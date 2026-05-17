@@ -4,6 +4,10 @@
 
 It started narrower: sharpen the skill library for an internal Gemini CLI trial. It grew into a system the operator wants for themselves first, and applies to the trial second.
 
+## Principles
+
+- **Harness- and model-agnostic by default.** Every Regimen artifact (schemas, event names, metrics, interfaces, configs) must hold for any agent CLI and any model, not just Claude Code. Harness-specific detail is confined to the capture/adapter edge and normalized immediately. This rule is pinned in `CLAUDE.md` at the root of every Regimen repo.
+
 ## How this is tracked
 
 Regimen is a program, not a single project. The tracking structure (full method: https://md.niftymonkey.dev/v/mKkKAEQl):
