@@ -101,6 +101,7 @@ The seam between the evaluation logic and the actual LLM is a port (dependency c
 - **The evaluator seam is a one-method port** with per-LLM adapters and a canned test adapter; failure is a return value, not an exception.
 - **Model is a first-class attribute, distinct from harness**, so a single model can be evaluated on its own terms.
 - **The event schema is a versioned semantic convention**, the keystone for cross-harness comparability, and carries span fields so the log reconstructs into traces.
+- **Capture adapters are built from the harness portability studies.** The per-harness hook payloads the capture hook normalizes are documented in `niftymonkey/skills/docs/portability/`. A capture adapter is built against the relevant `<harness>.md` and re-verifies it first. The dependency is one-directional and informational, never code.
 
 ## Architecture
 
