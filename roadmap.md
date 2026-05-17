@@ -55,13 +55,12 @@ Real, trackable items that are not yet tasks. Each becomes a "Needs decision" or
 - The judged-metrics JSON schema: the exact fields and shape.
 - The evaluator's default cadence for producing judged metrics automatically.
 - The rollup verdict's structured shape.
-- Grafana bridge: a bespoke service, or an OpenTelemetry Collector configuration plus a schema mapping. The Collector route is likely the smaller piece of work and should be scoped before tasking.
 - Whether the evaluation tier ships inside the observability repo or as a clearly separate component within it.
 - Shepherd needs a full design pass before it can become a PRD.
 
 ## Status
 
-Phase -1 of the original effort is complete: the skill library was evaluated and the observability architecture was designed and settled. Regimen as a program is now in Phase 0, being set up.
+Phase -1 of the original effort is complete: the skill library was evaluated and the observability architecture was designed and settled. Phase 0, program setup, is complete; Regimen is now in Phase 1.
 
 Design records:
 - Pitch: https://md.niftymonkey.dev/v/9s4liAxL
