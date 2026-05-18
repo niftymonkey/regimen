@@ -17,7 +17,7 @@ The observability module is a sibling to **shepherd** and the base for an option
 
 A capture hook registered in each harness's own hook config. The harness fires session events; the hook normalizes the payload into the shared event schema and appends it to the log. Capture is **continuous**: events stream in as they happen, through every compaction, for as long as a session runs. There is no trigger and no session boundary to wait on. There is no separate running service; capture is the harness invoking a hook.
 
-The event schema carries enough structure to support all three signal shapes: a timestamp and attributes (harness, model, model version, session id, tool name, file path) for logs and metrics, and span fields (span id, parent span id, start, end) so the flat log reconstructs into a trace.
+The event schema carries enough structure to support all three signal shapes: a timestamp and attributes (harness, model, model version, session id, tool name, file path) for logs and metrics, and a trace id plus per-event timestamps and pairing keys so the surfacing layer reconstructs the flat log into a trace. The capture hook fires once per event and cannot pair a start with its later end, so it assigns only the trace id; span ids are minted by the surfacing projector when it builds the spans on read.
 
 ### The event log
 
@@ -100,7 +100,7 @@ The seam between the evaluation logic and the actual LLM is a port (dependency c
 - **No AI in Tier 1.** The telemetry layer is fully deterministic. All AI lives in Tier 2 and reads telemetry.
 - **The evaluator seam is a one-method port** with per-LLM adapters and a canned test adapter; failure is a return value, not an exception.
 - **Model is a first-class attribute, distinct from harness**, so a single model can be evaluated on its own terms.
-- **The event schema is a versioned semantic convention**, the keystone for cross-harness comparability, and carries span fields so the log reconstructs into traces.
+- **The event schema is a versioned semantic convention**, the keystone for cross-harness comparability; it carries a trace id and the timestamps and pairing keys the surfacing layer needs to reconstruct spans, which the projector mints on read.
 - **Capture adapters are built from the harness portability studies.** The per-harness hook payloads the capture hook normalizes are documented in `niftymonkey/skills/docs/portability/`. A capture adapter is built against the relevant `<harness>.md` and re-verifies it first. The dependency is one-directional and informational, never code.
 
 ## Architecture
