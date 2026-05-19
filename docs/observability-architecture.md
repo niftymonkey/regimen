@@ -1,5 +1,7 @@
 # Observability module: telemetry and evaluation
 
+> **Superseded (2026-05-18).** This document predates the Regimen reframe and no longer describes the current model. It is kept because its detail (the metrics tables, the evaluator seam, the judged-metric consistency mechanisms) is valuable input for the future `regimen-feedback` design. For the current model see `regimen-shape.md` and `docs/adr/`.
+
 > **In plain terms.** This watches your AI coding sessions and turns them into data: how often you correct the model, which skills you use, how long sessions run, where things drift. The bottom tier is pure telemetry with no AI in it, the same three shapes OpenTelemetry uses (logs, metrics, traces). The top tier is optional: an AI reads that telemetry and produces a few judgment calls, a readable review of a stretch of work, or an objective verdict over a whole month. You review the data instead of taking notes.
 
 The observability module is a sibling to **shepherd** and the base for an optional **visualization** layer. It has two tiers. Tier 1 is the telemetry layer: deterministic, continuous, no AI. Tier 2 is the evaluation layer: an LLM that reads the telemetry and produces judged outputs. Tier 1 is fully useful on its own; Tier 2 layers on top.

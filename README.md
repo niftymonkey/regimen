@@ -1,37 +1,45 @@
 # Regimen
 
-*A deliberate practice of engineering with AI agents.*
+*Tools for working well with AI coding agents.*
 
-AI doesn't replace an engineer's practice. It raises the stakes on it. The developers shipping real software instead of AI slop are the ones putting hard-won engineering judgment into *how they work with* their coding agents. This is a system for doing that on purpose: three composable, harness-agnostic layers that hold up whether you run Claude, Codex, or Gemini.
+AI's value in software engineering is conditional, not intrinsic. What separates good software from slop is not the model, it is the engineer's process: how work is framed, how context is supplied, how output is verified, what is and is not handed to the agent. Regimen makes that process explicit, portable across any agent CLI and any model, and improvable.
+
+Working well with an AI agent is a practice. Regimen makes it concrete: a set of instruments you pick up one at a time, each earning its place by meeting a need you already feel.
+
+## The three instruments
+
+- **Guidance**: skills that encode good practice the agent is asked to follow. It instructs.
+- **Enforcement**: mechanisms that make an outcome happen deterministically, not at the model's discretion. Hooks, permission gates, CI checks, and sandboxing all qualify. It compels.
+- **Feedback**: the instrument that watches how the work actually went and shows you, plainly and comparably, where the interaction is strong and where it is weak. It observes.
+
+Each is adopted on its own. Guidance alone is useful. Add Enforcement when you need something to happen without fail. Add Feedback when you want to know whether any of it is working.
+
+## The loop
+
+At the center is the interaction itself: you and the AI agent doing the work. Guidance and Enforcement shape it; Feedback observes it and closes two loops.
 
 ```mermaid
 flowchart LR
-    P["PRACTICE<br/>harness-agnostic skills<br/>-how you work with AI-"]
-    O["OBSERVABILITY<br/>telemetry from sessions<br/>-how it's actually going-"]
-    S["SHEPHERD<br/>guardrails +<br/>human-in-the-loop<br/>-keep agents in bounds-"]
-    P -->|observe| O
-    O -->|respond| S
-    S -->|improve| P
+    subgraph KIT["shaping instruments"]
+        G["Guidance"]
+        E["Enforcement"]
+    end
+    KIT --> I(["the interaction:<br/>you and the AI agent"])
+    I --> F["Feedback"]
+    F -.->|tight loop| I
+    F -.->|long arc| KIT
 ```
 
-**Practice** is the foundation: a curated, opinionated set of skills that encode how to work well with an agent. Everyone starts here, with a harness's built-in skills or ones they install. **Observability** is the easy add-on. It captures telemetry from every session (what you asked, which skills ran, where things drifted) and turns it into plain-English recaps and the metrics that tell you, objectively, whether a given model is earning its place. **Shepherd** is the optimization layer: guardrails that make it harder for an agent to go off-spec, and the judgment to route what needs a human in the loop versus what a capable model can safely validate itself.
-
-The three are independent and composable: each pluggable, each installable on its own. Together they close a loop: you bring your practice, observability shows you how it actually went, and you respond by sharpening a skill or adding a guardrail. That loop is the point. It compounds, leaving every next session a little more disciplined.
+- **The tight loop** runs in the flow of work. Feedback shows how the current work is going against your own baseline, and you adjust your next move.
+- **The long arc** runs across weeks. Patterns roll up, and you make a durable change to the shaping instruments themselves: a sharper skill, a new guardrail.
 
 ## This repository
 
-Regimen is a program, not a single project. This hub holds the program-level artifacts; the workstreams live in their own repos.
+Regimen is a program. This hub holds the program-level artifacts; the rest live in their own repositories:
 
-- [roadmap.md](roadmap.md): workstreams, sequencing, and the epic list
-- [docs/observability-architecture.md](docs/observability-architecture.md): the observability module design
-- [docs/observability-siblings.md](docs/observability-siblings.md): how Observability relates to Practice and Shepherd
-- [docs/tracking.md](docs/tracking.md): how this multi-repo program is tracked
+- `regimen-feedback`: the Feedback instrument.
+- `regimen-enforcement`: the Enforcement instrument.
+- `skills`: high-value Guidance skills, curated and published by the author.
+- `regimen-otlp-bridge`: an optional renderer that visualizes Feedback's signals in Grafana.
 
-Board: https://github.com/orgs/niftymonkey/projects/9
-
-## Workstreams
-
-- **Practice**: `niftymonkey/claude`, `niftymonkey/skills`
-- **Observability**: `niftymonkey/regimen-observability`
-- **Visualization**: `niftymonkey/regimen-otlp-bridge`
-- **Shepherd**: `niftymonkey/regimen-shepherd`
+The full design is in [`docs/regimen-shape.md`](docs/regimen-shape.md); the decisions behind it are in [`docs/adr/`](docs/adr/).
