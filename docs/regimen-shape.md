@@ -65,4 +65,4 @@ A program, multi-repo, because instruments are independently pluggable and insta
 ## Open questions
 
 - The stored feedback data format: the shape of the open format Feedback writes and any tool reads.
-- The long arc's "respond" step, turning a diagnosed pattern into a new skill or guardrail, is real engineering work owned by no instrument; how much Feedback assists it is undefined.
+- The long arc's "respond" step, turning a diagnosed pattern into a new skill or guardrail, is real engineering work owned by no instrument; how much Feedback assists it is undefined. See `docs/prior-art.md` for a candidate mechanism.
