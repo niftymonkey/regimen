@@ -30,6 +30,7 @@ The first two are the tight loop. The third is the long arc. Feedback serves the
 3. **Quality over volume.** Surface where assignments did not land cleanly, not how much happened.
 4. **Actionable.** Each surfaced signal maps to a reflection or a lever the engineer can pull. A signal that implies no action is noise.
 5. **Both layers visible.** The evidence layer and the judgment layer are both on the surface, and the judge shows its work, so the engineer can check a verdict against the evidence behind it.
+6. **Honest over tidy.** Prefer an honestly-incomplete representation over a tidy false one. A conversation that has not ended renders as open, never as force-closed with an invented end. A signal not yet measured renders as absent, never as a default zero. Fabricating completeness to look orderly poisons the comparative baselines every other principle depends on; absence and in-flight state are themselves information.
 
 ## The signals
 
