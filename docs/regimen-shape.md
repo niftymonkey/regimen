@@ -31,7 +31,7 @@ Cut by mechanism:
 - Two visible layers: the evidence layer (always-on deterministic facts and counts) and the judgment layer (an LLM-as-judge that reads the evidence and emits structured, drill-able signals plus an assessment, showing its work).
 - Unit within a conversation: the assignment, classified by kind, rolling up by kind across conversations.
 - Also produces forward-looking recommendations, such as routing (which model or harness for which kind of work).
-- Stores its data in an open format that acts as a seam any tool can read.
+- Stores its data in one local SQLite file that any tool can read.
 
 How Feedback must surface what it captures is detailed in [`feedback-surfacing.md`](feedback-surfacing.md).
 
@@ -54,7 +54,7 @@ A program, multi-repo, because instruments are independently pluggable and insta
 - `regimen-feedback`: the Feedback instrument.
 - `regimen-enforcement`: the Enforcement instrument.
 - `skills`: a curated set of high-value Guidance skills the author maintains. Guidance is skills generally; this repo is one good source of them.
-- `regimen-otlp-bridge`: an optional renderer that reads Feedback's stored format and maps signals to OTLP for Grafana.
+- `regimen-otlp-bridge`: an optional renderer that reads Feedback's SQLite store and maps signals to OTLP for Grafana.
 
 ## Constraints and boundaries
 
@@ -64,5 +64,4 @@ A program, multi-repo, because instruments are independently pluggable and insta
 
 ## Open questions
 
-- The stored feedback data format: the shape of the open format Feedback writes and any tool reads.
 - The long arc's "respond" step, turning a diagnosed pattern into a new skill or guardrail, is real engineering work owned by no instrument; how much Feedback assists it is undefined. See `docs/prior-art.md` for a candidate mechanism.

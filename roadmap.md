@@ -12,7 +12,7 @@ Regimen is a program: tools for working well with AI coding agents, built as thr
 |---|---|---|---|
 | Hub | `regimen` | Program docs, roadmap, ADRs, glossary | Active |
 | Guidance | `skills` | Curated, high-value skills the agent is asked to follow | Mature; curation ongoing |
-| Feedback | `regimen-feedback` | Capture, the evidence layer, the judgment layer, the stored format, a default CLI | Capture pipeline proven end to end; evidence and judgment layers to build |
+| Feedback | `regimen-feedback` | Capture, the evidence layer, the judgment layer, the SQLite store, a default CLI | Capture pipeline proven end to end; evidence and judgment layers to build |
 | Enforcement | `regimen-enforcement` | Deterministic mechanisms that remove the model's discretion, plus an installer | Defined; design pass pending |
 | Bridge | `regimen-otlp-bridge` | Optional renderer: visualizes Feedback's signals in Grafana | Exists; optional |
 
@@ -20,7 +20,7 @@ Regimen is a program: tools for working well with AI coding agents, built as thr
 
 Feedback is the active build. Enforcement follows. Guidance runs in parallel.
 
-- **Phase 1, Feedback: the evidence layer.** Capture conversations across harnesses into the open stored format; surface the deterministic facts and counts; ship a default CLI. The always-on substrate the rest of Feedback sits on.
+- **Phase 1, Feedback: the evidence layer.** Capture conversation events across harnesses into the SQLite store; surface the deterministic facts and counts; ship a default CLI. The always-on substrate the rest of Feedback sits on.
 - **Phase 2, Feedback: the judgment layer.** The LLM-as-judge: segment conversations into assignments, classify each by kind, emit drill-able signals and an assessment, and produce routing recommendations. With both layers live, the tight loop and the long arc are usable.
 - **Phase 3, Enforcement.** A design pass first, then build: hooks and guardrails plus an installer.
 - **Parallel, Guidance.** Curating and publishing high-value skills. Not gated by the other workstreams.
@@ -31,9 +31,7 @@ The Bridge is maintained as an optional renderer alongside Feedback, not a phase
 
 ## Open questions
 
-- The stored feedback data format: keep the current event-log JSONL shape or change it.
-- Renaming `regimen-observability` to `regimen-feedback`, and reconciling the bridge work, against the reframe.
-- Reconciling existing in-flight work (the event schema, the streaming bridge daemon) with the current model.
+- Reconciling the `regimen-feedback` and `regimen-otlp-bridge` repos with the reframe and ADR-0005: the README framing, the streaming-bridge daemon design, and any docs that still describe the old observability model.
 
 See [`docs/regimen-shape.md`](docs/regimen-shape.md) for the full set of open design questions.
 
