@@ -85,6 +85,12 @@ The one Windows-specific concern is rename-while-held: a hook subprocess may hav
 
 WSL is treated as Linux. Users on native Windows install the Windows service definition; users on Windows running their harnesses inside WSL use the Linux install path.
 
+## Multi-conversation concurrency
+
+The buffer is shared across every active conversation on the machine: each harness session's capture hook appends to the same `current.jsonl` from its own subprocess, and several may fire at once. Append atomicity comes from the regular-file write itself, not from any cross-process lock. On Linux and macOS, `open(O_APPEND)` plus `write()` of one envelope line is a single kernel-atomic operation for writes up to `PIPE_BUF`, so concurrent hook subprocesses interleave at line granularity, never within a line. On native Windows, the same property holds when the file is opened with `FILE_APPEND_DATA` access (Node and Bun's append-mode default), which serializes appends inside the filesystem driver. The hook never reads or seeks; it only appends, so no cross-process coordination is needed.
+
+The failure mode is a single torn line, and it is handled by the existing quarantine path rather than by tighter locking. If a write does straddle a kernel boundary (a hook envelope exceeds `PIPE_BUF` and the kernel commits the halves around another appender's write), the resulting line fails `JSON.parse` and the loader inserts one quarantine row with the raw bytes, leaving the events table untouched and continuing past it. Event-hash idempotency means a hook that retries on a partial write does not double-write the event. The `regimen-feedback` repo carries a stress test (`tests/concurrent-producers.test.ts`) that fires 100 hook subprocesses across four sessions at the same buffer and asserts zero quarantine, zero clobbering, and a correct per-session row count.
+
 ## Freshness, crash recovery, and idempotency
 
 Freshness is bounded by the watcher latency (sub-second on `inotify` and `FSEvents`, the polling interval on the fallback) plus one SQLite transaction. The store reflects what happened a moment ago, not a moment from the last batch.
