@@ -42,4 +42,4 @@ Regimen is a program. This hub holds the program-level artifacts; the instrument
 - [`skills`](https://github.com/niftymonkey/skills): high-value Guidance skills, curated and published by the author.
 - [`regimen-otlp-bridge`](https://github.com/niftymonkey/regimen-otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
 
-See [`PRD.md`](PRD.md) for what Regimen does and for whom, [`ARCHITECTURE.md`](ARCHITECTURE.md) for how it is structured, and [`docs/adr/`](docs/adr/) for the decisions behind it.
+See [`PRD.md`](PRD.md) for what Regimen does and for whom, [`ARCHITECTURE.md`](ARCHITECTURE.md) for how it is structured, [`docs/plan.md`](docs/plan.md) for the implementation phases, and [`docs/adr/`](docs/adr/) for the decisions behind it. Work in flight is tracked on the [project board](https://github.com/orgs/niftymonkey/projects/9).
