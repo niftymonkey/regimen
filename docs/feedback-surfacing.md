@@ -2,7 +2,7 @@
 
 Feedback, the Regimen instrument that adds observability to your work with an AI, describes what actually happened, not whether it was right. It reads the factual record of the interaction: what you asked, what the agent did, what broke, and what you said back. Half of what Feedback surfaces is plain counting and holds no opinion; the other half, where an LLM interprets that record, stays anchored to those counts and shows its work, so every signal traces back to evidence you can see. Whether a result was sound is taken from your own reaction to it, never from Feedback grading your code.
 
-*Feedback is one of Regimen's three instruments; see [`regimen-shape.md`](regimen-shape.md) for the whole.*
+*Feedback is one of Regimen's three instruments; see [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the whole.*
 
 ## The rule: activity is not feedback
 
@@ -58,7 +58,7 @@ First, **assignment segmentation** divides a conversation into its assignments. 
 
 Then, per assignment:
 
-- **Kind**: a categorical value from a fixed vocabulary (refactor, bug-fix, feature, test-writing, exploration, schema-change, and so on). Also a dimension signals roll up by.
+- **Intent**: a categorical value from a fixed vocabulary (refactor, bug-fix, feature, test-writing, exploration, schema-change, and so on). Names what the engineer was trying to do. Also a dimension signals roll up by.
 - **Outcome**: an ordinal value from a fixed set (accomplished cleanly, accomplished with correction, partial, abandoned). The headline.
 - **Correction rate**: a number, corrections over prompts.
 - **Correction types**: a count per category from a fixed vocabulary (misunderstood goal, wrong approach, scope drift, quality, omission, and so on).
@@ -72,7 +72,7 @@ The judge also writes prose; see Narrative outputs.
 
 ### Throughout
 
-Every signal is scoped to an assignment or a conversation and rolls up longitudinally, as trends, per-kind rollups, and your own baselines once they exist. Every signal can be sliced by model, harness, and kind. Feedback never grades software quality, and the judge reads the engineer's inputs and the AI's actions, never the model's private reasoning.
+Every signal is scoped to an assignment or a conversation and rolls up longitudinally, as trends, per-intent rollups, and your own baselines once they exist. Every signal can be sliced by model, harness, and intent. Feedback never grades software quality, and the judge reads the engineer's inputs and the AI's actions, never the model's private reasoning.
 
 ## Narrative outputs
 
@@ -81,7 +81,7 @@ Beyond the signals, the judge writes prose for an engineer to read, exposed by t
 - **The assessment**: a readable synthesis of how a conversation, or a stretch of work, went.
 - **What-helped**: a skill, hook, or intervention that visibly improved a trajectory.
 - **Skill-gap**: recurring manual work that suggests an instrument should exist but does not.
-- **Routing recommendations**: which model or harness suits which kind of work, and what to stop delegating.
+- **Routing recommendations**: which model or harness suits which intent of work, and what to stop delegating.
 
 Asked across a window, what-helped, skill-gap, and routing aggregate: "eleven conversations this week would have benefited from the same missing skill." These outputs are understanding, not metrics; they never enter the signal store.
 

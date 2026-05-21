@@ -2,9 +2,13 @@
 
 > A shared glossary for Regimen. Terms meaningful to someone who knows the domain but not the code. Definitions only: design decisions live in ADRs and design docs, not here.
 
+## Anchor
+
+A deterministic event from the evidence layer that the judgment layer points at when making a claim. Every judged signal cross-references one or more anchors so a verdict is checkable against the evidence behind it. Anchors keep the judge falsifiable.
+
 ## Assignment
 
-The unit of work within a conversation: a coherent, bounded piece of work the engineer asked the AI for. The judgment layer segments a conversation into assignments and classifies each by kind (refactor, debugging, test writing, and so on). Assignments roll up by kind across conversations, letting an engineer see how a given kind of work has gone over many sessions. A kind is an adjective on the unit (a "refactor assignment"); "task" is never a schema term, only casual speech.
+The unit of work within a conversation: a coherent, bounded piece of work the engineer asked the AI for. The judgment layer segments a conversation into assignments and classifies each by intent (see Intent). Assignments roll up by intent across conversations, letting an engineer see how a given intent of work has gone over many sessions. "Task" is never a schema term, only casual speech.
 
 ## Conversation
 
@@ -20,15 +24,23 @@ The always-on, inspectable record of what factually happened in a conversation: 
 
 ## Feedback
 
-One of Regimen's three instruments. The evidence layer and the judgment layer together: how Regimen shows how well the AI is performing and where the interaction is weak. Feedback observes the interaction, and also produces forward-looking recommendations, such as which kinds of task to route where.
+One of Regimen's three instruments. The evidence layer and the judgment layer together: how Regimen shows how well the AI is performing and where the interaction is weak. Feedback observes the interaction, and also produces forward-looking recommendations, such as which intents of work to route where.
 
 ## Guidance
 
 One of Regimen's three instruments. Advisory artifacts, primarily skills, that encode good practice the agent is asked to follow. Guidance instructs; the model may or may not comply.
 
+## Harness
+
+The agent CLI an engineer uses to interact with their AI agent: Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Copilot, and so on. Regimen's harness-agnostic design means every artifact (schemas, signals, interfaces, configs) must hold across harnesses; the only harness-specific code is a small adapter at the capture edge per harness.
+
 ## Instrument
 
 A pluggable tool Regimen adds to the engineer-and-AI interaction to embody part of the interaction discipline. An engineer adopts instruments individually, as felt needs arise, without adopting a methodology wholesale. An instrument is an addition to the interaction, as opposed to a property the interaction already has (such as the AI's context). Regimen has three instruments: Guidance, Enforcement, and Feedback.
+
+## Intent
+
+The engineer's categorical purpose for an assignment: refactor, bug-fix, feature, test-writing, exploration, schema-change, and similar. One of the dimensions the judgment layer derives, and a dimension signals roll up by. Intent names what the engineer was trying to do, not what code changed.
 
 ## Interaction discipline
 
@@ -38,9 +50,17 @@ The object Regimen exists to improve: the practice of operating an engineer-and-
 
 The assessment an LLM-as-judge produces by reading the evidence layer: structured, named, drill-able signals and the higher-level assessment built from them. The judgment layer shows its work; its conclusions trace back to visible evidence.
 
+## Kit
+
+The set of instruments the engineer has adopted at a given point in time. The long arc improves the kit: rolled-up patterns drive durable changes like adding a Guidance skill, sharpening an existing one, adding an Enforcement gate, or changing a routing. The tight loop uses the existing kit; it changes behavior, not the kit.
+
 ## Long arc
 
-The slow feedback loop, operating across many conversations. Rolled-up Feedback reveals a pattern in how a kind of assignment has gone over time, and the engineer responds with a durable change to the instruments themselves: a new or sharpened skill, a new hook, a routing change. The long arc improves the kit.
+The slow feedback loop, operating across many conversations. Rolled-up Feedback reveals a pattern in how an intent of work has gone over time, and the engineer responds with a durable change to the kit: a new or sharpened skill, a new gate, a routing change. The long arc improves the kit.
+
+## Respond step
+
+The third part of the long arc, where a diagnosed pattern is turned into a durable change to the kit. Regimen offers light assistance: it surfaces the pattern in plain language and suggests what to research, build, or invoke. The engineer does the authoring.
 
 ## Signal
 

@@ -2,7 +2,7 @@
 
 > Status: accepted (2026-05-18)
 
-Feedback measures how well the AI performed the work it was given, never whether the resulting software is good, because software quality is subjective and not Regimen's to adjudicate. The measured object is the conversation, evaluated start-to-now and never waiting on a close, since Regimen conversations routinely never end cleanly. Feedback has two visible layers: an always-on deterministic evidence layer, and an LLM-as-judge judgment layer that emits structured, drill-able signals and shows its work. The unit within a conversation is the assignment, classified by kind and rolled up by kind across conversations.
+Feedback measures how well the AI performed the work it was given, never whether the resulting software is good, because software quality is subjective and not Regimen's to adjudicate. The measured object is the conversation, evaluated start-to-now and never waiting on a close, since Regimen conversations routinely never end cleanly. Feedback has two visible layers: an always-on deterministic evidence layer, and an LLM-as-judge judgment layer that emits structured, drill-able signals and shows its work. The unit within a conversation is the assignment, classified by intent and rolled up by intent across conversations.
 
 ## Considered options
 

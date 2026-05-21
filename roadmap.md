@@ -1,6 +1,6 @@
 # Regimen: program roadmap
 
-Regimen is a program: tools for working well with AI coding agents, built as three instruments (Guidance, Enforcement, Feedback) plus the hub that ties them together. This roadmap is the program-level view: the workstreams, their state, and the rough order of work. For what Regimen is and why, see [`README.md`](README.md) and [`docs/regimen-shape.md`](docs/regimen-shape.md).
+Regimen is a program: tools for working well with AI coding agents, built as three instruments (Guidance, Enforcement, Feedback) plus the hub that ties them together. This roadmap is the engineering-sequence view: the workstreams, their state, and the rough order of work. For what Regimen is for and who it is for, see [`PRD.md`](PRD.md). For architecture and topology, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Principles
 
@@ -10,9 +10,9 @@ Regimen is a program: tools for working well with AI coding agents, built as thr
 
 | Workstream | Repository | What it is | State |
 |---|---|---|---|
-| Hub | `regimen` | Program docs, roadmap, ADRs, glossary | Active |
+| Hub | `regimen` | Program docs, roadmap, ADRs, glossary, PRD | Active |
 | Guidance | `skills` | Curated, high-value skills the agent is asked to follow | Mature; curation ongoing |
-| Feedback | `regimen-feedback` | Capture, the evidence layer, the judgment layer, the SQLite store, a default CLI | Capture pipeline proven end to end; evidence and judgment layers to build |
+| Feedback | `regimen-feedback` | Capture, the evidence layer, the judgment layer, the SQLite store, a default CLI | Capture pipeline proven end to end; loader, evidence and judgment layers to build |
 | Enforcement | `regimen-enforcement` | Deterministic mechanisms that remove the model's discretion, plus an installer | Defined; design pass pending |
 | Bridge | `regimen-otlp-bridge` | Optional renderer: visualizes Feedback's signals in Grafana | Exists; optional |
 
@@ -21,19 +21,19 @@ Regimen is a program: tools for working well with AI coding agents, built as thr
 Feedback is the active build. Enforcement follows. Guidance runs in parallel.
 
 - **Phase 1, Feedback: the evidence layer.** Capture conversation events across harnesses into the SQLite store; surface the deterministic facts and counts; ship a default CLI. The always-on substrate the rest of Feedback sits on.
-- **Phase 2, Feedback: the judgment layer.** The LLM-as-judge: segment conversations into assignments, classify each by kind, emit drill-able signals and an assessment, and produce routing recommendations. With both layers live, the tight loop and the long arc are usable.
-- **Phase 3, Enforcement.** A design pass first, then build: hooks and guardrails plus an installer.
+- **Phase 2, Feedback: the judgment layer.** The LLM-as-judge: segment conversations into assignments, classify each by intent, emit drill-able signals and an assessment, and produce routing recommendations. With both layers live, the tight loop and the long arc are usable.
+- **Phase 3, Enforcement.** A design pass first, then build: a small set of reference gates plus tooling to write new ones.
 - **Parallel, Guidance.** Curating and publishing high-value skills. Not gated by the other workstreams.
 
 The Bridge is maintained as an optional renderer alongside Feedback, not a phase of its own.
+
+What the engineer can do when each phase lands is described in [`PRD.md`](PRD.md) under "Phases of value."
 
 **External driver.** A workplace AI-tooling trial needs Feedback's longitudinal evaluation to judge whether a given CLI and model help an engineer succeed. That pulls Phases 1 and 2 ahead of Enforcement.
 
 ## Open questions
 
-- Reconciling the `regimen-feedback` and `regimen-otlp-bridge` repos with the reframe and ADR-0005: the README framing, the streaming-bridge daemon design, and any docs that still describe the old observability model.
-
-See [`docs/regimen-shape.md`](docs/regimen-shape.md) for the full set of open design questions.
+- Realigning the `regimen-otlp-bridge` with ADR-0005 (the streaming-daemon design predates the reframe and assumed a JSONL-tailing source; the bridge now consumes SQLite). Tracked as [regimen#16](https://github.com/niftymonkey/regimen/issues/16).
 
 ## Tracking
 

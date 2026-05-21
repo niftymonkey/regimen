@@ -1,6 +1,6 @@
 # Regimen PRD
 
-> Program-level Product Requirements Document for Regimen as a whole, sitting above the per-instrument repos. Companion to `regimen-shape.md` (architectural overview) and `docs/adr/` (decisions). This PRD focuses on what Regimen is for, who it is for, what it does and does not do, and the use cases that drive each piece.
+> Program-level Product Requirements Document for Regimen as a whole, sitting above the per-instrument repos. Companion to [`ARCHITECTURE.md`](ARCHITECTURE.md) (architectural overview) and [`docs/adr/`](docs/adr/) (decisions). This PRD focuses on what Regimen is for, who it is for, what it does and does not do, and the use cases that drive each piece.
 
 ## Problem Statement
 
@@ -136,7 +136,7 @@ These are not commitments for any near-term phase, but the loader's daemon shape
 
 This PRD does not supersede the existing hub docs; it layers above them.
 
-- `regimen-shape.md` is the architectural overview, "the shape of Regimen."
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) is the architectural overview.
 - `feedback-surfacing.md` is the design of what Feedback surfaces and the principles its surfaces follow.
 - `DOMAIN-LANGUAGE.md` is the vocabulary.
 - `docs/adr/` is the decision log.

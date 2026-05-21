@@ -9,10 +9,10 @@ Working well with an AI agent is a practice. Regimen makes it concrete: a set of
 ## The three instruments
 
 - **Guidance**: skills that encode good practice the agent is asked to follow. It instructs.
-- **Enforcement**: mechanisms that make an outcome happen deterministically, not at the model's discretion. Hooks, permission gates, CI checks, and sandboxing all qualify. It compels.
+- **Enforcement**: any mechanism that makes an outcome happen deterministically, not at the model's discretion. Hooks, permission and tool gating, sandboxing, CI and pre-merge gates, schema-constrained outputs. It compels.
 - **Feedback**: the instrument that watches how the work actually went and shows you, plainly and comparably, where the interaction is strong and where it is weak. It observes.
 
-Each is adopted on its own. Guidance alone is useful. Add Enforcement when you need something to happen without fail. Add Feedback when you want to know whether any of it is working.
+Each is adopted on its own. Guidance alone is useful. Add Enforcement when you need something to happen without fail. Add Feedback when you want to know whether any of it is working and what else might need to be added or sharpened.
 
 ## The loop
 
@@ -30,16 +30,16 @@ flowchart LR
     F -.->|long arc| KIT
 ```
 
-- **The tight loop** runs in the flow of work. Feedback shows how the current work is going against your own baseline, and you adjust your next move.
-- **The long arc** runs across weeks. Patterns roll up, and you make a durable change to the shaping instruments themselves: a sharper skill, a new guardrail.
+- **The tight loop** runs in the flow of work. Feedback shows how the current work is going, and you adjust your next move with the existing kit.
+- **The long arc** runs across weeks. Patterns roll up, and you make a durable change to your kit: a sharper skill, a new guardrail, a routing change.
 
 ## This repository
 
-Regimen is a program. This hub holds the program-level artifacts; the rest live in their own repositories:
+Regimen is a program. This hub holds the program-level artifacts; the instruments live in their own repositories:
 
-- `regimen-feedback`: the Feedback instrument.
-- `regimen-enforcement`: the Enforcement instrument.
-- `skills`: high-value Guidance skills, curated and published by the author.
-- `regimen-otlp-bridge`: an optional renderer that visualizes Feedback's signals in Grafana.
+- [`regimen-feedback`](https://github.com/niftymonkey/regimen-feedback): the Feedback instrument.
+- [`regimen-enforcement`](https://github.com/niftymonkey/regimen-enforcement): the Enforcement instrument.
+- [`skills`](https://github.com/niftymonkey/skills): high-value Guidance skills, curated and published by the author.
+- [`regimen-otlp-bridge`](https://github.com/niftymonkey/regimen-otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
 
-The full design is in [`docs/regimen-shape.md`](docs/regimen-shape.md); the decisions behind it are in [`docs/adr/`](docs/adr/).
+See [`PRD.md`](PRD.md) for what Regimen does and for whom, [`ARCHITECTURE.md`](ARCHITECTURE.md) for how it is structured, and [`docs/adr/`](docs/adr/) for the decisions behind it.

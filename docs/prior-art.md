@@ -12,4 +12,4 @@ A walkthrough applying Andrej Karpathy's "auto research" idea to Claude Code ski
 
 **Caveat.** Its loop tunes a skill against a hand-written eval suite, synthetic test prompts in a lab. Regimen's Feedback measures real captured conversations. The video is prior art for the mechanism, not for the data source.
 
-**Informs:** the long arc, the Guidance instrument, and the long-arc respond step (an open question in `regimen-shape.md`).
+**Informs:** the long arc, the Guidance instrument, and the long-arc respond step (formerly an open question in `ARCHITECTURE.md`, now resolved as light assistance in [`PRD.md`](../PRD.md)).
