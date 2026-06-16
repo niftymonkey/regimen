@@ -35,20 +35,44 @@ flowchart LR
 
 ## Install
 
-From a fresh clone, run the bootstrap once:
+A full install is this hub plus the two instruments, cloned as siblings under one parent directory (the hub finds them by name next to itself). Feedback and Enforcement come from `regimen install`; the Guidance skills install separately.
+
+### Prerequisites (only if missing)
+
+- Bun: `curl -fsSL https://bun.sh/install | bash`
+- jq, for the em-dash and inline-message gates: `brew install jq`
+- `ANTHROPIC_API_KEY` exported, for the `feedback-judgment` skill
+
+### Core (Feedback and Enforcement)
 
 ```bash
-./install.sh
+git clone https://github.com/niftymonkey/regimen.git
+git clone https://github.com/niftymonkey/regimen-feedback.git
+git clone https://github.com/niftymonkey/regimen-enforcement.git
+cd regimen && ./install.sh
 ```
 
-It installs dependencies, then runs `regimen install`, the thin orchestrator that shells out to each instrument's own install verb (Feedback, then Enforcement) and finally self-links the hub bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run you use the bare command:
+`./install.sh` installs dependencies, then runs `regimen install`, the thin orchestrator that shells out to each instrument's own install verb (Feedback, then Enforcement) and self-links the hub bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run, `regimen install` and `regimen uninstall` work from anywhere. Useful flags: `--dry-run` previews every step and changes nothing, `--codex-home <dir>` targets a non-default Codex home, and `--gate <name>` (repeatable) or `--no-gates` selects which Enforcement gates wire.
+
+### Guidance skills (runs via npx, or bunx)
+
+The Guidance pillar is not part of `regimen install`. It installs from the curated [`niftymonkey/skills`](https://github.com/niftymonkey/skills) with the [`skills`](https://github.com/vercel-labs/skills) CLI:
 
 ```bash
-regimen install      # install or re-install every instrument
-regimen uninstall     # tear everything down (reverse order, best-effort)
+npx skills@latest add niftymonkey/skills -g -a codex -s '*' -y
+npx skills@latest add mattpocock/skills  -g -a codex -s '*' -y
 ```
 
-Shared flags forwarded to the instruments: `--dry-run` (preview every step, change nothing), `--codex-home <dir>` (point the Codex artifacts at a non-default home), and gate selection (`--gate <name>`, repeatable, or `--no-gates`) which routes only to Enforcement. Run `regimen install --dry-run` first to see the composed plan, including the per-instrument working directory and the trailing hub self-link, before anything runs.
+The CLI auto-detects the running agent, so `-a codex` pins the target and `-s '*' -y` installs the full set without prompts; confirm they landed with `ls ~/.codex/skills`. The niftymonkey set already vendors the MIT-adapted Pocock companions it builds on, so the second line is only for Pocock's own skills beyond those.
+
+### Verify
+
+```bash
+codex features list                 # the hooks feature is on
+feedback status                     # daemon running, recent last event
+feedback evidence --harness codex   # read a captured session back
+ls ~/.codex/skills                  # the niftymonkey and feedback skills are present
+```
 
 ### The `--codex-home` non-hermetic caveat
 
