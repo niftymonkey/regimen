@@ -15,11 +15,26 @@
  */
 export type InstrumentName = "feedback" | "enforcement";
 
-export interface Step {
+/** A step that shells out to one instrument's own install/uninstall verb. */
+export interface InstrumentStep {
   readonly instrument: InstrumentName;
   readonly verb: string;
   readonly args: string[];
 }
+
+/**
+ * The hub's own self-link step: `bun link` (install) or `bun unlink`
+ * (uninstall) of the hub package, so that after the first run `regimen` is a
+ * permanent bare command. It runs through the same runner and spawn seam as the
+ * instrument steps, with cwd set to the hub clone root, so it previews under
+ * --dry-run and is covered by the recording-fake runner tests.
+ */
+export interface HubStep {
+  readonly kind: "hub";
+  readonly verb: "link" | "unlink";
+}
+
+export type Step = InstrumentStep | HubStep;
 
 export interface InstallConfig {
   readonly dryRun: boolean;
@@ -41,11 +56,13 @@ export function planInstall(config: InstallConfig): Step[] {
       verb: "install",
       args: argsFor("enforcement", config),
     },
+    { kind: "hub", verb: "link" },
   ];
 }
 
 export function planUninstall(config: InstallConfig): Step[] {
   return [
+    { kind: "hub", verb: "unlink" },
     {
       instrument: "enforcement",
       verb: "uninstall",

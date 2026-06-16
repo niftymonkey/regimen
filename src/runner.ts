@@ -16,17 +16,27 @@
  */
 import type { InstrumentName, Step } from "./plan.ts";
 
-/** A single subprocess invocation: the program, then its arguments. */
+/** The label recorded for a step's outcome: its instrument, or "hub". */
+type StepLabel = InstrumentName | "hub";
+
+/**
+ * A single subprocess invocation: the program, its arguments, and the working
+ * directory to run it in. The cwd is load-bearing: every spawned instrument
+ * subprocess must run in THAT instrument's own clone root so its cwd-relative
+ * operations (for example `bun link`) act on the right package, not the hub's.
+ */
 export interface SpawnInvocation {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
+  readonly cwd: string;
 }
 
 /** Spawn a subprocess and resolve with its exit code. The injected seam. */
 export type SpawnFn = (invocation: SpawnInvocation) => Promise<number>;
 
 export interface StepOutcome {
-  readonly instrument: InstrumentName;
+  /** The instrument name, or "hub" for the hub's own self-link/unlink step. */
+  readonly instrument: InstrumentName | "hub";
   readonly verb: string;
   readonly exitCode: number;
 }
@@ -43,6 +53,14 @@ export interface RunResult {
 export interface RunOptions {
   readonly spawn: SpawnFn;
   readonly failFast: boolean;
+  /** The hub's own clone root, the cwd for the hub self-link/unlink step. */
+  readonly hubCloneRoot: string;
+  /**
+   * When true, the hub self-link/unlink step is previewed but not spawned: it
+   * has no dry-run flag of its own (unlike the instrument steps, which forward
+   * --dry-run and self-no-op), so a dry run must skip its real `bun link`.
+   */
+  readonly dryRun?: boolean;
 }
 
 /**
@@ -54,36 +72,78 @@ export interface RunOptions {
  */
 export function realSpawn(invocation: SpawnInvocation): Promise<number> {
   const proc = Bun.spawn([invocation.command, ...invocation.args], {
+    cwd: invocation.cwd,
     stdout: "inherit",
     stderr: "inherit",
   });
   return proc.exited;
 }
 
+/**
+ * Resolve one step (instrument or hub self-link) into its outcome label and the
+ * concrete subprocess invocation: an instrument step runs
+ * `bun <entryPath> <verb> <...args>` in that instrument's clone root; the hub
+ * step runs `bun <link|unlink>` in the hub clone root. The cwd is load-bearing
+ * in both cases.
+ */
+function resolveStep(
+  step: Step,
+  locatedPaths: ReadonlyMap<InstrumentName, string>,
+  cloneRoots: ReadonlyMap<InstrumentName, string>,
+  hubCloneRoot: string,
+): { label: StepLabel; verb: string; invocation: SpawnInvocation } {
+  if ("kind" in step) {
+    return {
+      label: "hub",
+      verb: step.verb,
+      invocation: { command: "bun", args: [step.verb], cwd: hubCloneRoot },
+    };
+  }
+
+  const entryPath = locatedPaths.get(step.instrument);
+  if (entryPath === undefined) {
+    throw new Error(`no located entry path for instrument ${step.instrument}`);
+  }
+  const cwd = cloneRoots.get(step.instrument);
+  if (cwd === undefined) {
+    throw new Error(`no clone root for instrument ${step.instrument}`);
+  }
+  return {
+    label: step.instrument,
+    verb: step.verb,
+    invocation: {
+      command: "bun",
+      args: [entryPath, step.verb, ...step.args],
+      cwd,
+    },
+  };
+}
+
 export async function runSteps(
   steps: ReadonlyArray<Step>,
   locatedPaths: ReadonlyMap<InstrumentName, string>,
+  cloneRoots: ReadonlyMap<InstrumentName, string>,
   options: RunOptions,
 ): Promise<RunResult> {
   const outcomes: StepOutcome[] = [];
   let failed: StepOutcome | null = null;
 
   for (const step of steps) {
-    const entryPath = locatedPaths.get(step.instrument);
-    if (entryPath === undefined) {
-      throw new Error(
-        `no located entry path for instrument ${step.instrument}`,
-      );
+    const { label, verb, invocation } = resolveStep(
+      step,
+      locatedPaths,
+      cloneRoots,
+      options.hubCloneRoot,
+    );
+    // The hub self-link has no dry-run flag of its own; under a dry run it is
+    // previewed (in the printed plan) and skipped here so no real `bun link`
+    // runs. Instrument steps always spawn: they forward --dry-run and self-no-op.
+    if (options.dryRun === true && "kind" in step) {
+      outcomes.push({ instrument: label, verb, exitCode: 0 });
+      continue;
     }
-    const exitCode = await options.spawn({
-      command: "bun",
-      args: [entryPath, step.verb, ...step.args],
-    });
-    const outcome: StepOutcome = {
-      instrument: step.instrument,
-      verb: step.verb,
-      exitCode,
-    };
+    const exitCode = await options.spawn(invocation);
+    const outcome: StepOutcome = { instrument: label, verb, exitCode };
     outcomes.push(outcome);
     if (exitCode !== 0) {
       if (failed === null) failed = outcome;

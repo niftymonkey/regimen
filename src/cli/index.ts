@@ -17,6 +17,7 @@ import { dirname } from "node:path";
 import {
   type InstrumentName,
   type LocateError,
+  type LocateResult,
   type LocatorOverrides,
   locateAll,
 } from "../locator.ts";
@@ -88,7 +89,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
 const EXIT_LOCATE_MISS = 2;
 
 function isLocateError(
-  value: { entryPath: string } | LocateError,
+  value: LocateResult | LocateError,
 ): value is LocateError {
   return "message" in value;
 }
@@ -112,8 +113,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   // locateAll runs for real even in dry-run (it is read-only), so a dry run
   // surfaces missing-instrument errors exactly as a wet run would, before any
   // subprocess spawns.
+  const hubRoot = hubCloneRoot();
   const located = locateAll({
-    hubCloneRoot: hubCloneRoot(),
+    hubCloneRoot: hubRoot,
     env: process.env,
     overrides,
   });
@@ -124,33 +126,46 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
 
   const entryPaths = new Map<InstrumentName, string>();
+  const cloneRoots = new Map<InstrumentName, string>();
   for (const [name, result] of located) {
-    if (!isLocateError(result)) entryPaths.set(name, result.entryPath);
+    if (!isLocateError(result)) {
+      entryPaths.set(name, result.entryPath);
+      cloneRoots.set(name, result.cloneRoot);
+    }
   }
 
   const steps =
     verb === "install" ? planInstall(config) : planUninstall(config);
-  printPlan(steps, entryPaths);
+  printPlan(steps, entryPaths, hubRoot);
 
-  const result = await runSteps(steps, entryPaths, {
+  const result = await runSteps(steps, entryPaths, cloneRoots, {
     spawn: realSpawn,
     failFast: verb === "install",
+    hubCloneRoot: hubRoot,
+    dryRun: config.dryRun,
   });
   return result.exitCode;
 }
 
 /**
  * Print the hub's computed plan so the user sees the composition before any
- * child runs: each step's instrument, verb, resolved entry path, and args, in
- * order. Both layers preview under --dry-run (the hub prints this plan and each
- * child still runs with --dry-run in its args).
+ * child runs: each instrument step's instrument, verb, resolved entry path, and
+ * args, plus the hub's own self-link step (`bun link`/`bun unlink` at the hub
+ * clone root), in order. Both layers preview under --dry-run (the hub prints
+ * this plan and each child still runs with --dry-run in its args; the hub
+ * self-link is previewed here and not spawned under --dry-run).
  */
 function printPlan(
   steps: ReadonlyArray<Step>,
   entryPaths: ReadonlyMap<InstrumentName, string>,
+  hubRoot: string,
 ): void {
   process.stdout.write("plan:\n");
   for (const step of steps) {
+    if ("kind" in step) {
+      process.stdout.write(`  hub: bun ${step.verb} (cwd ${hubRoot})\n`);
+      continue;
+    }
     const entry = entryPaths.get(step.instrument) ?? "(unresolved)";
     const argsText = step.args.length > 0 ? ` ${step.args.join(" ")}` : "";
     process.stdout.write(

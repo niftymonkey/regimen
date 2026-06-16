@@ -11,7 +11,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Step } from "../src/plan.ts";
+import type { InstrumentName, Step } from "../src/plan.ts";
 import { locate } from "../src/locator.ts";
 import {
   type SpawnFn,
@@ -43,16 +43,24 @@ const installSteps: ReadonlyArray<Step> = [
   },
 ];
 
-const locatedPaths = new Map<string, string>([
+const locatedPaths = new Map<InstrumentName, string>([
   ["feedback", "/clones/regimen-feedback/src/cli/index.ts"],
   ["enforcement", "/clones/regimen-enforcement/src/cli/index.ts"],
-]) as ReadonlyMap<Step["instrument"], string>;
+]);
+
+const cloneRoots = new Map<InstrumentName, string>([
+  ["feedback", "/clones/regimen-feedback"],
+  ["enforcement", "/clones/regimen-enforcement"],
+]);
+
+const HUB_ROOT = "/clones/regimen";
 
 test("each step spawns `bun <entryPath> <verb> <...args>` in order", async () => {
   const { spawn, calls } = recordingSpawn([0, 0]);
-  const result = await runSteps(installSteps, locatedPaths, {
+  const result = await runSteps(installSteps, locatedPaths, cloneRoots, {
     spawn,
     failFast: true,
+    hubCloneRoot: HUB_ROOT,
   });
 
   expect(calls).toEqual([
@@ -63,6 +71,7 @@ test("each step spawns `bun <entryPath> <verb> <...args>` in order", async () =>
         "install",
         "--dry-run",
       ],
+      cwd: "/clones/regimen-feedback",
     },
     {
       command: "bun",
@@ -73,17 +82,93 @@ test("each step spawns `bun <entryPath> <verb> <...args>` in order", async () =>
         "--gate",
         "rm-rf",
       ],
+      cwd: "/clones/regimen-enforcement",
     },
   ]);
   expect(result.exitCode).toBe(0);
   expect(result.failed).toBeNull();
 });
 
-test("failFast halts the run before the next step on a nonzero exit", async () => {
-  const { spawn, calls } = recordingSpawn([3, 0]);
-  const result = await runSteps(installSteps, locatedPaths, {
+test("each spawned step runs with cwd set to that instrument's clone root", async () => {
+  const { spawn, calls } = recordingSpawn([0, 0]);
+  await runSteps(installSteps, locatedPaths, cloneRoots, {
     spawn,
     failFast: true,
+    hubCloneRoot: HUB_ROOT,
+  });
+
+  expect(calls.map((c) => c.cwd)).toEqual([
+    "/clones/regimen-feedback",
+    "/clones/regimen-enforcement",
+  ]);
+});
+
+test("the hub self-link step spawns `bun link` at the hub clone root, last", async () => {
+  const stepsWithHubLink: ReadonlyArray<Step> = [
+    ...installSteps,
+    { kind: "hub", verb: "link" },
+  ];
+  const { spawn, calls } = recordingSpawn([0, 0, 0]);
+  await runSteps(stepsWithHubLink, locatedPaths, cloneRoots, {
+    spawn,
+    failFast: true,
+    hubCloneRoot: HUB_ROOT,
+  });
+
+  const last = calls[calls.length - 1];
+  expect(last).toEqual({ command: "bun", args: ["link"], cwd: HUB_ROOT });
+});
+
+test("under dryRun the hub self-link is previewed, not spawned, while instrument steps still spawn", async () => {
+  const stepsWithHubLink: ReadonlyArray<Step> = [
+    ...installSteps,
+    { kind: "hub", verb: "link" },
+  ];
+  const { spawn, calls } = recordingSpawn([0, 0, 0]);
+  await runSteps(stepsWithHubLink, locatedPaths, cloneRoots, {
+    spawn,
+    failFast: true,
+    hubCloneRoot: HUB_ROOT,
+    dryRun: true,
+  });
+
+  // The two instrument steps still spawn (they forward --dry-run and self-no-op),
+  // but the hub `bun link` is preview-only and never reaches the spawn seam.
+  expect(calls.map((c) => c.args)).toEqual([
+    ["/clones/regimen-feedback/src/cli/index.ts", "install", "--dry-run"],
+    [
+      "/clones/regimen-enforcement/src/cli/index.ts",
+      "install",
+      "--dry-run",
+      "--gate",
+      "rm-rf",
+    ],
+  ]);
+  expect(calls.some((c) => c.args[0] === "link")).toBe(false);
+});
+
+test("the hub self-unlink step spawns `bun unlink` at the hub clone root, first", async () => {
+  const stepsWithHubUnlink: ReadonlyArray<Step> = [
+    { kind: "hub", verb: "unlink" },
+    { instrument: "enforcement", verb: "uninstall", args: [] },
+    { instrument: "feedback", verb: "uninstall", args: [] },
+  ];
+  const { spawn, calls } = recordingSpawn([0, 0, 0]);
+  await runSteps(stepsWithHubUnlink, locatedPaths, cloneRoots, {
+    spawn,
+    failFast: false,
+    hubCloneRoot: HUB_ROOT,
+  });
+
+  expect(calls[0]).toEqual({ command: "bun", args: ["unlink"], cwd: HUB_ROOT });
+});
+
+test("failFast halts the run before the next step on a nonzero exit", async () => {
+  const { spawn, calls } = recordingSpawn([3, 0]);
+  const result = await runSteps(installSteps, locatedPaths, cloneRoots, {
+    spawn,
+    failFast: true,
+    hubCloneRoot: HUB_ROOT,
   });
 
   expect(calls).toHaveLength(1);
@@ -99,9 +184,10 @@ test("best-effort (failFast false) continues past a nonzero step and aggregates 
     { instrument: "feedback", verb: "uninstall", args: [] },
   ];
   const { spawn, calls } = recordingSpawn([5, 0]);
-  const result = await runSteps(uninstallSteps, locatedPaths, {
+  const result = await runSteps(uninstallSteps, locatedPaths, cloneRoots, {
     spawn,
     failFast: false,
+    hubCloneRoot: HUB_ROOT,
   });
 
   expect(calls).toHaveLength(2);
@@ -137,12 +223,16 @@ test("real spawn: a genuine feedback install --dry-run exits 0 through the runne
         args: ["--dry-run", "--codex-home", codexHome],
       },
     ];
-    const located = new Map<Step["instrument"], string>([
+    const located = new Map<InstrumentName, string>([
       ["feedback", feedback.entryPath],
     ]);
-    const result = await runSteps(steps, located, {
+    const roots = new Map<InstrumentName, string>([
+      ["feedback", feedback.cloneRoot],
+    ]);
+    const result = await runSteps(steps, located, roots, {
       spawn: realSpawn,
       failFast: true,
+      hubCloneRoot,
     });
     expect(result.exitCode).toBe(0);
     expect(result.failed).toBeNull();
