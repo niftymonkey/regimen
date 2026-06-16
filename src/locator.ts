@@ -16,6 +16,8 @@ import { dirname, join } from "node:path";
 
 export interface LocateResult {
   readonly entryPath: string;
+  /** The instrument's own clone root, the cwd its subprocess must run in. */
+  readonly cloneRoot: string;
 }
 
 export interface LocateError {
@@ -104,7 +106,7 @@ export function locate(
         : join(dirname(ctx.hubCloneRoot), spec.conventionalDir);
 
   const entryPath = join(cloneRoot, ENTRY_SUBPATH);
-  if (isReadableFile(entryPath)) return { entryPath };
+  if (isReadableFile(entryPath)) return { entryPath, cloneRoot };
 
   return {
     instrument: name,

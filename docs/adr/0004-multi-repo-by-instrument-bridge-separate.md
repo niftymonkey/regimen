@@ -4,6 +4,8 @@
 
 Regimen is a multi-repo program because its instruments are independently pluggable and installable, and a monorepo would fight that. The repos are `regimen` (the hub), `regimen-feedback` (the Feedback instrument), `regimen-enforcement` (the Enforcement instrument), and `skills` (a curated set of high-value Guidance skills; Guidance is skills generally, and this repo is one good source of them). The OTLP bridge stays its own repo, `regimen-otlp-bridge`, as an optional renderer.
 
+Update: `regimen-enforcement` is now realized, created and deployed alongside `regimen-feedback`, no longer a planned repo.
+
 ## Considered options
 
 - A monorepo. Rejected: fights the independent installability of instruments.

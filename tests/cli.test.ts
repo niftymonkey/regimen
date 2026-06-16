@@ -107,6 +107,12 @@ test("install --dry-run prints the ordered plan and forwards --dry-run to both c
       .split("\n")
       .filter((l) => l.startsWith("STUB install --dry-run"));
     expect(stubLines).toHaveLength(2);
+    // The hub self-link is previewed last in the plan, after both instruments,
+    // and under --dry-run it is preview-only (it never spawns a real bun link).
+    expect(stdout).toContain("hub: bun link");
+    expect(stdout.indexOf("enforcement: bun")).toBeLessThan(
+      stdout.indexOf("hub: bun link"),
+    );
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }

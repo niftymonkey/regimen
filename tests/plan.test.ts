@@ -6,7 +6,13 @@
  * I/O: same config in, same plan out.
  */
 import { expect, test } from "bun:test";
-import { type InstallConfig, planInstall, planUninstall } from "../src/plan.ts";
+import {
+  type InstallConfig,
+  type InstrumentStep,
+  type Step,
+  planInstall,
+  planUninstall,
+} from "../src/plan.ts";
 
 const baseConfig: InstallConfig = {
   dryRun: false,
@@ -15,29 +21,36 @@ const baseConfig: InstallConfig = {
   withBridge: false,
 };
 
-test("install runs feedback then enforcement, each with its top-level install verb", () => {
+/** The instrument steps only, narrowing away the hub self-link step. */
+function instrumentSteps(steps: ReadonlyArray<Step>): InstrumentStep[] {
+  return steps.filter((s): s is InstrumentStep => "instrument" in s);
+}
+
+test("install runs feedback then enforcement, then self-links the hub bin last", () => {
   const steps = planInstall(baseConfig);
   expect(steps).toEqual([
     { instrument: "feedback", verb: "install", args: [] },
     { instrument: "enforcement", verb: "install", args: [] },
+    { kind: "hub", verb: "link" },
   ]);
 });
 
-test("uninstall reverses the order to enforcement then feedback, with the uninstall verb", () => {
+test("uninstall self-unlinks the hub bin first, then enforcement then feedback", () => {
   const steps = planUninstall(baseConfig);
   expect(steps).toEqual([
+    { kind: "hub", verb: "unlink" },
     { instrument: "enforcement", verb: "uninstall", args: [] },
     { instrument: "feedback", verb: "uninstall", args: [] },
   ]);
 });
 
-test("--dry-run and --codex-home forward to every step", () => {
+test("--dry-run and --codex-home forward to every instrument step", () => {
   const steps = planInstall({
     ...baseConfig,
     dryRun: true,
     codexHome: "/tmp/codex",
   });
-  for (const step of steps) {
+  for (const step of instrumentSteps(steps)) {
     expect(step.args).toContain("--dry-run");
     const i = step.args.indexOf("--codex-home");
     expect(i).toBeGreaterThanOrEqual(0);
@@ -46,10 +59,12 @@ test("--dry-run and --codex-home forward to every step", () => {
 });
 
 test("repeated --gate forwards only to the enforcement step, in order", () => {
-  const steps = planInstall({
-    ...baseConfig,
-    gates: ["rm-rf", "em-dash"],
-  });
+  const steps = instrumentSteps(
+    planInstall({
+      ...baseConfig,
+      gates: ["rm-rf", "em-dash"],
+    }),
+  );
   const feedback = steps.find((s) => s.instrument === "feedback")!;
   const enforcement = steps.find((s) => s.instrument === "enforcement")!;
   expect(enforcement.args).toEqual(["--gate", "rm-rf", "--gate", "em-dash"]);
@@ -57,11 +72,13 @@ test("repeated --gate forwards only to the enforcement step, in order", () => {
 });
 
 test("--no-gates forwards only to enforcement and suppresses any --gate", () => {
-  const steps = planInstall({
-    ...baseConfig,
-    gates: ["rm-rf"],
-    noGates: true,
-  });
+  const steps = instrumentSteps(
+    planInstall({
+      ...baseConfig,
+      gates: ["rm-rf"],
+      noGates: true,
+    }),
+  );
   const feedback = steps.find((s) => s.instrument === "feedback")!;
   const enforcement = steps.find((s) => s.instrument === "enforcement")!;
   expect(enforcement.args).toEqual(["--no-gates"]);
@@ -75,9 +92,12 @@ test("--with-bridge is hub-owned: it never leaks into any step's args", () => {
     codexHome: "/tmp/codex",
     gates: ["rm-rf"],
   });
-  for (const step of steps) {
+  for (const step of instrumentSteps(steps)) {
     expect(step.args).not.toContain("--with-bridge");
   }
-  // The bridge instrument is not buildable yet, so it adds no step today.
-  expect(steps.map((s) => s.instrument)).toEqual(["feedback", "enforcement"]);
+  // The bridge instrument is not buildable yet, so it adds no instrument step today.
+  expect(instrumentSteps(steps).map((s) => s.instrument)).toEqual([
+    "feedback",
+    "enforcement",
+  ]);
 });

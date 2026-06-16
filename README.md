@@ -33,6 +33,27 @@ flowchart LR
 - **The tight loop** runs in the flow of work. Feedback shows how the current work is going, and you adjust your next move with the existing kit.
 - **The long arc** runs across weeks. Patterns roll up, and you make a durable change to your kit: a sharper skill, a new guardrail, a routing change.
 
+## Install
+
+From a fresh clone, run the bootstrap once:
+
+```bash
+./install.sh
+```
+
+It installs dependencies, then runs `regimen install`, the thin orchestrator that shells out to each instrument's own install verb (Feedback, then Enforcement) and finally self-links the hub bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run you use the bare command:
+
+```bash
+regimen install      # install or re-install every instrument
+regimen uninstall     # tear everything down (reverse order, best-effort)
+```
+
+Shared flags forwarded to the instruments: `--dry-run` (preview every step, change nothing), `--codex-home <dir>` (point the Codex artifacts at a non-default home), and gate selection (`--gate <name>`, repeatable, or `--no-gates`) which routes only to Enforcement. Run `regimen install --dry-run` first to see the composed plan, including the per-instrument working directory and the trailing hub self-link, before anything runs.
+
+### The `--codex-home` non-hermetic caveat
+
+`--codex-home` isolates ONLY the Codex home (the `hooks.json` and the installed skills under that directory). It does NOT redirect the rest of the install: the daemon and its systemd unit, the enabled flag in the Regimen data dir, and the `bun link` of each package are all GLOBAL and are not redirected by it. So a `--codex-home /tmp/...` "test" still writes the real daemon and links globally. For a more hermetic test, also set `REGIMEN_DATA_DIR` to override the data dir (the enabled flag); note the daemon/systemd unit and `bun link` remain global regardless.
+
 ## This repository
 
 Regimen is a program. This hub holds the program-level artifacts; the instruments live in their own repositories:
