@@ -1,0 +1,7 @@
+node_modules/
+bun.lock
+
+# Markdown in this hub repo is prose (driver docs, plans, ADRs, READMEs) that
+# carries intentional hand-authored line breaks and living uncommitted edits.
+# Prettier formats the TypeScript code; it does not own the documentation.
+*.md
