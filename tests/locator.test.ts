@@ -98,6 +98,34 @@ test("an explicit flag override beats the env override, which beats the conventi
   });
 });
 
+test("empty-string overrides fall through to the next precedence level", () => {
+  withSiblingTree(({ parent, hubCloneRoot }) => {
+    const envRoot = join(parent, "env-clone");
+    mkdirSync(join(envRoot, "src", "cli"), { recursive: true });
+    writeFileSync(join(envRoot, "src", "cli", "index.ts"), "// stub\n");
+
+    // An empty flag override is not a selection; it falls through to the env.
+    const emptyFlagFallsToEnv = locate("feedback", {
+      hubCloneRoot,
+      env: { REGIMEN_FEEDBACK_PATH: envRoot },
+      overrides: { feedbackPath: "" },
+    });
+    expect(entryOf(emptyFlagFallsToEnv)).toBe(
+      join(envRoot, "src", "cli", "index.ts"),
+    );
+
+    // An empty env override falls through to the named-sibling convention.
+    const emptyEnvFallsToConvention = locate("feedback", {
+      hubCloneRoot,
+      env: { REGIMEN_FEEDBACK_PATH: "" },
+      overrides: {},
+    });
+    expect(entryOf(emptyEnvFallsToConvention)).toBe(
+      join(parent, "regimen-feedback", "src", "cli", "index.ts"),
+    );
+  });
+});
+
 test("a missing clone yields a typed error naming the instrument, the tried path, and the override knobs", () => {
   withSiblingTree(
     ({ parent, hubCloneRoot }) => {
