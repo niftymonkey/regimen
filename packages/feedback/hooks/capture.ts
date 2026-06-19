@@ -10,7 +10,7 @@
  * unconditionally and writes nothing to stdout, so a capture failure can
  * never block or interfere with the session.
  */
-import { bufferDir, dataDir } from "../src/data-dir.ts";
+import { bufferDir, dataDir } from "@regimen/shared";
 import { isEnabled } from "../src/enabled-flag.ts";
 import { appendEnvelope, recordError } from "./event-log.ts";
 

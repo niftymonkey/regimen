@@ -12,11 +12,8 @@
  * tests in `tests/event-schema.test.ts` and by the producers that mint
  * these events.
  */
-import {
-  asHarness,
-  type RegimenEvent,
-  type SpanPhase,
-} from "../../../hooks/event-log.ts";
+import { asHarness } from "@regimen/shared";
+import { type RegimenEvent, type SpanPhase } from "../../../hooks/event-log.ts";
 import type { TranslateResult } from "../../envelope.ts";
 
 const SPAN_PHASES: ReadonlySet<SpanPhase> = new Set(["start", "end", "point"]);

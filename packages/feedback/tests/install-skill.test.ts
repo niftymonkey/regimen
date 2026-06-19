@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { planSkillInstall } from "../src/cli/install/skill.ts";
-import { harnessContract } from "../src/harness/contract.ts";
+import { harnessContract } from "@regimen/shared";
 
 const CLI = join(import.meta.dir, "..", "src", "cli", "index.ts");
 

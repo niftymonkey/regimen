@@ -4,6 +4,10 @@
  * per OS via the runtime's standard user-data-dir API," so this module
  * dispatches on the OS at runtime. `REGIMEN_DATA_DIR` overrides the
  * platform default; tests rely on it to point Regimen at a temp directory.
+ *
+ * Pure computation over an injected env and platform (plus the one env read in
+ * `dataDir`), so it is a category-1 shared leaf both Feedback and Enforcement
+ * import and the bridge reuses for its own path helpers.
  */
 import {
   join as joinPath,
@@ -70,8 +74,8 @@ export function dataDir(): string {
 /**
  * The buffer directory: where the capture hook appends envelopes and the
  * loader reads segments. Lives under the data directory so a buffer-only
- * reset (`feedback purge`) does not touch the SQLite store. STUB.
+ * reset (`feedback purge`) does not touch the SQLite store.
  */
-export function bufferDir(dataDir: string): string {
-  return joinPath(dataDir, "buffer");
+export function bufferDir(dir: string): string {
+  return joinPath(dir, "buffer");
 }

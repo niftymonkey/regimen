@@ -7,29 +7,12 @@
  * plus zero or more `sealed-<rfc3339>.jsonl` segments rotated out by the
  * daemon. See docs/event-schema.md for the v1 event contract.
  */
-import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import { bufferDir, dataDir } from "../src/data-dir.ts";
+import { bufferDir, dataDir, traceIdFor, type Harness } from "@regimen/shared";
 import { rollIfOversize } from "../src/rolling-log.ts";
 
 export type SpanPhase = "start" | "end" | "point";
-
-/** The agent harnesses the schema admits, as normalized identifiers. */
-export const HARNESSES = [
-  "claude",
-  "codex",
-  "gemini",
-  "cursor",
-  "opencode",
-  "copilot",
-] as const;
-export type Harness = (typeof HARNESSES)[number];
-
-/** Narrow an untrusted string to a known harness identifier. */
-export function asHarness(value: string): Harness | undefined {
-  return HARNESSES.find((harness) => harness === value);
-}
 
 /** One event in the append-only buffer. Matches event.schema.json. */
 export interface RegimenEvent {
@@ -51,20 +34,6 @@ export interface RegimenEvent {
   span_phase: SpanPhase;
   span_name: string;
   attributes: Record<string, string>;
-}
-
-/** A deterministic lowercase hex id of OTLP-native width derived from seed. */
-function hexId(seed: string, length: number): string {
-  return createHash("sha256").update(seed).digest("hex").slice(0, length);
-}
-
-/**
- * The OTLP-native trace id (32 hex chars) for a session. Derived from the
- * session id, so every event of one session shares a trace id and lands in
- * the same trace, whichever producer emitted it.
- */
-export function traceIdFor(sessionId: string): string {
-  return hexId(`trace:${sessionId}`, 32);
 }
 
 /**

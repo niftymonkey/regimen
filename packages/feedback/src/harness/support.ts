@@ -11,9 +11,9 @@
  * falling back to the contract's default subdirectory of the user's home.
  */
 import { join } from "node:path";
-import { asHarness, type Harness } from "../../hooks/event-log.ts";
+import { asHarness, type Harness } from "@regimen/shared";
 import { codexReader, codexResolver } from "../codex/adapter.ts";
-import type { HarnessContract } from "./contract.ts";
+import type { HarnessContract } from "@regimen/shared";
 import {
   HARNESS_ENV_MARKERS,
   harnessDescriptor,

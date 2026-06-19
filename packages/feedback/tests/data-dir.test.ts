@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bufferDir, resolveDataDir } from "../src/data-dir.ts";
+import { bufferDir, resolveDataDir } from "@regimen/shared";
 
 test("REGIMEN_DATA_DIR wins over any OS default", () => {
   const result = resolveDataDir(

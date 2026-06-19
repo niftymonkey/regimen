@@ -1,35 +1,33 @@
 /**
  * The store-write seam for the Enforcement instrument: how a discipline gate
- * records a gate.denial event WITHOUT importing any Feedback code.
+ * records a gate.denial event across the open-format buffer seam (ADR-0005)
+ * WITHOUT importing Feedback's row types.
  *
- * Enforcement is its own repo and cannot import Feedback's TypeScript modules,
- * so this module reimplements exactly what the published store-write contract
- * (Feedback's docs/store-write-contract.md) specifies: where the buffer
- * lives, the v1 gate.denial line shape, and the frozen trace_id derivation. It
- * writes one JSON line across the open-format buffer seam; Feedback's loader
+ * Enforcement reproduces the v1 gate.denial line shape the published store-write
+ * contract (Feedback's docs/store-write-contract.md) specifies, rather than
+ * importing a shared row type, so the seam stays open to any future producer.
+ * The pure helpers the contract references, the harness set, the frozen
+ * trace_id derivation, and the data-directory resolver, come from
+ * `@regimen/shared`. It writes one JSON line across the seam; Feedback's loader
  * drains that line into its store.
  */
-import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { join, posix as pathPosix, win32 as pathWin32 } from "node:path";
+import { join } from "node:path";
+import {
+  asHarness,
+  traceIdFor,
+  resolveDataDir,
+  dataDir,
+  type Harness,
+} from "@regimen/shared";
 
-const APP_DIR_NAME = "regimen";
-
-/** The agent harnesses the schema admits, as normalized identifiers. */
-export const HARNESSES = [
-  "claude",
-  "codex",
-  "gemini",
-  "cursor",
-  "opencode",
-  "copilot",
-] as const;
-export type Harness = (typeof HARNESSES)[number];
-
-/** Narrow an untrusted string to a known harness identifier, else undefined. */
-export function asHarness(value: string): Harness | undefined {
-  return HARNESSES.find((harness) => harness === value);
-}
+/**
+ * Re-exported from the seam module so the gates and the conformance test resolve
+ * the harness and data dir through one import. resolveDataDir(env, platform) is
+ * the pure form; dataDir() resolves for the running process, per OS, exactly as
+ * the store-write contract documents Feedback's own resolution.
+ */
+export { asHarness, resolveDataDir, dataDir, type Harness };
 
 /** One v1 event in the append-only buffer. Matches Feedback's event schema. */
 export interface RegimenEvent {
@@ -57,19 +55,6 @@ export interface GateDenialInput {
 }
 
 /**
- * The OTLP-native trace id (32 hex chars) for a session, frozen by the
- * store-write contract: the SHA-256 of the UTF-8 string "trace:" + session_id,
- * lowercase hex, truncated to the first 32 characters. Reproduced exactly so
- * Enforcement's denials land in the same trace as the session's capture events.
- */
-function traceIdFor(sessionId: string): string {
-  return createHash("sha256")
-    .update(`trace:${sessionId}`)
-    .digest("hex")
-    .slice(0, 32);
-}
-
-/**
  * Build a gate.denial v1 event per the store-write contract. Pure: the gate, at
  * its harness-specific edge, has already normalized its native hook payload into
  * these fields. Optional fields (model, reason) are omitted when undefined to
@@ -93,61 +78,6 @@ export function buildGateDenialLine(input: GateDenialInput): RegimenEvent {
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
     },
   };
-}
-
-/** Return env[key] if it is a non-empty string, otherwise undefined. */
-function readEnv(
-  env: Partial<NodeJS.ProcessEnv>,
-  key: string,
-): string | undefined {
-  const value = env[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-/**
- * Resolve the Regimen data directory from an env snapshot and a platform string,
- * exactly as the store-write contract documents Feedback's own resolution.
- * REGIMEN_DATA_DIR overrides every platform; otherwise it dispatches on the OS.
- * Pure: callers under test pass fixed inputs and assert the result.
- */
-export function resolveDataDirFrom(
-  env: Partial<NodeJS.ProcessEnv>,
-  platform: string,
-): string {
-  const override = readEnv(env, "REGIMEN_DATA_DIR");
-  if (override !== undefined) return override;
-
-  if (platform === "linux") {
-    const xdg = readEnv(env, "XDG_DATA_HOME");
-    if (xdg !== undefined) return pathPosix.join(xdg, APP_DIR_NAME);
-    const home = readEnv(env, "HOME");
-    if (home !== undefined) {
-      return pathPosix.join(home, ".local", "share", APP_DIR_NAME);
-    }
-  }
-  if (platform === "darwin") {
-    const home = readEnv(env, "HOME");
-    if (home !== undefined) {
-      return pathPosix.join(
-        home,
-        "Library",
-        "Application Support",
-        APP_DIR_NAME,
-      );
-    }
-  }
-  if (platform === "win32") {
-    const appdata = readEnv(env, "APPDATA");
-    if (appdata !== undefined) return pathWin32.join(appdata, APP_DIR_NAME);
-  }
-  throw new Error(
-    `Regimen cannot resolve a data directory on platform "${platform}" with the given environment. Set REGIMEN_DATA_DIR to override.`,
-  );
-}
-
-/** The data directory for the running process. */
-export function resolveDataDir(): string {
-  return resolveDataDirFrom(process.env, process.platform);
 }
 
 /**

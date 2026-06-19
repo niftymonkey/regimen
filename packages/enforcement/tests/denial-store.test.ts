@@ -13,7 +13,7 @@ import { join, posix, win32 } from "node:path";
 import {
   appendGateDenial,
   buildGateDenialLine,
-  resolveDataDirFrom,
+  resolveDataDir,
 } from "../src/denial-store.ts";
 
 test("buildGateDenialLine matches the contract worked example, byte for byte", () => {
@@ -87,30 +87,30 @@ test("appendGateDenial mkdir -ps the buffer and writes one newline-terminated li
   }
 });
 
-test("resolveDataDirFrom honors REGIMEN_DATA_DIR on every platform", () => {
+test("resolveDataDir honors REGIMEN_DATA_DIR on every platform", () => {
   for (const platform of ["linux", "darwin", "win32"]) {
     expect(
-      resolveDataDirFrom({ REGIMEN_DATA_DIR: "/tmp/override" }, platform),
+      resolveDataDir({ REGIMEN_DATA_DIR: "/tmp/override" }, platform),
     ).toBe("/tmp/override");
   }
 });
 
-test("resolveDataDirFrom dispatches per OS to the same dir Feedback reads", () => {
+test("resolveDataDir dispatches per OS to the same dir Feedback reads", () => {
   expect(
-    resolveDataDirFrom({ XDG_DATA_HOME: "/xdg", HOME: "/home/me" }, "linux"),
+    resolveDataDir({ XDG_DATA_HOME: "/xdg", HOME: "/home/me" }, "linux"),
   ).toBe(posix.join("/xdg", "regimen"));
-  expect(resolveDataDirFrom({ HOME: "/home/me" }, "linux")).toBe(
+  expect(resolveDataDir({ HOME: "/home/me" }, "linux")).toBe(
     posix.join("/home/me", ".local", "share", "regimen"),
   );
-  expect(resolveDataDirFrom({ HOME: "/Users/me" }, "darwin")).toBe(
+  expect(resolveDataDir({ HOME: "/Users/me" }, "darwin")).toBe(
     posix.join("/Users/me", "Library", "Application Support", "regimen"),
   );
   expect(
-    resolveDataDirFrom({ APPDATA: "C:\\Users\\me\\AppData\\Roaming" }, "win32"),
+    resolveDataDir({ APPDATA: "C:\\Users\\me\\AppData\\Roaming" }, "win32"),
   ).toBe(win32.join("C:\\Users\\me\\AppData\\Roaming", "regimen"));
 });
 
-test("resolveDataDirFrom throws when nothing resolves", () => {
-  expect(() => resolveDataDirFrom({}, "linux")).toThrow(/REGIMEN_DATA_DIR/);
-  expect(() => resolveDataDirFrom({}, "sunos")).toThrow(/REGIMEN_DATA_DIR/);
+test("resolveDataDir throws when nothing resolves", () => {
+  expect(() => resolveDataDir({}, "linux")).toThrow(/REGIMEN_DATA_DIR/);
+  expect(() => resolveDataDir({}, "sunos")).toThrow(/REGIMEN_DATA_DIR/);
 });

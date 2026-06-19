@@ -11,8 +11,8 @@
  *
  * Pure data only. Nothing here reads the filesystem or runs a hook.
  */
-import type { Harness } from "../../hooks/event-log.ts";
-import { harnessContract, type HarnessContract } from "./contract.ts";
+import type { Harness } from "@regimen/shared";
+import { harnessContract, type HarnessContract } from "@regimen/shared";
 
 /**
  * The sentinel marker stamped on each Feedback-owned hook leaf, the

@@ -29,8 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
-import { traceIdFor } from "../hooks/event-log.ts";
-import { bufferDir } from "../src/data-dir.ts";
+import { traceIdFor, bufferDir } from "@regimen/shared";
 import { drainBuffer } from "../src/loader/drain.ts";
 import { openStore } from "../src/store.ts";
 

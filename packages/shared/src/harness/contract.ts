@@ -1,20 +1,18 @@
 /**
- * The harness CONTRACT: the data subset about an agent CLI that is shared,
- * byte-identical, across the Regimen repos (regimen-feedback and
- * regimen-enforcement). It is pure data: where a harness keeps its config home,
- * where its hooks file lives and in what format, and where its skills install.
+ * The harness CONTRACT: the data subset about an agent CLI that is shared
+ * across the Regimen instruments (Feedback and Enforcement). It is pure data:
+ * where a harness keeps its config home, where its hooks file lives and in what
+ * format, and where its skills install.
  *
- * IMPORTANT: this module is kept BYTE-IDENTICAL across regimen-feedback and
- * regimen-enforcement. Do not add anything repo-private here (capture facts,
- * imports of feedback-only modules, behavior). The canonical spec is the hub's
- * docs/harness-descriptor-contract.md (to be published). When the repos are
- * later consolidated, this is the one file that merges with zero diff.
+ * The canonical spec is the CLI's docs/harness-descriptor-contract.md (to be
+ * published). Now that the instruments share one workspace, this contract lives
+ * in `@regimen/shared` and both instruments import it rather than each holding a
+ * hand-copied byte-identical version.
  *
  * Only the `Harness` type is imported (the shared identifier set); the contract
- * data itself is self-contained so the byte-identical copy has no repo-private
- * dependency beyond that one shared type.
+ * data itself is self-contained.
  */
-import type { Harness } from "../../hooks/event-log.ts";
+import type { Harness } from "../harness.ts";
 
 /**
  * Where a harness keeps its configuration home: the environment variable that
@@ -37,7 +35,7 @@ export interface HooksFile {
 }
 
 /**
- * The shared, cross-repo contract for one harness. Pure data. The skills
+ * The shared, cross-instrument contract for one harness. Pure data. The skills
  * subdirectory is relative to the config home (target
  * `<configHome>/<skillsSubdir>/<name>/SKILL.md`).
  */
@@ -55,7 +53,7 @@ const CODEX_CONTRACT: HarnessContract = {
   skillsSubdir: "skills",
 };
 
-/** The cross-repo harness contracts, keyed by normalized harness identifier. */
+/** The cross-instrument harness contracts, keyed by normalized identifier. */
 export const HARNESS_CONTRACTS: ReadonlyMap<Harness, HarnessContract> = new Map(
   [["codex", CODEX_CONTRACT]],
 );

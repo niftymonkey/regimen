@@ -26,7 +26,7 @@ import {
   appendGateDenial,
   asHarness,
   buildGateDenialLine,
-  resolveDataDir,
+  dataDir,
 } from "../src/denial-store.ts";
 
 /**
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     }
 
     appendGateDenial(
-      resolveDataDir(),
+      dataDir(),
       buildGateDenialLine({
         gate_id: gate,
         session_id: session,

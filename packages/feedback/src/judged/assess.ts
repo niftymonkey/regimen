@@ -14,7 +14,7 @@
  * runs the Judge already shaped, written as-is.
  */
 import { readFileSync } from "node:fs";
-import type { Harness } from "../../hooks/event-log.ts";
+import type { Harness } from "@regimen/shared";
 import type { Store } from "../store.ts";
 import { harnessSupport } from "../harness/support.ts";
 import { readJudgmentDigest, type JudgmentDigest } from "./digest.ts";

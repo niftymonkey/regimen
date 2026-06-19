@@ -7,7 +7,8 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { traceIdFor, type RegimenEvent } from "../hooks/event-log.ts";
+import { traceIdFor } from "@regimen/shared";
+import { type RegimenEvent } from "../hooks/event-log.ts";
 import { openStore, type Store } from "../src/store.ts";
 
 const SESSION = "session-projection-1";

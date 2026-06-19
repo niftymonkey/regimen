@@ -11,7 +11,7 @@
 import chokidar from "chokidar";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { bufferDir as bufferDirFor, dataDir } from "../data-dir.ts";
+import { bufferDir as bufferDirFor, dataDir } from "@regimen/shared";
 import { isEnabled } from "../enabled-flag.ts";
 import { recordError } from "../../hooks/event-log.ts";
 import { openStore } from "../store.ts";

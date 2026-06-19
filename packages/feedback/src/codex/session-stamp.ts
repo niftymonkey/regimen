@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Harness } from "../../hooks/event-log.ts";
+import type { Harness } from "@regimen/shared";
 
 interface StampRecord {
   sessionId: string;

@@ -1,10 +1,13 @@
 {
-  "name": "@regimen/otlp-bridge",
+  "name": "@regimen/shared",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "bridge": "./src/cli.ts"
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -12,8 +15,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "bun test",
-    "check": "bun run typecheck && bun run lint && bun run format:check && bun test",
-    "start": "bun run src/cli.ts"
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun test"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -22,8 +24,5 @@
     "prettier": "^3.0.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.0.0"
-  },
-  "dependencies": {
-    "@regimen/shared": "workspace:*"
   }
 }

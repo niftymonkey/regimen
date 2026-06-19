@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeSessionStamp } from "../src/codex/session-stamp.ts";
-import { traceIdFor } from "../hooks/event-log.ts";
+import { traceIdFor } from "@regimen/shared";
 import { isEnabled, setEnabled } from "../src/enabled-flag.ts";
 import { openStore } from "../src/store.ts";
 

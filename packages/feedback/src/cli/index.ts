@@ -43,7 +43,7 @@ import {
   resolveHarnessFromEnvironment,
   resolveHarnessHome,
 } from "../harness/support.ts";
-import { bufferDir, dataDir } from "../data-dir.ts";
+import { bufferDir, dataDir } from "@regimen/shared";
 import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
 import { openStore } from "../store.ts";

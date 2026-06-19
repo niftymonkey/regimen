@@ -10,7 +10,7 @@
  * adding another is one entry in `BUNDLED_SKILLS`, not a new code path.
  */
 import { join } from "node:path";
-import type { HarnessContract } from "../../harness/contract.ts";
+import type { HarnessContract } from "@regimen/shared";
 
 /**
  * The skills this repo bundles, by their `<home>/<skillsSubdir>/<name>/`

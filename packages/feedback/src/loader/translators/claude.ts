@@ -16,7 +16,8 @@
  *   - `{ kind: "quarantine" }` when the payload is malformed enough that
  *     no trustworthy event can be derived (no `hook_event_name`).
  */
-import { traceIdFor, type SpanPhase } from "../../../hooks/event-log.ts";
+import { traceIdFor } from "@regimen/shared";
+import { type SpanPhase } from "../../../hooks/event-log.ts";
 import {
   readSkillName,
   readString,

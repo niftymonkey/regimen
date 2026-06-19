@@ -12,7 +12,7 @@
  * key are treated as v1 events), and resolve to one TranslateResult the
  * writer routes into the events table or the quarantine table.
  */
-import { asHarness, type Harness } from "../../../hooks/event-log.ts";
+import { asHarness, type Harness } from "@regimen/shared";
 import { type Envelope, type TranslateResult } from "../../envelope.ts";
 import { translateClaude } from "./claude.ts";
 import { translateCodex } from "./codex.ts";

@@ -7,7 +7,7 @@
  * JSON line to the buffer per ADR-0006.
  */
 import { writeSessionStamp } from "../src/codex/session-stamp.ts";
-import { bufferDir, dataDir } from "../src/data-dir.ts";
+import { bufferDir, dataDir } from "@regimen/shared";
 import { isEnabled } from "../src/enabled-flag.ts";
 import { readString } from "../src/envelope.ts";
 import { appendEnvelope, recordError } from "./event-log.ts";

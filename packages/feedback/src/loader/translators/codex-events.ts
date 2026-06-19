@@ -10,11 +10,8 @@
  * source of truth: the event_type, span phase, span name, harness stamp, and
  * trace-id derivation live here once, so the two producers cannot drift.
  */
-import {
-  traceIdFor,
-  type RegimenEvent,
-  type SpanPhase,
-} from "../../../hooks/event-log.ts";
+import { traceIdFor } from "@regimen/shared";
+import { type RegimenEvent, type SpanPhase } from "../../../hooks/event-log.ts";
 import { normalizeCodexEndReason } from "./end-reason.ts";
 
 /** The session-scoped fields every Codex v1 event carries. */
