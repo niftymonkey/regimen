@@ -90,5 +90,5 @@ Asked across a window, what-helped, skill-gap, and routing aggregate: "eleven co
 Three, for when Feedback's surface is built:
 
 - **Overview.** The conversation list, ordered so the conversations worth reflecting on rise first, with a small health strip and recent-character panels such as tool mix. The triage view.
-- **Conversation.** The drill-in: the event timeline, this conversation against your median, tool mix, your steering points, the assignments and their kinds.
+- **Conversation.** The drill-in: the event timeline, this conversation against your median, tool mix, your steering points, the assignments and their intents.
 - **Trends.** The long arc. Deferred until there are weeks of history; a short window only makes it look broken.
