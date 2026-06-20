@@ -16,3 +16,7 @@ export {
   type HarnessContract,
   type HooksFile,
 } from "./harness/contract.ts";
+export {
+  HARNESS_ENV_MARKERS,
+  resolveHarnessFromEnvironment,
+} from "./harness/resolve.ts";

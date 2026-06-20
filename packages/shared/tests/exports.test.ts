@@ -7,6 +7,8 @@ import {
   dataDir,
   bufferDir,
   harnessContract,
+  HARNESS_ENV_MARKERS,
+  resolveHarnessFromEnvironment,
 } from "../src/index.ts";
 
 test("the shared surface is exported", () => {
@@ -18,4 +20,6 @@ test("the shared surface is exported", () => {
   expect(typeof dataDir).toBe("function");
   expect(typeof bufferDir).toBe("function");
   expect(typeof harnessContract).toBe("function");
+  expect(typeof resolveHarnessFromEnvironment).toBe("function");
+  expect(HARNESS_ENV_MARKERS.get("codex")).toBe("CODEX_THREAD_ID");
 });

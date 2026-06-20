@@ -11,15 +11,11 @@
  * falling back to the contract's default subdirectory of the user's home.
  */
 import { join } from "node:path";
-import { asHarness, type Harness } from "@regimen/shared";
+import type { Harness } from "@regimen/shared";
 import { claudeReader, claudeResolver } from "../claude/adapter.ts";
 import { codexReader, codexResolver } from "../codex/adapter.ts";
 import type { HarnessContract } from "@regimen/shared";
-import {
-  HARNESS_ENV_MARKERS,
-  harnessDescriptor,
-  type HarnessDescriptor,
-} from "./descriptor.ts";
+import { harnessDescriptor, type HarnessDescriptor } from "./descriptor.ts";
 import type { SessionResolver, TranscriptReader } from "./ports.ts";
 
 /** Everything the judge path needs for one harness: data plus the two ports. */
@@ -58,36 +54,6 @@ const HARNESS_SUPPORT: ReadonlyMap<Harness, HarnessSupport> = new Map([
 /** The support bundle for `harness`, or undefined when none is registered. */
 export function harnessSupport(harness: Harness): HarnessSupport | undefined {
   return HARNESS_SUPPORT.get(harness);
-}
-
-/**
- * Resolve which harness the CLI is running inside, vendor-agnostically and
- * per-invocation. An explicit `REGIMEN_HARNESS` wins: when set and non-empty it
- * is validated against the known harness set and returned, and an invalid value
- * throws rather than silently falling through, so a typo surfaces instead of
- * being masked by detection. With no override, the first harness whose CLI-set
- * marker env var (HARNESS_ENV_MARKERS) is present and non-empty is returned;
- * with neither override nor any marker, the result is undefined and the caller
- * fails closed.
- */
-export function resolveHarnessFromEnvironment(
-  env: Partial<NodeJS.ProcessEnv>,
-): Harness | undefined {
-  const override = env.REGIMEN_HARNESS;
-  if (typeof override === "string" && override.length > 0) {
-    const harness = asHarness(override);
-    if (harness === undefined) {
-      throw new Error(
-        `REGIMEN_HARNESS is set to an unknown harness: ${override}`,
-      );
-    }
-    return harness;
-  }
-  for (const [harness, marker] of HARNESS_ENV_MARKERS) {
-    const value = env[marker];
-    if (typeof value === "string" && value.length > 0) return harness;
-  }
-  return undefined;
 }
 
 /**

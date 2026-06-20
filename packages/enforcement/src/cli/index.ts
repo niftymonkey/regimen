@@ -21,8 +21,12 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type Harness, harnessContract } from "@regimen/shared";
-import { resolveHarness, resolveHarnessHome } from "../harness.ts";
+import {
+  type Harness,
+  harnessContract,
+  resolveHarnessFromEnvironment,
+} from "@regimen/shared";
+import { resolveHarnessHome } from "../harness.ts";
 import {
   type GateChange,
   type GateId,
@@ -85,23 +89,26 @@ interface Target {
 }
 
 /**
- * Resolve the harness from REGIMEN_HARNESS and its config home from the env var
- * the shared contract names (e.g. CODEX_HOME), else the contract's default
- * subdir under the user's home. Fails closed: a null return means REGIMEN_HARNESS
- * is unset, set to an unknown harness, has no registered contract, or the home
- * directory is undefined. Every failure writes a diagnostic to stderr first.
+ * Resolve the harness with the shared per-invocation policy (explicit
+ * REGIMEN_HARNESS, else the CLI-set marker the running harness stamped, else
+ * undefined) and its config home from the env var the shared contract names
+ * (e.g. CODEX_HOME), else the contract's default subdir under the user's home.
+ * Fails closed: a null return means the harness could not be determined, the
+ * REGIMEN_HARNESS value is unknown, the harness has no registered contract, or
+ * the home directory is undefined. Every failure writes a diagnostic to stderr
+ * first.
  */
 function resolveTarget(): Target | null {
   let harness;
   try {
-    harness = resolveHarness(process.env);
+    harness = resolveHarnessFromEnvironment(process.env);
   } catch (err) {
     process.stderr.write(`${(err as Error).message}\n`);
     return null;
   }
   if (harness === undefined) {
     process.stderr.write(
-      "REGIMEN_HARNESS is not set; Enforcement must be invoked with the harness in the environment\n",
+      "could not determine the harness; set REGIMEN_HARNESS or run Enforcement from the harness CLI\n",
     );
     return null;
   }

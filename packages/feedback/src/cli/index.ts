@@ -38,12 +38,12 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { HarnessDescriptor } from "../harness/descriptor.ts";
+import { harnessSupport, resolveHarnessHome } from "../harness/support.ts";
 import {
-  harnessSupport,
+  bufferDir,
+  dataDir,
   resolveHarnessFromEnvironment,
-  resolveHarnessHome,
-} from "../harness/support.ts";
-import { bufferDir, dataDir } from "@regimen/shared";
+} from "@regimen/shared";
 import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
 import { openStore } from "../store.ts";

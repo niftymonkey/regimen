@@ -24,8 +24,20 @@ async function runCli(
   args: ReadonlyArray<string>,
   env: Record<string, string | undefined> = {},
 ): Promise<{ exit: number; stdout: string; stderr: string }> {
+  // A key set to undefined in the override map is REMOVED from the child env, so
+  // a test can scrub an ambient marker (the dev shell sets CLAUDECODE) rather
+  // than only mask it with the literal string "undefined".
+  const merged: Record<string, string | undefined> = {
+    ...process.env,
+    REGIMEN_HARNESS: "codex",
+    ...env,
+  };
+  const childEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (value !== undefined) childEnv[key] = value;
+  }
   const proc = Bun.spawn(["bun", CLI, ...args], {
-    env: { ...process.env, REGIMEN_HARNESS: "codex", ...env },
+    env: childEnv,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -66,15 +78,66 @@ test("wire-gates writes hooks.json with all three gates on PreToolUse by default
   });
 });
 
-test("wire-gates fails closed when REGIMEN_HARNESS is unset", async () => {
+test("wire-gates fails closed with a clear message when the harness is undetermined", async () => {
   await withCodexHome(async (codexHome) => {
     const { exit, stderr } = await runCli(["wire-gates"], {
       CODEX_HOME: codexHome,
       REGIMEN_HARNESS: undefined,
+      // Scrub every CLI-set marker so detection finds nothing: the install
+      // must fail closed, not silently pick a harness.
+      CLAUDECODE: undefined,
+      CODEX_THREAD_ID: undefined,
+      GEMINI_CLI: undefined,
+      COPILOT_CLI: undefined,
     });
     expect(exit).not.toBe(0);
     expect(stderr).toContain("REGIMEN_HARNESS");
     expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
+  });
+});
+
+test("wire-gates detects codex from its CLI marker and bakes it into every gate", async () => {
+  await withCodexHome(async (codexHome) => {
+    const { exit } = await runCli(["wire-gates"], {
+      CODEX_HOME: codexHome,
+      // No REGIMEN_HARNESS: only the codex CLI marker is present.
+      REGIMEN_HARNESS: undefined,
+      CLAUDECODE: undefined,
+      CODEX_THREAD_ID: "thread-xyz",
+    });
+    expect(exit).toBe(0);
+
+    const commands = (readHooks(codexHome).hooks?.PreToolUse ?? [])
+      .flatMap((g) => g.hooks)
+      .filter((l) => l._regimen?.role === "gate")
+      .map((l) => l.command);
+    expect(commands.length).toBeGreaterThan(0);
+    for (const command of commands) {
+      expect(command).toContain("REGIMEN_HARNESS=codex");
+    }
+  });
+});
+
+test("wire-gates detects claude from its CLI marker and bakes it into every gate", async () => {
+  await withCodexHome(async (claudeHome) => {
+    // Only the claude CLI marker is present, so the detected harness drives the
+    // config-home env var read (CLAUDE_CONFIG_DIR) and the baked harness label.
+    const { exit } = await runCli(["wire-gates"], {
+      CLAUDE_CONFIG_DIR: claudeHome,
+      REGIMEN_HARNESS: undefined,
+      CODEX_THREAD_ID: undefined,
+      CLAUDECODE: "1",
+    });
+    expect(exit).toBe(0);
+
+    const commands = (readHooks(claudeHome).hooks?.PreToolUse ?? [])
+      .flatMap((g) => g.hooks)
+      .filter((l) => l._regimen?.role === "gate")
+      .map((l) => l.command);
+    expect(commands.length).toBeGreaterThan(0);
+    for (const command of commands) {
+      expect(command).toContain("REGIMEN_HARNESS=claude");
+    }
   });
 });
 

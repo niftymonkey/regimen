@@ -42,7 +42,7 @@ function readEvents(dataDir: string): Record<string, unknown>[] {
     .map((line): Record<string, unknown> => JSON.parse(line));
 }
 
-test("the rm-rf gate denies a recursive forced rm and records it", async () => {
+test("the rm-rf gate blocks a recursive forced rm even with no harness set, and records nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
   try {
     const payload = {
@@ -63,23 +63,16 @@ test("the rm-rf gate denies a recursive forced rm and records it", async () => {
     });
     const stdout = await new Response(proc.stdout).text();
     expect(await proc.exited).toBe(0);
+    // Blocks unconditionally...
     expect(stdout).toContain('"permissionDecision":"deny"');
-
-    const events = readEvents(dir);
-    expect(events).toHaveLength(1);
-    expect(events[0]?.event_type).toBe("gate.denial");
-    expect(events[0]?.harness).toBe("claude");
-    expect(events[0]?.attributes).toMatchObject({
-      gate_id: "rm-rf-guard",
-      tool_name: "Bash",
-      tool_call_id: "toolu_rmrf",
-    });
+    // ...but stamps no telemetry with a wrong harness when none is baked in.
+    expect(readEvents(dir)).toEqual([]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("the rm-rf gate denies an uppercase -R recursive forced rm", async () => {
+test("the rm-rf gate blocks an uppercase -R recursive forced rm with no harness set, recording nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
   try {
     const payload = {
@@ -101,16 +94,7 @@ test("the rm-rf gate denies an uppercase -R recursive forced rm", async () => {
     const stdout = await new Response(proc.stdout).text();
     expect(await proc.exited).toBe(0);
     expect(stdout).toContain('"permissionDecision":"deny"');
-
-    const events = readEvents(dir);
-    expect(events).toHaveLength(1);
-    expect(events[0]?.event_type).toBe("gate.denial");
-    expect(events[0]?.harness).toBe("claude");
-    expect(events[0]?.attributes).toMatchObject({
-      gate_id: "rm-rf-guard",
-      tool_name: "Bash",
-      tool_call_id: "toolu_rmRf",
-    });
+    expect(readEvents(dir)).toEqual([]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

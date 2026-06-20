@@ -2,11 +2,12 @@
  * Enforcement's canonical published gate metadata: the gate ids it owns and how
  * each gate's command string is built from a clone path and the resolved
  * harness. This is the data the CLI installer consumes to wire Enforcement's
- * gates without reaching into Enforcement's internals. The TS gate runs under
- * bun and self-stamps its harness from REGIMEN_HARNESS (the command carries no
- * harness); the shell gates run under bash and need REGIMEN_HARNESS=<harness>
- * for the recorded harness label, so the harness is a parameter here, not a
- * literal. Adding a gate is one entry here.
+ * gates without reaching into Enforcement's internals. Every gate command, the
+ * bun-run TS gate and the bash-run shell gates alike, carries
+ * REGIMEN_HARNESS=<harness> so the running gate reads the harness the installer
+ * detected rather than guessing, and the recorded denial is labelled correctly.
+ * The harness is a parameter here, never a literal. Adding a gate is one entry
+ * here.
  */
 import { join } from "node:path";
 import type { Harness } from "@regimen/shared";
@@ -30,9 +31,9 @@ export const GATE_COMMANDS: ReadonlyArray<{
 }> = [
   {
     id: "rm-rf",
-    command: (c) => {
+    command: (c, harness) => {
       assertSafeClonePath(c);
-      return `bun "${join(c, "examples", "rm-rf-gate.ts")}"`;
+      return `REGIMEN_HARNESS=${harness} bun "${join(c, "examples", "rm-rf-gate.ts")}"`;
     },
   },
   {

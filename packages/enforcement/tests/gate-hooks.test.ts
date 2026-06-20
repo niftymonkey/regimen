@@ -39,7 +39,9 @@ test("a fresh file wires the selected gates onto PreToolUse only, each marked", 
     { v: 1, role: "gate", id: "em-dash" },
     { v: 1, role: "gate", id: "inline-message" },
   ]);
-  expect(pre[0]?.command).toBe(`bun "${CLONE}/examples/rm-rf-gate.ts"`);
+  expect(pre[0]?.command).toBe(
+    `REGIMEN_HARNESS=codex bun "${CLONE}/examples/rm-rf-gate.ts"`,
+  );
   expect(pre[1]?.command).toBe(
     `REGIMEN_HARNESS=codex bash "${CLONE}/examples/em-dash-gate.sh"`,
   );
@@ -60,9 +62,12 @@ test("the planner stamps the gate commands with the harness it is given", () => 
     gates: ["rm-rf", "em-dash"],
   });
   const pre = leavesOn(plan, "PreToolUse");
-  // The TS gate self-stamps from REGIMEN_HARNESS at run time, so its command
-  // carries no harness; the shell gate carries the wired harness explicitly.
-  expect(pre[0]?.command).toBe(`bun "${CLONE}/examples/rm-rf-gate.ts"`);
+  // Every gate command, the bun-run TS gate and the bash-run shell gate alike,
+  // carries the wired harness explicitly so the running gate reads the harness
+  // the installer detected rather than guessing.
+  expect(pre[0]?.command).toBe(
+    `REGIMEN_HARNESS=claude bun "${CLONE}/examples/rm-rf-gate.ts"`,
+  );
   expect(pre[1]?.command).toBe(
     `REGIMEN_HARNESS=claude bash "${CLONE}/examples/em-dash-gate.sh"`,
   );
@@ -210,7 +215,9 @@ test("a moved clone re-homes the gate command in place without duplicating", () 
 
   const pre = leavesOn(second, "PreToolUse").filter(isGateLeaf);
   expect(pre).toHaveLength(1);
-  expect(pre[0]?.command).toBe(`bun "${moved}/examples/rm-rf-gate.ts"`);
+  expect(pre[0]?.command).toBe(
+    `REGIMEN_HARNESS=codex bun "${moved}/examples/rm-rf-gate.ts"`,
+  );
 });
 
 test("removal strips exactly the gate entries, keeps capture and user, prunes emptied structure", () => {
@@ -294,7 +301,7 @@ test("a clonePath with a space is quoted as one argument and stays idempotent", 
     .filter(isGateLeaf)
     .map((l) => l.command);
   expect(commands).toEqual([
-    `bun "${spaced}/examples/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=codex bun "${spaced}/examples/rm-rf-gate.ts"`,
     `REGIMEN_HARNESS=codex bash "${spaced}/examples/em-dash-gate.sh"`,
     `REGIMEN_HARNESS=codex bash "${spaced}/examples/inline-message-guard.sh"`,
   ]);
@@ -355,7 +362,9 @@ test("a clonePath with characters literal inside double quotes is accepted and s
     gates: ["rm-rf"],
   });
   const command = leavesOn(plan, "PreToolUse").filter(isGateLeaf)[0]?.command;
-  expect(command).toBe(`bun "${safe}/examples/rm-rf-gate.ts"`);
+  expect(command).toBe(
+    `REGIMEN_HARNESS=codex bun "${safe}/examples/rm-rf-gate.ts"`,
+  );
 });
 
 test("a structurally malformed existing file is refused, not silently rewritten", () => {

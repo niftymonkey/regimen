@@ -12,11 +12,13 @@
  *
  * The deny shape Claude and Codex share is `hookSpecificOutput.permissionDecision:
  * "deny"`, so one gate body serves both: the rule and the deny live in this
- * portable body, and the harness label comes from REGIMEN_HARNESS (defaulting
- * to claude, as the shell gates do). The harness-specific work (reading the
- * PreToolUse payload shape, emitting the deny decision) lives here, at the gate
- * edge; the emit-denial emitter stays harness-agnostic. A gate in another
- * language does the same by running the emitter as a subprocess.
+ * portable body. The gate BLOCKS unconditionally, then records the denial only
+ * when the harness is known: the harness label is the value the installer baked
+ * into REGIMEN_HARNESS, with no hardcoded fallback, so an unset harness skips
+ * the telemetry rather than stamping a wrong one. The harness-specific work
+ * (reading the PreToolUse payload shape, emitting the deny decision) lives here,
+ * at the gate edge; the emit-denial emitter stays harness-agnostic. A gate in
+ * another language does the same by running the emitter as a subprocess.
  *
  * Honest reliability: a PreToolUse hook is a guardrail, not a hard boundary. On
  * Codex it does not intercept every unified_exec shell path, so a denied
@@ -87,25 +89,10 @@ async function main(): Promise<void> {
   const command = readString(asRecord(payload.tool_input), "command");
   if (toolName !== "Bash" || !isRecursiveForcedRm(command)) return;
 
-  // Record the denial as telemetry, then deny the call to the harness.
-  spawnSync("bun", [
-    EMITTER,
-    "--gate",
-    GATE_ID,
-    "--session",
-    readString(payload, "session_id"),
-    "--harness",
-    process.env.REGIMEN_HARNESS ?? "claude",
-    "--tool",
-    toolName,
-    "--tool-call-id",
-    readString(payload, "tool_use_id"),
-    "--reason",
-    REASON,
-  ]);
-
-  // Await the write so the deny decision is flushed before process.exit, which
-  // would otherwise risk truncating the gate's only output to the harness.
+  // Block unconditionally. The deny decision is the gate's load-bearing output,
+  // so it is written first and always, independent of telemetry. Await the write
+  // so the decision is flushed before process.exit, which would otherwise risk
+  // truncating the gate's only output to the harness.
   await Bun.write(
     Bun.stdout,
     JSON.stringify({
@@ -116,6 +103,27 @@ async function main(): Promise<void> {
       },
     }),
   );
+
+  // Record the denial as telemetry only when the harness is known. The harness
+  // is the value the installer baked into REGIMEN_HARNESS; with none present the
+  // gate still blocks but skips the emit rather than stamping a wrong harness.
+  const harness = process.env.REGIMEN_HARNESS;
+  if (typeof harness !== "string" || harness.length === 0) return;
+  spawnSync("bun", [
+    EMITTER,
+    "--gate",
+    GATE_ID,
+    "--session",
+    readString(payload, "session_id"),
+    "--harness",
+    harness,
+    "--tool",
+    toolName,
+    "--tool-call-id",
+    readString(payload, "tool_use_id"),
+    "--reason",
+    REASON,
+  ]);
 }
 
 if (import.meta.main) {

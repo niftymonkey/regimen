@@ -23,7 +23,9 @@ test("each gate builds the documented command from the clone path and harness", 
     if (spec === undefined) throw new Error(`missing gate ${id}`);
     return spec.command(CLONE, "codex");
   };
-  expect(byId("rm-rf")).toBe(`bun "${CLONE}/examples/rm-rf-gate.ts"`);
+  expect(byId("rm-rf")).toBe(
+    `REGIMEN_HARNESS=codex bun "${CLONE}/examples/rm-rf-gate.ts"`,
+  );
   expect(byId("em-dash")).toBe(
     `REGIMEN_HARNESS=codex bash "${CLONE}/examples/em-dash-gate.sh"`,
   );
@@ -32,12 +34,15 @@ test("each gate builds the documented command from the clone path and harness", 
   );
 });
 
-test("the shell gates carry the resolved harness, not a hardcoded codex", () => {
+test("every gate, including rm-rf, carries the resolved harness, not a hardcoded one", () => {
   const byId = (id: GateId): string => {
     const spec = GATE_COMMANDS.find((g) => g.id === id);
     if (spec === undefined) throw new Error(`missing gate ${id}`);
     return spec.command(CLONE, "claude");
   };
+  expect(byId("rm-rf")).toBe(
+    `REGIMEN_HARNESS=claude bun "${CLONE}/examples/rm-rf-gate.ts"`,
+  );
   expect(byId("em-dash")).toBe(
     `REGIMEN_HARNESS=claude bash "${CLONE}/examples/em-dash-gate.sh"`,
   );

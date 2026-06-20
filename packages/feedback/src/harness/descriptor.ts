@@ -95,26 +95,6 @@ export const HARNESS_DESCRIPTORS: ReadonlyMap<Harness, HarnessDescriptor> =
     ["claude", descriptorFor("claude", CLAUDE_CAPTURE, "projects")],
   ]);
 
-/**
- * The CLI-set environment marker each harness stamps into the agent's shell,
- * the one sanctioned place a harness name is bound to a concrete env var. The
- * resolver reads this map to detect which harness the CLI is running inside; a
- * harness whose marker env var is present and non-empty is that harness.
- *
- * These are the markers the harness CLI sets, NOT generic provider keys: a model
- * provider's API key (e.g. an Anthropic key in the shell) does not imply the
- * Claude Code CLI is the running harness. The map is independent of
- * HARNESS_DESCRIPTORS: it covers all four CLIs even though only codex has a full
- * descriptor today, so detection can name a harness that has no support entry,
- * and the downstream registry lookup then fails closed.
- */
-export const HARNESS_ENV_MARKERS: ReadonlyMap<Harness, string> = new Map([
-  ["claude", "CLAUDECODE"],
-  ["codex", "CODEX_THREAD_ID"],
-  ["gemini", "GEMINI_CLI"],
-  ["copilot", "COPILOT_CLI"],
-]);
-
 /** The descriptor for `harness`, or undefined when none is registered. */
 export function harnessDescriptor(
   harness: Harness,
