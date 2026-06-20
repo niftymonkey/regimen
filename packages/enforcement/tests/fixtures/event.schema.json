@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/niftymonkey/regimen-feedback/blob/main/schemas/event.schema.json",
+  "$id": "https://github.com/niftymonkey/regimen/blob/main/packages/feedback/schemas/event.schema.json",
   "title": "Regimen feedback event",
   "description": "One event in the append-only JSONL buffer the Feedback capture hook appends to. See docs/event-schema.md for the event contract.",
   "type": "object",

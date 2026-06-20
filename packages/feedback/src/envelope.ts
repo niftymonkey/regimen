@@ -6,8 +6,8 @@
  * the hook ran. The loader's translator registry consumes envelopes, looks
  * up the per-harness translator, and produces a canonical v1 event (or a
  * skip or quarantine outcome). v1 events produced directly by an external
- * producer over the store-write contract (such as regimen-enforcement's denial
- * emitter) still flow through the same dispatch path; ADR-0006 specifies that a
+ * producer over the store-write contract (such as the enforcement package's
+ * denial emitter) still flow through the same dispatch path; ADR-0006 specifies that a
  * JSON line missing a top-level `payload` key is treated as an already-translated
  * v1 event so the cutover from the prior wire format loses no data.
  */

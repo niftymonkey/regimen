@@ -1,7 +1,7 @@
 /**
  * The typed batches the Source hands to the Projection.
  *
- * These mirror the regimen-feedback store rows, normalized: the `attributes`
+ * These mirror the feedback package's store rows, normalized: the `attributes`
  * JSON column is parsed, BLOB ids are hex, and nullable columns are typed
  * optionals. Everything downstream of the Source works with these types and
  * never touches SQLite.

@@ -1,6 +1,6 @@
-# regimen-otlp-bridge
+# @regimen/otlp-bridge
 
-The optional renderer that visualizes Regimen's Feedback signals in Grafana. Part of the **Regimen** program ([`niftymonkey/regimen`](https://github.com/niftymonkey/regimen)).
+The optional renderer that visualizes Regimen's Feedback signals in Grafana. This is the `packages/otlp-bridge` workspace package of the Regimen monorepo.
 
 The bridge is a long-running daemon. It reads the Feedback SQLite store the rest of Regimen writes (per ADR-0005) and streams its evidence-layer signals to Grafana Cloud as all three OpenTelemetry signals: logs, metrics, and traces. Regimen is fully usable without it; the bridge is for engineers who want live dashboards instead of the CLI.
 
@@ -47,7 +47,7 @@ Resource attributes resolve from `REGIMEN_SERVICE_NAME`, `REGIMEN_SERVICE_VERSIO
 
 `bun run start` is a foreground process that stops when its terminal closes. To keep the bridge streaming, run it under a process supervisor. On Linux and WSL a `systemd --user` service is the simplest, and matches how the Feedback loader runs.
 
-Create `~/.config/systemd/user/regimen-otlp-bridge.service`, adjusting the paths to your `bun` and your checkout:
+Create `~/.config/systemd/user/regimen-otlp-bridge.service`, adjusting the paths to your `bun` and your `packages/otlp-bridge` directory:
 
 ```ini
 [Unit]
@@ -56,8 +56,8 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=/path/to/bun /path/to/regimen-otlp-bridge/src/cli.ts
-WorkingDirectory=/path/to/regimen-otlp-bridge
+ExecStart=/path/to/bun /path/to/regimen/packages/otlp-bridge/src/cli.ts
+WorkingDirectory=/path/to/regimen/packages/otlp-bridge
 Restart=on-failure
 RestartSec=2
 
@@ -65,7 +65,7 @@ RestartSec=2
 WantedBy=default.target
 ```
 
-`WorkingDirectory` must be the repo, so Bun loads the `.env` credentials from it. The unit does not redirect the daemon's output: the bridge writes its own `bridge.log` in the Regimen data directory and keeps it size-bounded itself (rolled at 1 MB, three copies kept). The daemon's stdout and stderr fall through to the systemd journal, which journald bounds. Then enable and manage the service:
+`WorkingDirectory` must be the `packages/otlp-bridge` directory, so Bun loads the `.env` credentials from it. The unit does not redirect the daemon's output: the bridge writes its own `bridge.log` in the Regimen data directory and keeps it size-bounded itself (rolled at 1 MB, three copies kept). The daemon's stdout and stderr fall through to the systemd journal, which journald bounds. Then enable and manage the service:
 
 ```
 systemctl --user daemon-reload
@@ -77,11 +77,11 @@ tail -f ~/.local/share/regimen/bridge.log           # the operational log
 journalctl --user -u regimen-otlp-bridge -f         # stdout and startup errors
 ```
 
-The service runs `src/cli.ts` from the repo working copy, and Bun loads the module code once at process start. A code change does not reach the running daemon until the service is restarted: after pulling new code, run `systemctl --user restart regimen-otlp-bridge`.
+The service runs `src/cli.ts` from the package working copy, and Bun loads the module code once at process start. A code change does not reach the running daemon until the service is restarted: after pulling new code, run `systemctl --user restart regimen-otlp-bridge`.
 
 A cross-platform `bridge install-daemon` command, the equivalent of `feedback install-daemon`, is a planned follow-up; until then this unit is written by hand.
 
-Once `bridge install-daemon` ships, the bridge will also compose into the unified install through the Regimen hub orchestrator, as an optional step via `regimen install --with-bridge`. This is deferred until that command exists. The bridge reads `feedback.db` read-only (the ADR-0005 seam) and never has its Grafana secrets bundled, so the compose stays optional and the bridge keeps its own `.env`.
+Once `bridge install-daemon` ships, the bridge will also compose into the unified install through the `@regimen/cli` orchestrator, as an optional step via `regimen install --with-bridge`. This is deferred until that command exists. The bridge reads `feedback.db` read-only (the ADR-0005 seam) and never has its Grafana secrets bundled, so the compose stays optional and the bridge keeps its own `.env`.
 
 ## How it stays correct
 

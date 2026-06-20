@@ -10,7 +10,7 @@
  * `rollIfOversize` is a pure decision: it re-reads the file system on every
  * call and holds no inter-call state. It is best-effort and never throws, so
  * a logging path can call it without a guard of its own. It is ported from
- * regimen-feedback's primitive of the same name, which bounds that
+ * the feedback package's primitive of the same name, which bounds that
  * instrument's daemon log the same way.
  */
 import { renameSync, rmSync, statSync } from "node:fs";

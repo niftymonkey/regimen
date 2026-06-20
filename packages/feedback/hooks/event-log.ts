@@ -40,7 +40,7 @@ export interface RegimenEvent {
  * Append one already-translated v1 event as a JSON line to
  * `<dir>/current.jsonl`. Used by producers that mint v1 events directly (an
  * external producer over the store-write contract, such as the denial emitter
- * in regimen-enforcement); the capture hook uses `appendEnvelope` instead.
+ * in the enforcement package); the capture hook uses `appendEnvelope` instead.
  */
 export function appendEvent(event: RegimenEvent, dir: string): void {
   mkdirSync(dir, { recursive: true });

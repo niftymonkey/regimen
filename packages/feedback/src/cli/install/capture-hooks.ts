@@ -14,8 +14,8 @@
  * both to avoid duplicating on re-run and to remove exactly Feedback's entries
  * on uninstall.
  *
- * Feedback owns only `role:"capture"` leaves. The separate regimen-enforcement
- * repo owns `role:"gate"` leaves in the same hooks file, so this module's
+ * Feedback owns only `role:"capture"` leaves. The enforcement package owns
+ * `role:"gate"` leaves in the same hooks file, so this module's
  * recognizer is scoped to capture: it preserves a foreign enforcement gate leaf
  * (and the user's own hooks) verbatim, touching only capture leaves.
  */
@@ -27,7 +27,7 @@ import type { HarnessDescriptor } from "../../harness/descriptor.ts";
  * only `type` and `command`, so this sibling key rides along untouched and is the
  * path-independent identity for dedup and removal. Feedback writes
  * `role:"capture"` (from the descriptor's leaf marker); `role:"gate"` belongs to
- * regimen-enforcement and is recognized here only so the detector can leave it
+ * the enforcement package and is recognized here only so the detector can leave it
  * alone.
  */
 export interface RegimenMarker {
@@ -83,7 +83,7 @@ export interface UnwirePlan {
 /**
  * True iff a leaf hook is a Feedback capture leaf (carries `role:"capture"`).
  * Scoped to capture so a foreign enforcement gate leaf (`role:"gate"`, owned by
- * regimen-enforcement in the same hooks.json) is not recognized here and is
+ * the enforcement package in the same hooks.json) is not recognized here and is
  * therefore preserved verbatim by the strip-and-rebuild and removal logic.
  */
 export function isRegimenLeaf(leaf: LeafHook): boolean {

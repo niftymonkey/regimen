@@ -1,12 +1,12 @@
-# regimen-feedback
+# @regimen/feedback
 
-The Feedback instrument of the **Regimen** program ([`niftymonkey/regimen`](https://github.com/niftymonkey/regimen)): a local, harness-agnostic system for observing AI coding sessions and judging how the work went. The data architecture is settled in [ADR-0005](https://github.com/niftymonkey/regimen/blob/main/docs/adr/0005-feedback-data-architecture.md).
+The Feedback instrument of the **Regimen** monorepo: a local, harness-agnostic system for observing AI coding sessions and judging how the work went. This is the `packages/feedback` workspace package. The data architecture is settled in [ADR-0005](../../docs/adr/0005-feedback-data-architecture.md).
 
 At the capture edge, a per-harness hook appends each event to a JSONL buffer. A loader drains that buffer into a local SQLite store, normalizing each event to the [event schema](docs/event-schema.md) and computing deterministic signals as it goes. A Feedback CLI reads SQLite for display and orchestrates judging when asked, reaching out to a per-harness transcript reader for the conversation content and to an LLM for the judgment. Conversation content itself is never duplicated: the harness's own transcript file is the canonical record.
 
 This is a TypeScript project; the hooks and tooling run on [Bun](https://bun.sh).
 
-To stand up the Feedback instrument (capture, daemon, and the bundled Guidance skills) in one command, run `./install.sh` from the repo root; see [`SETUP.md`](SETUP.md) for what it wires, the flags, and how to verify and uninstall. The Enforcement pillar (the discipline gates and the denial emitter) lives in its own repository, [`regimen-enforcement`](https://github.com/niftymonkey/regimen-enforcement), and is installed from there; it wires its gate leaves into the same `~/.codex/hooks.json` without disturbing Feedback's capture hook.
+To stand up the Feedback instrument (capture, daemon, and the bundled Guidance skills) in one command, run `./install.sh` from the monorepo root; see [`SETUP.md`](SETUP.md) for what it wires, the flags, and how to verify and uninstall. The Enforcement pillar (the discipline gates and the denial emitter) is the sibling [`packages/enforcement`](../enforcement) package, installed from there; it wires its gate leaves into the same `~/.codex/hooks.json` without disturbing Feedback's capture hook.
 
 ## Status
 
@@ -19,14 +19,14 @@ The capture edge is in place: a Claude Code hook appends each session event as a
 - **Events captured:** `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, mapped to the five session and tool event types; the model is recorded when the payload exposes it.
 - **Buffer:** a directory of daily JSONL segments; see [The buffer](#the-buffer) below.
 - **`trace_id`** is derived deterministically from `session_id`, so every event of a session shares one trace id. `tool.pre` and `tool.post` carry a shared `tool_call_id`, so downstream readers pair them into spans with no hook state.
-- **Registration:** `.claude/settings.json` in this repo wires the hook to all five events. Open a Claude Code session in this repo, approving the project hooks when prompted, and the buffer fills as you work.
+- **Registration:** `.claude/settings.json` in this package wires the hook to all five events. Open a Claude Code session in this package, approving the project hooks when prompted, and the buffer fills as you work.
 - **Errors**, if any, go to `~/.regimen/capture-errors.log` and are never surfaced to the session.
 
 ## Capturing gate denials
 
 A deterministic discipline gate, a hook that denies a tool call breaking a rule, records each denial as a `gate.denial` event. The capture hook cannot observe another hook's denial, so the denying gate emits the event itself, writing a v1 `gate.denial` line directly to the buffer. This holds for any gate on any harness.
 
-The gates and the denial emitter live in the separate [`regimen-enforcement`](https://github.com/niftymonkey/regimen-enforcement) repository, which writes across the open-format buffer seam per the [store-write contract](docs/store-write-contract.md). Feedback owns the contract and reads the resulting events; it no longer ships the emitter or the reference gates. `gate_id` is free-form: there is no registry of known gates, and a `gate.denial` is simply a JSONL line conforming to the event schema, so a gate in any language can append one. See [`docs/event-schema.md`](docs/event-schema.md) for the `gate.denial` rationale and the per-harness denial-capture table.
+The gates and the denial emitter live in the sibling [`packages/enforcement`](../enforcement) package, which writes across the open-format buffer seam per the [store-write contract](docs/store-write-contract.md). Feedback owns the contract and reads the resulting events; it does not ship the emitter or the reference gates. `gate_id` is free-form: there is no registry of known gates, and a `gate.denial` is simply a JSONL line conforming to the event schema, so a gate in any language can append one. See [`docs/event-schema.md`](docs/event-schema.md) for the `gate.denial` rationale and the per-harness denial-capture table.
 
 ## The buffer
 
@@ -64,7 +64,7 @@ Individual checks: `bun run typecheck`, `bun run lint`, `bun run format` (writes
 
 ## Earlier framings
 
-Two earlier framings of this repo are superseded by ADR-0005; noted so a later reader does not re-propose them.
+Two earlier framings of this package are superseded by ADR-0005; noted so a later reader does not re-propose them.
 
-- **A two-tier telemetry-and-evaluation layer projecting JSONL into OTel signals.** Earlier, this repo framed itself as Tier 1 (telemetry: an append-only JSONL log projected on read into OTel logs, metrics, and traces) and Tier 2 (evaluation: an LLM that reads the telemetry). ADR-0005 supersedes this with a single store (SQLite) and a CLI that owns judging; OTLP output is a separate optional renderer ([`regimen-otlp-bridge`](https://github.com/niftymonkey/regimen-otlp-bridge)) that reads SQLite.
+- **A two-tier telemetry-and-evaluation layer projecting JSONL into OTel signals.** Earlier, this package framed itself as Tier 1 (telemetry: an append-only JSONL log projected on read into OTel logs, metrics, and traces) and Tier 2 (evaluation: an LLM that reads the telemetry). ADR-0005 supersedes this with a single store (SQLite) and a CLI that owns judging; OTLP output is a separate optional renderer (the sibling [`packages/otlp-bridge`](../otlp-bridge) package) that reads SQLite.
 - **A versioned line of event schemas (v0 then v1).** An earlier tracer-bullet phase introduced a minimal v0 schema, later evolved to a fuller v1. The current schema is now the schema; `schema_version` is retained for future migration, but the line is not framed as evolving versions. See `docs/event-schema.md` for the full earlier-approaches note.

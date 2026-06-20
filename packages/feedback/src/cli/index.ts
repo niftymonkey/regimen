@@ -700,7 +700,7 @@ function describeChange(c: WireChange): string {
  * `feedback wire-hooks`. Merge Feedback's capture hook (the harness's capture
  * events) into the harness hooks file idempotently, without clobbering the
  * user's own hooks or any foreign enforcement gate leaves (owned by
- * regimen-enforcement). The descriptor supplies the events, producer, and hooks
+ * the enforcement package). The descriptor supplies the events, producer, and hooks
  * file path; the pure planner owns the merge; this command owns the file
  * read/write and the dry-run preview.
  */
@@ -748,7 +748,7 @@ function wireHooks(argv: ReadonlyArray<string>): number {
 /**
  * `feedback unwire-hooks`. Remove exactly Feedback's capture entries from the
  * harness hooks file, leaving the user's own hooks and any foreign enforcement
- * gate leaves (owned by regimen-enforcement) intact. Writes the pruned object
+ * gate leaves (owned by the enforcement package) intact. Writes the pruned object
  * back; the file is left in place even when empty (the user may re-add their own
  * hooks to it).
  */
@@ -802,7 +802,7 @@ function unwireHooks(argv: ReadonlyArray<string>): number {
  * so a partial install never reports success. The harness is resolved from the
  * environment and flows through to the hooks and skill steps. The Enforcement
  * pillar (gates and the denial emitter) is installed separately from
- * regimen-enforcement.
+ * the enforcement package.
  */
 function install(dir: string, argv: ReadonlyArray<string>): number {
   const dryRun = argv.includes("--dry-run");

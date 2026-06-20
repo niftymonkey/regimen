@@ -147,7 +147,7 @@ The contract is the schema: a `gate.denial` is a JSONL line conforming to it, ca
 
 This section is the event-content contract. Where to append the line and how an out-of-process producer targets the seam (the buffer location, the no-`payload` dispatch rule, the frozen `trace_id` derivation, and append and idempotency semantics) is the [store-write contract](./store-write-contract.md).
 
-The gates and the denial emitter are external producers: they live in the separate [`regimen-enforcement`](https://github.com/niftymonkey/regimen-enforcement) repository and write `gate.denial` events across that store-write contract. Feedback owns the event-content contract here and the seam there, and reads the resulting events from the store; it does not ship the emitter or the reference gates. A gate in any language that appends a conforming line has its denial recorded, with no registry of approved gates and nothing gate-specific in the schema.
+The gates and the denial emitter are external producers: they live in the separate enforcement package and write `gate.denial` events across that store-write contract. Feedback owns the event-content contract here and the seam there, and reads the resulting events from the store; it does not ship the emitter or the reference gates. A gate in any language that appends a conforming line has its denial recorded, with no registry of approved gates and nothing gate-specific in the schema.
 
 ### Per-harness denial capture
 

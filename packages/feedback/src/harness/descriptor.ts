@@ -1,8 +1,8 @@
 /**
  * The harness DESCRIPTOR: the feedback-private superset of the shared contract.
  *
- * The contract (contract.ts) holds the data both Regimen repos share. The
- * descriptor adds the capture facts that belong to regimen-feedback alone: the
+ * The contract (contract.ts) holds the data both Regimen packages share. The
+ * descriptor adds the capture facts that belong to the feedback package alone: the
  * harness events the capture hook subscribes to, the producer script that emits
  * the envelope, and the sentinel leaf marker that identifies Feedback's own
  * hook leaves. Keeping these as DATA on the descriptor (not as a CaptureStrategy
@@ -18,7 +18,7 @@ import { harnessContract, type HarnessContract } from "@regimen/shared";
  * The sentinel marker stamped on each Feedback-owned hook leaf, the
  * path-independent identity used to dedup on re-install and to remove exactly
  * Feedback's leaves on uninstall. Feedback writes `role:"capture"`;
- * `role:"gate"` belongs to regimen-enforcement.
+ * `role:"gate"` belongs to the enforcement package.
  */
 export interface CaptureLeafMarker {
   readonly v: 1;

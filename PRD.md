@@ -1,6 +1,6 @@
 # Regimen PRD
 
-> Program-level Product Requirements Document for Regimen as a whole, sitting above the per-instrument repos. Companion to [`ARCHITECTURE.md`](ARCHITECTURE.md) (architectural overview) and [`docs/adr/`](docs/adr/) (decisions). This PRD focuses on what Regimen is for, who it is for, what it does and does not do, and the use cases that drive each piece.
+> Program-level Product Requirements Document for Regimen as a whole, sitting above the per-instrument packages. Companion to [`ARCHITECTURE.md`](ARCHITECTURE.md) (architectural overview) and [`docs/adr/`](docs/adr/) (decisions). This PRD focuses on what Regimen is for, who it is for, what it does and does not do, and the use cases that drive each piece.
 
 ## Problem Statement
 
@@ -75,7 +75,7 @@ In experience terms, Regimen lives quietly. Feedback runs in the background once
 
 Most program-level structure is settled in ADRs; this section names the decisions that hold across the program, not within any one instrument.
 
-- **Multi-repo program**, one repo per instrument, the bridge separate. Settled in ADR-0004. The hub repo holds program-level artifacts (PRDs, ADRs, roadmap, glossary); instrument repos hold their own code. The hub repo today is predominantly docs, with the door open to growing software (a unified installer is the most likely future shape).
+- **Single monorepo**, one Bun workspace with a package per instrument plus the bridge. The workspace root holds program-level artifacts (PRDs, ADRs, roadmap, glossary) and the `regimen` installer; each instrument lives under `packages/`. Instruments stay independently pluggable so an engineer can adopt one without the others.
 - **Instruments cut by mechanism, not by purpose.** What separates Guidance from Enforcement is the reliability boundary between a skill the agent may or may not follow and a deterministic mechanism that takes the choice away. Settled in ADR-0002.
 - **Regimen is embodied in pluggable instruments, not a methodology document.** Engineers do not stop work to internalize a practice before using it. Settled in ADR-0001.
 - **Feedback measures the conversation, not the software.** Software quality is subjective and not Regimen's to judge. Settled in ADR-0003.
@@ -83,15 +83,15 @@ Most program-level structure is settled in ADRs; this section names the decision
 - **Feedback's loader is an opt-in always-on daemon.** Real-time freshness is the substrate. Per-harness translation is the only harness-specific seam. Capture and storage share one enabled-flag gate. First-class support for Linux, macOS, and native Windows. Settled in ADR-0006.
 - **The judge LLM defaults to the engineer's already-configured agent LLM** in the first implementation. The configuration sits behind a seam that allows swapping in a different LLM later without changing callers.
 - **Guidance is skills generally; the curated `skills` repo is one good source, not the canonical container.** Other sources (agent-CLI defaults, organization-curated sets, externally-published collections) are valid sources of Guidance.
-- **The OTLP bridge consumes from SQLite.** Per ADR-0005. It is a separate optional renderer, not bundled with Feedback. Its own streaming-daemon architecture is sketched in the bridge repo; the realignment to ADR-0005 is tracked in the Bridge workstream.
+- **The OTLP bridge consumes from SQLite.** Per ADR-0005. It is a separate optional renderer, not bundled with Feedback. Its own streaming-daemon architecture is sketched in the `packages/otlp-bridge` package; the realignment to ADR-0005 is tracked in the Bridge workstream.
 - **The "respond" step of the long arc is in scope as light assistance.** Regimen surfaces patterns in plain language and offers concrete suggestions of what to research, build, or invoke; the engineer does the authoring.
-- **Distribution is mixed per instrument in current scope.** Each instrument ships with its own install path. A unified `regimen` installer is acknowledged as a future direction, not committed.
+- **A unified `regimen` installer composes the instruments.** The `@regimen/cli` package shells out to each instrument's own install verb (Feedback, then Enforcement); each instrument can still be installed on its own.
 
 ## Testing Decisions
 
-- **Tests live in instrument repos, at the instrument's external interface.** Each instrument owns its own tests; the interface (CLI commands, the capture-hook contract, the event schema, the SQLite schema) is the test surface.
-- **The hub repo has no production code today, so no test suite.** If the hub grows a unified installer, that command gains tests at its CLI interface, not at internal modules.
-- **Highest-leverage test surfaces in `regimen-feedback`.** The translator interface (per-harness mapping is the only harness-specific seam, so tests are the safety net for adding harnesses); the segment reader (idempotency and crash recovery are correctness-critical); the SQLite schema (a stable contract every downstream reader depends on).
+- **Tests live in each package, at the instrument's external interface.** Each package owns its own tests; the interface (CLI commands, the capture-hook contract, the event schema, the SQLite schema) is the test surface.
+- **The `@regimen/cli` package is tested at its CLI interface.** The unified installer's tests exercise its install and uninstall verbs, not its internal modules.
+- **Highest-leverage test surfaces in the feedback package.** The translator interface (per-harness mapping is the only harness-specific seam, so tests are the safety net for adding harnesses); the segment reader (idempotency and crash recovery are correctness-critical); the SQLite schema (a stable contract every downstream reader depends on).
 - **What makes a good test in this codebase.** External-behavior assertions through the module's interface; tests should survive internal refactors. A test that must change every time the implementation changes is testing past the interface and should be redesigned at the seam.
 
 ## Out of Scope

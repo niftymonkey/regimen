@@ -52,7 +52,7 @@ export function translateEnvelope(envelope: Envelope): TranslateResult {
  *   - An envelope `{ harness, captured_at, payload }` from the capture hook.
  *     Looked up via the translator registry.
  *   - An already-translated v1 event (from an external producer writing across
- *     the store-write contract, such as regimen-enforcement's denial emitter,
+ *     the store-write contract, such as the enforcement package's denial emitter,
  *     or from a buffer written before the envelope cutover). Validated
  *     structurally and returned as-is.
  *   - Anything else: quarantine.
