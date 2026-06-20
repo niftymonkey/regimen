@@ -8,7 +8,7 @@
  * exit-code mapping are real.
  */
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InstrumentName, Step } from "../src/plan.ts";
@@ -87,6 +87,40 @@ test("each step spawns `bun <entryPath> <verb> <...args>` in order", async () =>
   ]);
   expect(result.exitCode).toBe(0);
   expect(result.failed).toBeNull();
+});
+
+test("instrument steps carry the childEnv overlay (the harness identity) to the spawn", async () => {
+  const { spawn, calls } = recordingSpawn([0, 0]);
+  await runSteps(installSteps, locatedPaths, cloneRoots, {
+    spawn,
+    failFast: true,
+    cliPackageRoot: CLI_ROOT,
+    childEnv: { REGIMEN_HARNESS: "codex" },
+  });
+
+  // Every instrument child is handed the harness as an opaque env string, not a
+  // flag; the args never carry --harness.
+  for (const call of calls) {
+    expect(call.env).toEqual({ REGIMEN_HARNESS: "codex" });
+    expect(call.args).not.toContain("--harness");
+  }
+});
+
+test("the cli self-link step does not carry the childEnv overlay (it needs no harness)", async () => {
+  const stepsWithCliLink: ReadonlyArray<Step> = [
+    { instrument: "feedback", verb: "install", args: [] },
+    { kind: "cli", verb: "link" },
+  ];
+  const { spawn, calls } = recordingSpawn([0, 0]);
+  await runSteps(stepsWithCliLink, locatedPaths, cloneRoots, {
+    spawn,
+    failFast: true,
+    cliPackageRoot: CLI_ROOT,
+    childEnv: { REGIMEN_HARNESS: "codex" },
+  });
+
+  const cliCall = calls.find((c) => c.args[0] === "link");
+  expect(cliCall?.env).toBeUndefined();
 });
 
 test("each spawned step runs with cwd set to that instrument's clone root", async () => {
@@ -198,6 +232,42 @@ test("best-effort (failFast false) continues past a nonzero step and aggregates 
   // The aggregate is the first failing exit code even though later steps ran.
   expect(result.exitCode).toBe(5);
   expect(result.failed?.instrument).toBe("enforcement");
+});
+
+test("real spawn: the per-invocation env overlay merges over the parent env", async () => {
+  // The child probes two vars and encodes the result in its exit code: one set
+  // only on the parent (proves the parent env is forwarded, the path the
+  // config-home var like CODEX_HOME rides) and one set only on the invocation
+  // overlay (proves the overlay reaches the child, the path REGIMEN_HARNESS
+  // rides). Exit 0 only when BOTH arrive; a distinct nonzero otherwise.
+  const printer = mkdtempSync(join(tmpdir(), "regimen-cli-env-"));
+  const script = join(printer, "probe-env.ts");
+  writeFileSync(
+    script,
+    [
+      'const parent = process.env.REGIMEN_PARENT_ONLY === "from-parent";',
+      'const overlay = process.env.REGIMEN_OVERLAY === "from-overlay";',
+      "process.exit(parent && overlay ? 0 : parent ? 7 : 8);",
+      "",
+    ].join("\n"),
+  );
+  const priorParent = process.env.REGIMEN_PARENT_ONLY;
+  process.env.REGIMEN_PARENT_ONLY = "from-parent";
+  try {
+    // realSpawn merges invocation.env OVER the parent process.env, so the child
+    // sees both the parent-only var and the overlay var.
+    const code = await realSpawn({
+      command: "bun",
+      args: [script],
+      cwd: printer,
+      env: { REGIMEN_OVERLAY: "from-overlay" },
+    });
+    expect(code).toBe(0);
+  } finally {
+    rmSync(printer, { recursive: true, force: true });
+    if (priorParent === undefined) delete process.env.REGIMEN_PARENT_ONLY;
+    else process.env.REGIMEN_PARENT_ONLY = priorParent;
+  }
 });
 
 test("real spawn: a genuine feedback install --dry-run exits 0 through the runner", async () => {

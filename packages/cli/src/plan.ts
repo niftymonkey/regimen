@@ -38,7 +38,6 @@ export type Step = InstrumentStep | CliStep;
 
 export interface InstallConfig {
   readonly dryRun: boolean;
-  readonly codexHome?: string;
   readonly gates: ReadonlyArray<string>;
   readonly noGates: boolean;
   readonly withBridge: boolean;
@@ -78,17 +77,15 @@ export function planUninstall(config: InstallConfig): Step[] {
 
 /**
  * The args forwarded to one instrument's step, applying the flag-routing rules.
- * Shared flags (--dry-run, --codex-home) go to every step; gate flags (--gate,
- * --no-gates) go only to enforcement. CLI-owned flags (--with-bridge) and the
- * locator override flags (--*-path) are consumed elsewhere and never appear
- * here.
+ * The shared flag (--dry-run) goes to every step; gate flags (--gate,
+ * --no-gates) go only to enforcement. The harness and its config home are NOT
+ * flags: they travel in the child environment, so no step carries --codex-home
+ * or --harness. CLI-owned flags (--with-bridge) and the locator override flags
+ * (--*-path) are consumed elsewhere and never appear here.
  */
 function argsFor(instrument: InstrumentName, config: InstallConfig): string[] {
   const args: string[] = [];
   if (config.dryRun) args.push("--dry-run");
-  if (config.codexHome !== undefined) {
-    args.push("--codex-home", config.codexHome);
-  }
   if (instrument === "enforcement") {
     if (config.noGates) {
       args.push("--no-gates");

@@ -65,13 +65,11 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
     throw new Error(`usage: regimen <install|uninstall> [flags]`);
   }
 
-  const codexHome = flagValue(argv, "--codex-home");
   const feedbackPath = flagValue(argv, "--feedback-path");
   const enforcementPath = flagValue(argv, "--enforcement-path");
 
   const config: InstallConfig = {
     dryRun: argv.includes("--dry-run"),
-    ...(codexHome !== undefined ? { codexHome } : {}),
     gates: collectFlagValues(argv, "--gate"),
     noGates: argv.includes("--no-gates"),
     withBridge: argv.includes("--with-bridge"),
@@ -138,13 +136,32 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
     verb === "install" ? planInstall(config) : planUninstall(config);
   printPlan(steps, entryPaths, cliRoot);
 
+  const childEnv = harnessChildEnv(process.env);
   const result = await runSteps(steps, entryPaths, cloneRoots, {
     spawn: realSpawn,
     failFast: verb === "install",
     cliPackageRoot: cliRoot,
     dryRun: config.dryRun,
+    ...(childEnv !== undefined ? { childEnv } : {}),
   });
   return result.exitCode;
+}
+
+/**
+ * The environment overlay the CLI hands each instrument child: the harness
+ * identity as an opaque REGIMEN_HARNESS string, copied from the CLI's own
+ * environment, so a child resolves its own harness without the CLI importing any
+ * instrument internals or forwarding a --harness flag. Returns undefined when
+ * REGIMEN_HARNESS is unset or empty, leaving the child to inherit the parent
+ * environment unchanged (each instrument fails closed on its own if it then
+ * cannot resolve a harness). Pure: same env in, same overlay out.
+ */
+export function harnessChildEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string> | undefined {
+  const harness = env.REGIMEN_HARNESS;
+  if (typeof harness !== "string" || harness.length === 0) return undefined;
+  return { REGIMEN_HARNESS: harness };
 }
 
 /**

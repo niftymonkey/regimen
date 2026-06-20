@@ -29,6 +29,14 @@ export interface SpawnInvocation {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd: string;
+  /**
+   * Environment overlay merged OVER the parent's environment for this child.
+   * The CLI uses it to hand each child the harness identity (REGIMEN_HARNESS) as
+   * an opaque string, without importing any instrument internals; the parent's
+   * own environment (including the harness's config-home var, e.g. CODEX_HOME)
+   * is forwarded underneath. Absent or empty means "inherit the parent env".
+   */
+  readonly env?: Record<string, string | undefined>;
 }
 
 /** Spawn a subprocess and resolve with its exit code. The injected seam. */
@@ -61,22 +69,32 @@ export interface RunOptions {
    * --dry-run and self-no-op), so a dry run must skip its real `bun link`.
    */
   readonly dryRun?: boolean;
+  /**
+   * The environment overlay handed to each INSTRUMENT child (not the CLI
+   * self-link step): the harness identity (REGIMEN_HARNESS) as an opaque string,
+   * so a child resolves its own harness without the CLI importing any instrument
+   * internals or forwarding a --harness flag. The CLI self-link runs `bun link`
+   * and needs no harness, so the overlay is not attached to it.
+   */
+  readonly childEnv?: Record<string, string | undefined>;
 }
 
 /**
  * The production spawn adapter: spawn the real subprocess with the parent's
- * current environment and with stdout and stderr inherited so a child's output
- * streams to the parent terminal, and resolve with its exit code. Passing
- * `process.env` explicitly forwards the live environment (Bun.spawn otherwise
- * uses a snapshot taken at process start), so a child sees any environment the
- * parent set after startup. This is the only place that touches Bun.spawn; the
- * runner's control flow never does, which is why it stays deterministically
- * testable through the injected fake.
+ * current environment, OVERLAID with the invocation's own env (so the CLI can
+ * hand a child the harness identity without naming the child's other vars), and
+ * with stdout and stderr inherited so a child's output streams to the parent
+ * terminal, and resolve with its exit code. Spreading `process.env` explicitly
+ * forwards the live environment (Bun.spawn otherwise uses a snapshot taken at
+ * process start), so a child sees any environment the parent set after startup;
+ * the invocation overlay is spread last so it wins on a key collision. This is
+ * the only place that touches Bun.spawn; the runner's control flow never does,
+ * which is why it stays deterministically testable through the injected fake.
  */
 export function realSpawn(invocation: SpawnInvocation): Promise<number> {
   const proc = Bun.spawn([invocation.command, ...invocation.args], {
     cwd: invocation.cwd,
-    env: process.env,
+    env: { ...process.env, ...invocation.env },
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -95,6 +113,7 @@ function resolveStep(
   locatedPaths: ReadonlyMap<InstrumentName, string>,
   cloneRoots: ReadonlyMap<InstrumentName, string>,
   cliPackageRoot: string,
+  childEnv: Record<string, string | undefined> | undefined,
 ): { label: StepLabel; verb: string; invocation: SpawnInvocation } {
   if ("kind" in step) {
     return {
@@ -119,6 +138,7 @@ function resolveStep(
       command: "bun",
       args: [entryPath, step.verb, ...step.args],
       cwd,
+      ...(childEnv !== undefined ? { env: childEnv } : {}),
     },
   };
 }
@@ -138,6 +158,7 @@ export async function runSteps(
       locatedPaths,
       cloneRoots,
       options.cliPackageRoot,
+      options.childEnv,
     );
     // The CLI self-link has no dry-run flag of its own; under a dry run it is
     // previewed (in the printed plan) and skipped here so no real `bun link`

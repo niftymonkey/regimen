@@ -1,9 +1,10 @@
 /**
  * The InstallPlan, the CLI's pure test surface. Asserts the EXACT ordered Step[]
- * for install vs uninstall, dry-run on/off, --no-gates, repeated --gate,
- * --codex-home forwarded to both, and that --gate, --with-bridge, and the
- * locator --*-path flags never leak onto the wrong step. Zero spawning, zero
- * I/O: same config in, same plan out.
+ * for install vs uninstall, dry-run on/off, --no-gates, repeated --gate, and
+ * that --gate, --with-bridge, and the locator --*-path flags never leak onto the
+ * wrong step. The config home is NOT a flag any more: it travels in the child
+ * environment, so no step ever carries --codex-home. Zero spawning, zero I/O:
+ * same config in, same plan out.
  */
 import { expect, test } from "bun:test";
 import {
@@ -44,17 +45,15 @@ test("uninstall self-unlinks the cli bin first, then enforcement then feedback",
   ]);
 });
 
-test("--dry-run and --codex-home forward to every instrument step", () => {
+test("--dry-run forwards to every instrument step; the config home is never a flag", () => {
   const steps = planInstall({
     ...baseConfig,
     dryRun: true,
-    codexHome: "/tmp/codex",
   });
   for (const step of instrumentSteps(steps)) {
     expect(step.args).toContain("--dry-run");
-    const i = step.args.indexOf("--codex-home");
-    expect(i).toBeGreaterThanOrEqual(0);
-    expect(step.args[i + 1]).toBe("/tmp/codex");
+    // The config home travels in the child env, never as a forwarded flag.
+    expect(step.args).not.toContain("--codex-home");
   }
 });
 
@@ -89,7 +88,6 @@ test("--with-bridge is cli-owned: it never leaks into any step's args", () => {
   const steps = planInstall({
     ...baseConfig,
     withBridge: true,
-    codexHome: "/tmp/codex",
     gates: ["rm-rf"],
   });
   for (const step of instrumentSteps(steps)) {
