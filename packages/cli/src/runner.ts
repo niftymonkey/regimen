@@ -1,6 +1,6 @@
 /**
  * The StepRunner: run an ordered list of Steps by spawning each instrument's
- * CLI as a subprocess, SEQUENTIALLY, never in parallel. The hub is a shell-out
+ * CLI as a subprocess, SEQUENTIALLY, never in parallel. The CLI is a shell-out
  * orchestrator: it imports no instrument internals; it only spawns their CLIs
  * as `bun <entryPath> <verb> <...args>` and forwards exit codes.
  *
@@ -16,14 +16,14 @@
  */
 import type { InstrumentName, Step } from "./plan.ts";
 
-/** The label recorded for a step's outcome: its instrument, or "hub". */
-type StepLabel = InstrumentName | "hub";
+/** The label recorded for a step's outcome: its instrument, or "cli". */
+type StepLabel = InstrumentName | "cli";
 
 /**
  * A single subprocess invocation: the program, its arguments, and the working
  * directory to run it in. The cwd is load-bearing: every spawned instrument
  * subprocess must run in THAT instrument's own clone root so its cwd-relative
- * operations (for example `bun link`) act on the right package, not the hub's.
+ * operations (for example `bun link`) act on the right package, not the CLI's.
  */
 export interface SpawnInvocation {
   readonly command: string;
@@ -35,8 +35,8 @@ export interface SpawnInvocation {
 export type SpawnFn = (invocation: SpawnInvocation) => Promise<number>;
 
 export interface StepOutcome {
-  /** The instrument name, or "hub" for the hub's own self-link/unlink step. */
-  readonly instrument: InstrumentName | "hub";
+  /** The instrument name, or "cli" for the CLI's own self-link/unlink step. */
+  readonly instrument: InstrumentName | "cli";
   readonly verb: string;
   readonly exitCode: number;
 }
@@ -53,10 +53,10 @@ export interface RunResult {
 export interface RunOptions {
   readonly spawn: SpawnFn;
   readonly failFast: boolean;
-  /** The hub's own clone root, the cwd for the hub self-link/unlink step. */
-  readonly hubCloneRoot: string;
+  /** The CLI's own clone root, the cwd for the CLI self-link/unlink step. */
+  readonly cliPackageRoot: string;
   /**
-   * When true, the hub self-link/unlink step is previewed but not spawned: it
+   * When true, the CLI self-link/unlink step is previewed but not spawned: it
    * has no dry-run flag of its own (unlike the instrument steps, which forward
    * --dry-run and self-no-op), so a dry run must skip its real `bun link`.
    */
@@ -84,23 +84,23 @@ export function realSpawn(invocation: SpawnInvocation): Promise<number> {
 }
 
 /**
- * Resolve one step (instrument or hub self-link) into its outcome label and the
+ * Resolve one step (instrument or CLI self-link) into its outcome label and the
  * concrete subprocess invocation: an instrument step runs
- * `bun <entryPath> <verb> <...args>` in that instrument's clone root; the hub
- * step runs `bun <link|unlink>` in the hub clone root. The cwd is load-bearing
+ * `bun <entryPath> <verb> <...args>` in that instrument's clone root; the CLI
+ * step runs `bun <link|unlink>` in the CLI clone root. The cwd is load-bearing
  * in both cases.
  */
 function resolveStep(
   step: Step,
   locatedPaths: ReadonlyMap<InstrumentName, string>,
   cloneRoots: ReadonlyMap<InstrumentName, string>,
-  hubCloneRoot: string,
+  cliPackageRoot: string,
 ): { label: StepLabel; verb: string; invocation: SpawnInvocation } {
   if ("kind" in step) {
     return {
-      label: "hub",
+      label: "cli",
       verb: step.verb,
-      invocation: { command: "bun", args: [step.verb], cwd: hubCloneRoot },
+      invocation: { command: "bun", args: [step.verb], cwd: cliPackageRoot },
     };
   }
 
@@ -137,9 +137,9 @@ export async function runSteps(
       step,
       locatedPaths,
       cloneRoots,
-      options.hubCloneRoot,
+      options.cliPackageRoot,
     );
-    // The hub self-link has no dry-run flag of its own; under a dry run it is
+    // The CLI self-link has no dry-run flag of its own; under a dry run it is
     // previewed (in the printed plan) and skipped here so no real `bun link`
     // runs. Instrument steps always spawn: they forward --dry-run and self-no-op.
     if (options.dryRun === true && "kind" in step) {

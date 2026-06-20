@@ -24,7 +24,7 @@ import {
  * for miss tests.
  */
 function withSiblingTree(
-  fn: (tree: { parent: string; hubCloneRoot: string }) => void,
+  fn: (tree: { parent: string; cliPackageRoot: string }) => void,
   present: ReadonlyArray<string> = ["feedback", "enforcement"],
 ): void {
   const parent = mkdtempSync(join(tmpdir(), "regimen-packages-locator-"));
@@ -35,9 +35,9 @@ function withSiblingTree(
       writeFileSync(join(root, "src", "cli", "index.ts"), "// stub entry\n");
       return root;
     };
-    const hubCloneRoot = makePackage("cli");
+    const cliPackageRoot = makePackage("cli");
     for (const name of present) makePackage(name);
-    fn({ parent, hubCloneRoot });
+    fn({ parent, cliPackageRoot });
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }
@@ -52,8 +52,8 @@ function entryOf(value: LocateResult | LocateError | undefined): string | null {
 }
 
 test("the named-sibling convention resolves both instruments from the cli package root", () => {
-  withSiblingTree(({ parent, hubCloneRoot }) => {
-    const results = locateAll({ hubCloneRoot, env: {}, overrides: {} });
+  withSiblingTree(({ parent, cliPackageRoot }) => {
+    const results = locateAll({ cliPackageRoot, env: {}, overrides: {} });
 
     expect(entryOf(results.get("feedback"))).toBe(
       join(parent, "feedback", "src", "cli", "index.ts"),
@@ -65,7 +65,7 @@ test("the named-sibling convention resolves both instruments from the cli packag
 });
 
 test("an explicit flag override beats the env override, which beats the convention", () => {
-  withSiblingTree(({ parent, hubCloneRoot }) => {
+  withSiblingTree(({ parent, cliPackageRoot }) => {
     // Two extra clones to point the flag and env at, distinct from the sibling.
     const flagRoot = join(parent, "flag-clone");
     const envRoot = join(parent, "env-clone");
@@ -75,21 +75,21 @@ test("an explicit flag override beats the env override, which beats the conventi
     }
 
     const flagWins = locate("feedback", {
-      hubCloneRoot,
+      cliPackageRoot,
       env: { REGIMEN_FEEDBACK_PATH: envRoot },
       overrides: { feedbackPath: flagRoot },
     });
     expect(entryOf(flagWins)).toBe(join(flagRoot, "src", "cli", "index.ts"));
 
     const envWins = locate("feedback", {
-      hubCloneRoot,
+      cliPackageRoot,
       env: { REGIMEN_FEEDBACK_PATH: envRoot },
       overrides: {},
     });
     expect(entryOf(envWins)).toBe(join(envRoot, "src", "cli", "index.ts"));
 
     const conventionWins = locate("feedback", {
-      hubCloneRoot,
+      cliPackageRoot,
       env: {},
       overrides: {},
     });
@@ -100,14 +100,14 @@ test("an explicit flag override beats the env override, which beats the conventi
 });
 
 test("empty-string overrides fall through to the next precedence level", () => {
-  withSiblingTree(({ parent, hubCloneRoot }) => {
+  withSiblingTree(({ parent, cliPackageRoot }) => {
     const envRoot = join(parent, "env-clone");
     mkdirSync(join(envRoot, "src", "cli"), { recursive: true });
     writeFileSync(join(envRoot, "src", "cli", "index.ts"), "// stub\n");
 
     // An empty flag override is not a selection; it falls through to the env.
     const emptyFlagFallsToEnv = locate("feedback", {
-      hubCloneRoot,
+      cliPackageRoot,
       env: { REGIMEN_FEEDBACK_PATH: envRoot },
       overrides: { feedbackPath: "" },
     });
@@ -117,7 +117,7 @@ test("empty-string overrides fall through to the next precedence level", () => {
 
     // An empty env override falls through to the named-sibling convention.
     const emptyEnvFallsToConvention = locate("feedback", {
-      hubCloneRoot,
+      cliPackageRoot,
       env: { REGIMEN_FEEDBACK_PATH: "" },
       overrides: {},
     });
@@ -129,8 +129,8 @@ test("empty-string overrides fall through to the next precedence level", () => {
 
 test("a missing clone yields a typed error naming the instrument, the tried path, and the override knobs", () => {
   withSiblingTree(
-    ({ parent, hubCloneRoot }) => {
-      const results = locateAll({ hubCloneRoot, env: {}, overrides: {} });
+    ({ parent, cliPackageRoot }) => {
+      const results = locateAll({ cliPackageRoot, env: {}, overrides: {} });
 
       // enforcement is present; feedback is absent (omitted from the tree).
       expect(isError(results.get("enforcement")!)).toBe(false);
@@ -154,9 +154,9 @@ test("a missing clone yields a typed error naming the instrument, the tried path
 });
 
 test("resolution is identical for install and uninstall (the locator is verb-agnostic)", () => {
-  withSiblingTree(({ hubCloneRoot }) => {
-    const a = locateAll({ hubCloneRoot, env: {}, overrides: {} });
-    const b = locateAll({ hubCloneRoot, env: {}, overrides: {} });
+  withSiblingTree(({ cliPackageRoot }) => {
+    const a = locateAll({ cliPackageRoot, env: {}, overrides: {} });
+    const b = locateAll({ cliPackageRoot, env: {}, overrides: {} });
     expect(entryOf(a.get("feedback"))).toBe(entryOf(b.get("feedback")));
     expect(entryOf(a.get("enforcement"))).toBe(entryOf(b.get("enforcement")));
   });

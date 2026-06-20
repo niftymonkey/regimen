@@ -1,5 +1,5 @@
 /**
- * The InstallPlan, the hub's pure test surface. Asserts the EXACT ordered Step[]
+ * The InstallPlan, the CLI's pure test surface. Asserts the EXACT ordered Step[]
  * for install vs uninstall, dry-run on/off, --no-gates, repeated --gate,
  * --codex-home forwarded to both, and that --gate, --with-bridge, and the
  * locator --*-path flags never leak onto the wrong step. Zero spawning, zero
@@ -21,24 +21,24 @@ const baseConfig: InstallConfig = {
   withBridge: false,
 };
 
-/** The instrument steps only, narrowing away the hub self-link step. */
+/** The instrument steps only, narrowing away the cli self-link step. */
 function instrumentSteps(steps: ReadonlyArray<Step>): InstrumentStep[] {
   return steps.filter((s): s is InstrumentStep => "instrument" in s);
 }
 
-test("install runs feedback then enforcement, then self-links the hub bin last", () => {
+test("install runs feedback then enforcement, then self-links the cli bin last", () => {
   const steps = planInstall(baseConfig);
   expect(steps).toEqual([
     { instrument: "feedback", verb: "install", args: [] },
     { instrument: "enforcement", verb: "install", args: [] },
-    { kind: "hub", verb: "link" },
+    { kind: "cli", verb: "link" },
   ]);
 });
 
-test("uninstall self-unlinks the hub bin first, then enforcement then feedback", () => {
+test("uninstall self-unlinks the cli bin first, then enforcement then feedback", () => {
   const steps = planUninstall(baseConfig);
   expect(steps).toEqual([
-    { kind: "hub", verb: "unlink" },
+    { kind: "cli", verb: "unlink" },
     { instrument: "enforcement", verb: "uninstall", args: [] },
     { instrument: "feedback", verb: "uninstall", args: [] },
   ]);
@@ -85,7 +85,7 @@ test("--no-gates forwards only to enforcement and suppresses any --gate", () => 
   expect(feedback.args).not.toContain("--no-gates");
 });
 
-test("--with-bridge is hub-owned: it never leaks into any step's args", () => {
+test("--with-bridge is cli-owned: it never leaks into any step's args", () => {
   const steps = planInstall({
     ...baseConfig,
     withBridge: true,

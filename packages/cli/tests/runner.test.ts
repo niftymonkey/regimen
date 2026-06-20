@@ -53,14 +53,14 @@ const cloneRoots = new Map<InstrumentName, string>([
   ["enforcement", "/clones/regimen-enforcement"],
 ]);
 
-const HUB_ROOT = "/clones/regimen";
+const CLI_ROOT = "/clones/regimen";
 
 test("each step spawns `bun <entryPath> <verb> <...args>` in order", async () => {
   const { spawn, calls } = recordingSpawn([0, 0]);
   const result = await runSteps(installSteps, locatedPaths, cloneRoots, {
     spawn,
     failFast: true,
-    hubCloneRoot: HUB_ROOT,
+    cliPackageRoot: CLI_ROOT,
   });
 
   expect(calls).toEqual([
@@ -94,7 +94,7 @@ test("each spawned step runs with cwd set to that instrument's clone root", asyn
   await runSteps(installSteps, locatedPaths, cloneRoots, {
     spawn,
     failFast: true,
-    hubCloneRoot: HUB_ROOT,
+    cliPackageRoot: CLI_ROOT,
   });
 
   expect(calls.map((c) => c.cwd)).toEqual([
@@ -103,37 +103,37 @@ test("each spawned step runs with cwd set to that instrument's clone root", asyn
   ]);
 });
 
-test("the hub self-link step spawns `bun link` at the hub clone root, last", async () => {
-  const stepsWithHubLink: ReadonlyArray<Step> = [
+test("the cli self-link step spawns `bun link` at the cli clone root, last", async () => {
+  const stepsWithCliLink: ReadonlyArray<Step> = [
     ...installSteps,
-    { kind: "hub", verb: "link" },
+    { kind: "cli", verb: "link" },
   ];
   const { spawn, calls } = recordingSpawn([0, 0, 0]);
-  await runSteps(stepsWithHubLink, locatedPaths, cloneRoots, {
+  await runSteps(stepsWithCliLink, locatedPaths, cloneRoots, {
     spawn,
     failFast: true,
-    hubCloneRoot: HUB_ROOT,
+    cliPackageRoot: CLI_ROOT,
   });
 
   const last = calls[calls.length - 1];
-  expect(last).toEqual({ command: "bun", args: ["link"], cwd: HUB_ROOT });
+  expect(last).toEqual({ command: "bun", args: ["link"], cwd: CLI_ROOT });
 });
 
-test("under dryRun the hub self-link is previewed, not spawned, while instrument steps still spawn", async () => {
-  const stepsWithHubLink: ReadonlyArray<Step> = [
+test("under dryRun the cli self-link is previewed, not spawned, while instrument steps still spawn", async () => {
+  const stepsWithCliLink: ReadonlyArray<Step> = [
     ...installSteps,
-    { kind: "hub", verb: "link" },
+    { kind: "cli", verb: "link" },
   ];
   const { spawn, calls } = recordingSpawn([0, 0, 0]);
-  await runSteps(stepsWithHubLink, locatedPaths, cloneRoots, {
+  await runSteps(stepsWithCliLink, locatedPaths, cloneRoots, {
     spawn,
     failFast: true,
-    hubCloneRoot: HUB_ROOT,
+    cliPackageRoot: CLI_ROOT,
     dryRun: true,
   });
 
   // The two instrument steps still spawn (they forward --dry-run and self-no-op),
-  // but the hub `bun link` is preview-only and never reaches the spawn seam.
+  // but the cli `bun link` is preview-only and never reaches the spawn seam.
   expect(calls.map((c) => c.args)).toEqual([
     ["/clones/regimen-feedback/src/cli/index.ts", "install", "--dry-run"],
     [
@@ -147,20 +147,20 @@ test("under dryRun the hub self-link is previewed, not spawned, while instrument
   expect(calls.some((c) => c.args[0] === "link")).toBe(false);
 });
 
-test("the hub self-unlink step spawns `bun unlink` at the hub clone root, first", async () => {
-  const stepsWithHubUnlink: ReadonlyArray<Step> = [
-    { kind: "hub", verb: "unlink" },
+test("the cli self-unlink step spawns `bun unlink` at the cli clone root, first", async () => {
+  const stepsWithCliUnlink: ReadonlyArray<Step> = [
+    { kind: "cli", verb: "unlink" },
     { instrument: "enforcement", verb: "uninstall", args: [] },
     { instrument: "feedback", verb: "uninstall", args: [] },
   ];
   const { spawn, calls } = recordingSpawn([0, 0, 0]);
-  await runSteps(stepsWithHubUnlink, locatedPaths, cloneRoots, {
+  await runSteps(stepsWithCliUnlink, locatedPaths, cloneRoots, {
     spawn,
     failFast: false,
-    hubCloneRoot: HUB_ROOT,
+    cliPackageRoot: CLI_ROOT,
   });
 
-  expect(calls[0]).toEqual({ command: "bun", args: ["unlink"], cwd: HUB_ROOT });
+  expect(calls[0]).toEqual({ command: "bun", args: ["unlink"], cwd: CLI_ROOT });
 });
 
 test("failFast halts the run before the next step on a nonzero exit", async () => {
@@ -168,7 +168,7 @@ test("failFast halts the run before the next step on a nonzero exit", async () =
   const result = await runSteps(installSteps, locatedPaths, cloneRoots, {
     spawn,
     failFast: true,
-    hubCloneRoot: HUB_ROOT,
+    cliPackageRoot: CLI_ROOT,
   });
 
   expect(calls).toHaveLength(1);
@@ -187,7 +187,7 @@ test("best-effort (failFast false) continues past a nonzero step and aggregates 
   const result = await runSteps(uninstallSteps, locatedPaths, cloneRoots, {
     spawn,
     failFast: false,
-    hubCloneRoot: HUB_ROOT,
+    cliPackageRoot: CLI_ROOT,
   });
 
   expect(calls).toHaveLength(2);
@@ -205,7 +205,7 @@ test("real spawn: a genuine feedback install --dry-run exits 0 through the runne
   // cli package at packages/cli the convention join lands on packages/feedback.
   const cliPackageRoot = join(import.meta.dir, "..");
   const feedback = locate("feedback", {
-    hubCloneRoot: cliPackageRoot,
+    cliPackageRoot,
     env: process.env,
     overrides: {},
   });
@@ -240,7 +240,7 @@ test("real spawn: a genuine feedback install --dry-run exits 0 through the runne
     const result = await runSteps(steps, located, roots, {
       spawn: realSpawn,
       failFast: true,
-      hubCloneRoot: cliPackageRoot,
+      cliPackageRoot,
     });
     expect(result.exitCode).toBe(0);
     expect(result.failed).toBeNull();

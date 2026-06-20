@@ -1,8 +1,8 @@
 /**
  * The InstallPlan: a PURE function from an InstallConfig to an ordered list of
- * Steps the hub will run, one per instrument. No I/O, no spawning, no
+ * Steps the CLI will run, one per instrument. No I/O, no spawning, no
  * filesystem, no import.meta.dir: same config in, same plan out (dependency
- * category 1, the hub's primary test surface).
+ * category 1, the CLI's primary test surface).
  *
  * It names the instruments directly (no registry). Ordering is fixed so the
  * capture group lands ahead of the gate group on PreToolUse: install runs
@@ -10,7 +10,7 @@
  * is the reverse (gates come down before capture). Each instrument's top-level
  * `install` / `uninstall` verb wires its own hooks internally, so the plan uses
  * no sub-verbs. Flag routing is the correctness core: shared flags forward to
- * every step, gate flags only to enforcement, hub-owned flags are consumed and
+ * every step, gate flags only to enforcement, cli-owned flags are consumed and
  * never forwarded.
  */
 export type InstrumentName = "feedback" | "enforcement";
@@ -23,18 +23,18 @@ export interface InstrumentStep {
 }
 
 /**
- * The hub's own self-link step: `bun link` (install) or `bun unlink`
- * (uninstall) of the hub package, so that after the first run `regimen` is a
+ * The CLI's own self-link step: `bun link` (install) or `bun unlink`
+ * (uninstall) of the CLI package, so that after the first run `regimen` is a
  * permanent bare command. It runs through the same runner and spawn seam as the
- * instrument steps, with cwd set to the hub clone root, so it previews under
+ * instrument steps, with cwd set to the CLI clone root, so it previews under
  * --dry-run and is covered by the recording-fake runner tests.
  */
-export interface HubStep {
-  readonly kind: "hub";
+export interface CliStep {
+  readonly kind: "cli";
   readonly verb: "link" | "unlink";
 }
 
-export type Step = InstrumentStep | HubStep;
+export type Step = InstrumentStep | CliStep;
 
 export interface InstallConfig {
   readonly dryRun: boolean;
@@ -56,13 +56,13 @@ export function planInstall(config: InstallConfig): Step[] {
       verb: "install",
       args: argsFor("enforcement", config),
     },
-    { kind: "hub", verb: "link" },
+    { kind: "cli", verb: "link" },
   ];
 }
 
 export function planUninstall(config: InstallConfig): Step[] {
   return [
-    { kind: "hub", verb: "unlink" },
+    { kind: "cli", verb: "unlink" },
     {
       instrument: "enforcement",
       verb: "uninstall",
@@ -79,7 +79,7 @@ export function planUninstall(config: InstallConfig): Step[] {
 /**
  * The args forwarded to one instrument's step, applying the flag-routing rules.
  * Shared flags (--dry-run, --codex-home) go to every step; gate flags (--gate,
- * --no-gates) go only to enforcement. Hub-owned flags (--with-bridge) and the
+ * --no-gates) go only to enforcement. CLI-owned flags (--with-bridge) and the
  * locator override flags (--*-path) are consumed elsewhere and never appear
  * here.
  */

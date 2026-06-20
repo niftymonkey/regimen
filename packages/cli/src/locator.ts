@@ -1,7 +1,7 @@
 /**
  * The InstrumentLocator: resolve each Regimen instrument's CLI entry point on
  * the local filesystem, harness- and model-agnostic. This is the one deep
- * module of the hub: a small interface (locate one, or locate all) over a
+ * module of the CLI: a small interface (locate one, or locate all) over a
  * first-hit-wins resolution chain (explicit flag, then env override, then the
  * named-sibling convention), followed by an existence-and-readability check.
  *
@@ -36,8 +36,8 @@ export interface LocatorOverrides {
 }
 
 export interface LocateContext {
-  /** The hub's own clone root (the repo root, computed by the CLI from import.meta.dir). */
-  readonly hubCloneRoot: string;
+  /** The CLI's own clone root (the repo root, computed by the CLI from import.meta.dir). */
+  readonly cliPackageRoot: string;
   /** The environment to read overrides from (injected so tests control it). */
   readonly env: Record<string, string | undefined>;
   readonly overrides: LocatorOverrides;
@@ -85,7 +85,7 @@ function isReadableFile(path: string): boolean {
 /**
  * Resolve one instrument. First hit wins: (1) explicit flag override pointing
  * at the clone root, (2) env override, (3) the named-sibling convention (the
- * hub clone root's parent dir plus the conventional sibling name). The chosen
+ * CLI clone root's parent dir plus the conventional sibling name). The chosen
  * clone root gets the known entry sub-path appended and is verified readable;
  * a miss returns a typed LocateError naming the instrument, the path tried, and
  * both override knobs so the message is actionable.
@@ -103,7 +103,7 @@ export function locate(
       ? flagOverride
       : envOverride !== undefined && envOverride.length > 0
         ? envOverride
-        : join(dirname(ctx.hubCloneRoot), spec.conventionalDir);
+        : join(dirname(ctx.cliPackageRoot), spec.conventionalDir);
 
   const entryPath = join(cloneRoot, ENTRY_SUBPATH);
   if (isReadableFile(entryPath)) return { entryPath, cloneRoot };
@@ -113,7 +113,7 @@ export function locate(
     triedPath: entryPath,
     flag: spec.flag,
     envVar: spec.envVar,
-    message: `could not locate the ${name} instrument: expected a readable CLI entry at ${entryPath}. Point the hub at its clone with ${spec.flag} <clone-root> or the ${spec.envVar} environment variable.`,
+    message: `could not locate the ${name} instrument: expected a readable CLI entry at ${entryPath}. Point the CLI at its clone with ${spec.flag} <clone-root> or the ${spec.envVar} environment variable.`,
   };
 }
 

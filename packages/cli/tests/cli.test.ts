@@ -1,5 +1,5 @@
 /**
- * The hub CLI composition root. A thin arg-parse test (argv -> ParsedArgs) and
+ * The Regimen CLI composition root. A thin arg-parse test (argv -> ParsedArgs) and
  * one end-to-end dry-run smoke spawned against temp instrument clones, since the
  * CLI holds no logic worth deep testing (the depth is in the locator and the
  * planner, covered by their own suites).
@@ -58,7 +58,7 @@ test("parseArgs reads --no-gates", () => {
   expect(parsed.config.noGates).toBe(true);
 });
 
-const HUB_CLI = join(import.meta.dir, "..", "src", "cli", "index.ts");
+const CLI_ENTRY = join(import.meta.dir, "..", "src", "cli", "index.ts");
 
 /** A runnable stub instrument CLI that echoes its argv and exits 0. */
 const STUB_CLI = `#!/usr/bin/env bun
@@ -74,7 +74,7 @@ function makeStubClone(parent: string, name: string): string {
 }
 
 test("install --dry-run prints the ordered plan and forwards --dry-run to both children", async () => {
-  const parent = mkdtempSync(join(tmpdir(), "regimen-hub-cli-smoke-"));
+  const parent = mkdtempSync(join(tmpdir(), "regimen-cli-smoke-"));
   try {
     const feedback = makeStubClone(parent, "regimen-feedback");
     const enforcement = makeStubClone(parent, "regimen-enforcement");
@@ -82,7 +82,7 @@ test("install --dry-run prints the ordered plan and forwards --dry-run to both c
     const proc = Bun.spawn(
       [
         "bun",
-        HUB_CLI,
+        CLI_ENTRY,
         "install",
         "--dry-run",
         "--feedback-path",
@@ -107,11 +107,11 @@ test("install --dry-run prints the ordered plan and forwards --dry-run to both c
       .split("\n")
       .filter((l) => l.startsWith("STUB install --dry-run"));
     expect(stubLines).toHaveLength(2);
-    // The hub self-link is previewed last in the plan, after both instruments,
+    // The cli self-link is previewed last in the plan, after both instruments,
     // and under --dry-run it is preview-only (it never spawns a real bun link).
-    expect(stdout).toContain("hub: bun link");
+    expect(stdout).toContain("cli: bun link");
     expect(stdout.indexOf("enforcement: bun")).toBeLessThan(
-      stdout.indexOf("hub: bun link"),
+      stdout.indexOf("cli: bun link"),
     );
   } finally {
     rmSync(parent, { recursive: true, force: true });

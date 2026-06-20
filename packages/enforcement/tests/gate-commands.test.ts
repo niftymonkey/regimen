@@ -31,7 +31,7 @@ test("each gate builds the documented Codex command from the clone path", () => 
 });
 
 test("a builder called directly with an unsafe clone path throws (self-protecting export)", () => {
-  // GATE_COMMANDS is consumed directly by the hub, with no planner to validate
+  // GATE_COMMANDS is consumed directly by the CLI, with no planner to validate
   // first, so each builder must reject a path that could break out of the
   // double-quoted shell context on its own.
   for (const builder of GATE_COMMANDS.map((g) => g.command)) {

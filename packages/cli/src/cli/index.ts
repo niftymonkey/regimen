@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 /**
- * The Regimen hub CLI: `regimen install` / `regimen uninstall`. A thin
+ * The Regimen CLI: `regimen install` / `regimen uninstall`. A thin
  * composition root with no hidden depth: it parses argv, asks the locator to
  * resolve every instrument (failing with a distinct nonzero BEFORE any spawn if
- * one is missing), builds the pure plan, prints the hub's composition, then
+ * one is missing), builds the pure plan, prints the CLI's composition, then
  * hands the plan and the located paths to the runner with the real spawn. The
  * depth lives in the locator and the planner; the CLI holds no logic worth deep
  * testing.
  *
  * Harness- and model-agnostic: it spawns each instrument's CLI as a subprocess
- * and forwards exit codes; it never imports any instrument internals. The hub
+ * and forwards exit codes; it never imports any instrument internals. The CLI
  * orchestrates Feedback and Enforcement today; the bridge is a reserved future
  * (--with-bridge is parsed and consumed but adds no step yet).
  */
@@ -115,7 +115,7 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   // subprocess spawns.
   const cliRoot = cliPackageRoot();
   const located = locateAll({
-    hubCloneRoot: cliRoot,
+    cliPackageRoot: cliRoot,
     env: process.env,
     overrides,
   });
@@ -141,29 +141,29 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   const result = await runSteps(steps, entryPaths, cloneRoots, {
     spawn: realSpawn,
     failFast: verb === "install",
-    hubCloneRoot: cliRoot,
+    cliPackageRoot: cliRoot,
     dryRun: config.dryRun,
   });
   return result.exitCode;
 }
 
 /**
- * Print the hub's computed plan so the user sees the composition before any
+ * Print the CLI's computed plan so the user sees the composition before any
  * child runs: each instrument step's instrument, verb, resolved entry path, and
- * args, plus the hub's own self-link step (`bun link`/`bun unlink` at the hub
- * clone root), in order. Both layers preview under --dry-run (the hub prints
- * this plan and each child still runs with --dry-run in its args; the hub
+ * args, plus the CLI's own self-link step (`bun link`/`bun unlink` at the CLI
+ * clone root), in order. Both layers preview under --dry-run (the CLI prints
+ * this plan and each child still runs with --dry-run in its args; the CLI
  * self-link is previewed here and not spawned under --dry-run).
  */
 function printPlan(
   steps: ReadonlyArray<Step>,
   entryPaths: ReadonlyMap<InstrumentName, string>,
-  hubRoot: string,
+  cliRoot: string,
 ): void {
   process.stdout.write("plan:\n");
   for (const step of steps) {
     if ("kind" in step) {
-      process.stdout.write(`  hub: bun ${step.verb} (cwd ${hubRoot})\n`);
+      process.stdout.write(`  cli: bun ${step.verb} (cwd ${cliRoot})\n`);
       continue;
     }
     const entry = entryPaths.get(step.instrument) ?? "(unresolved)";

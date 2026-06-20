@@ -1,7 +1,7 @@
 /**
  * Enforcement's canonical published gate metadata: the gate ids it owns and how
  * each gate's Codex command string is built from a clone path. This is the data
- * the hub installer (a later step) consumes to wire Enforcement's gates without
+ * the CLI installer (a later step) consumes to wire Enforcement's gates without
  * reaching into Enforcement's internals. The TS gate runs under bun and
  * self-stamps its harness; the shell gates run under bash, need
  * REGIMEN_HARNESS=codex for the recorded harness label, and rely on jq. Adding a
@@ -18,7 +18,7 @@ export type GateId = "rm-rf" | "em-dash" | "inline-message";
  * order within PreToolUse. The caller names a GateId and never constructs a
  * command, so the command shape stays owned here, the one published place. Each
  * builder validates the clone path before interpolating it into its double-quoted
- * shell string, so the export is self-protecting for a direct consumer (the hub)
+ * shell string, so the export is self-protecting for a direct consumer (the CLI)
  * that has no planner to validate first.
  */
 export const GATE_COMMANDS: ReadonlyArray<{
