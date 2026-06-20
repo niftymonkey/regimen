@@ -53,9 +53,28 @@ const CODEX_CONTRACT: HarnessContract = {
   skillsSubdir: "skills",
 };
 
+/**
+ * Claude Code's config home is `CLAUDE_CONFIG_DIR` (default `~/.claude`); its
+ * hooks live in `settings.json` under the same event-to-matcher-groups shape
+ * as Codex's `hooks.json`; skills install to `<configHome>/skills/<name>`.
+ * Values verified against the official Claude Code env-vars and hooks docs.
+ */
+const CLAUDE_CONTRACT: HarnessContract = {
+  harness: "claude",
+  configHome: { envVar: "CLAUDE_CONFIG_DIR", defaultSubdir: ".claude" },
+  hooksFile: {
+    relativePath: "settings.json",
+    format: "nested-matcher-groups",
+  },
+  skillsSubdir: "skills",
+};
+
 /** The cross-instrument harness contracts, keyed by normalized identifier. */
 export const HARNESS_CONTRACTS: ReadonlyMap<Harness, HarnessContract> = new Map(
-  [["codex", CODEX_CONTRACT]],
+  [
+    ["codex", CODEX_CONTRACT],
+    ["claude", CLAUDE_CONTRACT],
+  ],
 );
 
 /** The contract for `harness`, or undefined when no contract is registered. */

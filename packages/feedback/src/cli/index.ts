@@ -507,7 +507,8 @@ function printEvidence(dir: string, sessionId: string): number {
  * Run one `feedback assess` pass over a conversation and print its JudgmentDigest
  * as JSON on stdout (the judged twin of `feedback evidence`). Unlike evidence,
  * assess writes the store (events + verdict), so it opens read-write and locates
- * the transcript under CODEX_HOME/sessions for the judge to read (spec section 6).
+ * the transcript under the harness's transcripts subdir of its config home (the
+ * descriptor's `transcriptsSubdir`) for the judge to read (spec section 6).
  *
  * The session is identified the same two ways as evidence: `--session <id>` is
  * the generic, harness-agnostic form a harness that exposes a session id to the
@@ -557,7 +558,7 @@ async function assess(
     process.env,
     home ?? "",
   );
-  const sessionsDir = join(harnessHome, "sessions");
+  const sessionsDir = join(harnessHome, support.descriptor.transcriptsSubdir);
 
   const explicit = flagValue(argv, "--session");
   let sessionId: string | null = explicit ?? null;
