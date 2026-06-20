@@ -11,7 +11,7 @@
  * inputs and the AI's actions only, never model-private reasoning, and never
  * grades software quality (ADR-0003, ADR-0008, feedback-surfacing.md).
  */
-import type { ContentChunk } from "../loader/rollout/codex-reader.ts";
+import type { ContentChunk } from "../loader/reader-types.ts";
 
 export interface JudgePrompt {
   readonly system: string;

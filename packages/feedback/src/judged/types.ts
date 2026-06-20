@@ -9,7 +9,7 @@
  * conversation assessment today). AnchorRef and ContentChunk come from the S2
  * reader unchanged so the judged layer introduces no new id space.
  */
-import type { AnchorRef } from "../loader/rollout/codex-reader.ts";
+import type { AnchorRef } from "../loader/reader-types.ts";
 
 /**
  * The closed controlled vocabulary of signal names (ADR-0008). It grows by
