@@ -9,10 +9,7 @@
  * the ADR-0008 rows; the Judge writes no SQLite and makes no network call of
  * its own (that lives behind the port).
  */
-import type {
-  AnchorRef,
-  ContentChunk,
-} from "../loader/rollout/codex-reader.ts";
+import type { AnchorRef, ContentChunk } from "../loader/reader-types.ts";
 import type { JudgeModelPort } from "./port.ts";
 import { resolveDefaultJudgeModel } from "./anthropic-adapter.ts";
 import { buildJudgePrompt } from "./prompt.ts";

@@ -16,9 +16,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { RegimenEvent } from "../../../hooks/event-log.ts";
-import { rolloutRead, type QuarantinedRecord } from "./codex-reader.ts";
+import { rolloutRead } from "./codex-reader.ts";
+import type { QuarantinedRecord } from "../reader-types.ts";
 
-export type { QuarantinedRecord } from "./codex-reader.ts";
+export type { QuarantinedRecord } from "../reader-types.ts";
 
 const ROLLOUT_FILE = /^rollout-.*\.jsonl$/;
 

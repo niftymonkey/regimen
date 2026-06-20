@@ -9,13 +9,13 @@
  * the judge path asks: which session is live in a cwd, and where a session's
  * transcript file is (with whether that file is the open/live one).
  *
- * The `RolloutReadResult`/`RolloutReadOptions` types are harness-agnostic; they
- * happen to live in the codex-reader module today, which is fine for Leg A.
+ * The `RolloutReadResult`/`RolloutReadOptions` types are harness-agnostic and
+ * live in the neutral `reader-types` module both harness readers import.
  */
 import type {
   RolloutReadOptions,
   RolloutReadResult,
-} from "../loader/rollout/codex-reader.ts";
+} from "../loader/reader-types.ts";
 
 /** Reads a whole transcript's text into the harness-agnostic read result. */
 export interface TranscriptReader {

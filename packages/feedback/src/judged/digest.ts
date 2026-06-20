@@ -9,7 +9,7 @@
  * signals as the drill-down. Pure SQLite read: no Judge, no network, no writes.
  */
 import type { Database } from "bun:sqlite";
-import type { AnchorRef } from "../loader/rollout/codex-reader.ts";
+import type { AnchorRef } from "../loader/reader-types.ts";
 import type { JudgeProvenance, SignalName, ValueKind } from "./types.ts";
 
 export type JudgmentDigest = UnjudgedDigest | JudgedDigest;

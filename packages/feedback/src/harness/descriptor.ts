@@ -37,10 +37,18 @@ export interface CaptureDescriptor {
   readonly leafMarker: CaptureLeafMarker;
 }
 
-/** The full feedback-private descriptor for one harness: contract plus capture. */
+/**
+ * The full feedback-private descriptor for one harness: the shared contract, the
+ * capture facts, and where the harness keeps its session transcripts relative to
+ * its config home. `transcriptsSubdir` is feedback-private because only Feedback
+ * reads transcripts (Codex keeps them in `sessions`; Claude in `projects`), so
+ * the judge path joins `<configHome>/<transcriptsSubdir>` without naming a
+ * harness in the generic code.
+ */
 export interface HarnessDescriptor {
   readonly contract: HarnessContract;
   readonly capture: CaptureDescriptor;
+  readonly transcriptsSubdir: string;
 }
 
 const CODEX_CAPTURE: CaptureDescriptor = {
@@ -55,20 +63,37 @@ const CODEX_CAPTURE: CaptureDescriptor = {
   leafMarker: { v: 1, role: "capture" },
 };
 
+const CLAUDE_CAPTURE: CaptureDescriptor = {
+  events: [
+    "SessionStart",
+    "SessionEnd",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PreCompact",
+  ],
+  producerScript: "hooks/capture.ts",
+  leafMarker: { v: 1, role: "capture" },
+};
+
 function descriptorFor(
   harness: Harness,
   capture: CaptureDescriptor,
+  transcriptsSubdir: string,
 ): HarnessDescriptor {
   const contract = harnessContract(harness);
   if (contract === undefined) {
     throw new Error(`no harness contract registered for harness ${harness}`);
   }
-  return { contract, capture };
+  return { contract, capture, transcriptsSubdir };
 }
 
 /** The feedback-private descriptors, keyed by normalized harness identifier. */
 export const HARNESS_DESCRIPTORS: ReadonlyMap<Harness, HarnessDescriptor> =
-  new Map([["codex", descriptorFor("codex", CODEX_CAPTURE)]]);
+  new Map([
+    ["codex", descriptorFor("codex", CODEX_CAPTURE, "sessions")],
+    ["claude", descriptorFor("claude", CLAUDE_CAPTURE, "projects")],
+  ]);
 
 /**
  * The CLI-set environment marker each harness stamps into the agent's shell,

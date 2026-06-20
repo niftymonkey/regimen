@@ -288,6 +288,7 @@ test("a different harness descriptor flows through the planner unedited", () => 
         producerScript: "adapters/capture-other.ts",
         leafMarker: { v: 1, role: "capture" },
       },
+      transcriptsSubdir: "transcripts",
     },
     clonePath: CLONE,
   };
