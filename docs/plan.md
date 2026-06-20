@@ -6,7 +6,7 @@
 
 Durable across every phase. Sourced from the ADRs and PRD; restated here so each slice can reference them:
 
-- **Multi-repo program.** One repo per instrument plus the bridge separate: `regimen` (hub), `regimen-feedback`, `regimen-enforcement`, `skills` (Guidance), `regimen-otlp-bridge`. Settled in ADR-0004.
+- **Single monorepo.** One Bun workspace with a package per instrument: `packages/cli` (the `regimen` orchestrator), `packages/feedback`, `packages/enforcement`, `packages/otlp-bridge`, and `packages/shared`, plus the curated `skills` source for Guidance. Each package stays independently pluggable.
 - **Instruments cut by mechanism.** Guidance instructs, Enforcement compels, Feedback observes. Settled in ADR-0002.
 - **Feedback measures the conversation, not the software.** Soundness enters only through engineer reactions captured as signals. Settled in ADR-0003.
 - **Feedback's data architecture.** Capture hook appends raw envelopes (`{harness, captured_at, payload}`) to a JSONL buffer; the loader translates per-harness events to the canonical v1 schema and writes to a local SQLite store; conversation content stays in the harness's own transcript file, never duplicated. Settled in ADR-0005.
@@ -206,7 +206,7 @@ A design pass producing at least one Enforcement ADR (and a sub-PRD if useful) t
 
 ### Acceptance criteria
 
-- [ ] At least one Enforcement ADR is committed in the hub.
+- [ ] At least one Enforcement ADR is committed at the workspace root under `docs/adr/`.
 - [ ] The denial-event flow into Feedback's capture pipeline is documented and consistent with ADR-0006's gate-denial handling.
 - [ ] The design covers Claude and Codex's gating mechanisms at minimum.
 - [ ] The design addresses how a gate written for one harness ports (or doesn't) to another.
@@ -219,7 +219,7 @@ A design pass producing at least one Enforcement ADR (and a sub-PRD if useful) t
 
 ### What to build
 
-One reference gate ships in `regimen-enforcement` (for example, a protected-path guard that prevents the agent from editing specified paths). The gate emits a denial event that flows through the existing Feedback capture pipeline into the SQLite `gate_denials` table and is visible in `feedback show` for the affected session.
+One reference gate ships in the `packages/enforcement` package (for example, a protected-path guard that prevents the agent from editing specified paths). The gate emits a denial event that flows through the existing Feedback capture pipeline into the SQLite `gate_denials` table and is visible in `feedback show` for the affected session.
 
 ### Acceptance criteria
 
@@ -236,7 +236,7 @@ One reference gate ships in `regimen-enforcement` (for example, a protected-path
 
 ### What to build
 
-A framework or pattern for writing new Enforcement gates, documented in the `regimen-enforcement` repo with a complete worked example. A second reference gate ships using that framework (for example, a command-pattern guard that blocks specific destructive shell commands). Cross-harness adapters where needed.
+A framework or pattern for writing new Enforcement gates, documented in the `packages/enforcement` package with a complete worked example. A second reference gate ships using that framework (for example, a command-pattern guard that blocks specific destructive shell commands). Cross-harness adapters where needed.
 
 ### Acceptance criteria
 
@@ -276,4 +276,4 @@ The OTLP bridge realigns with ADR-0005: instead of tailing JSONL (its original p
 - [ ] The bridge runs and exports without errors when Regimen is live.
 - [ ] Grafana shows live evidence-layer signals from the SQLite store, refreshing within the bridge's cadence.
 - [ ] The bridge does not duplicate or block any data path; removing the bridge does not affect Regimen's correctness.
-- [ ] A reference dashboard JSON is committed in the bridge repo and importable into a fresh Grafana instance.
+- [ ] A reference dashboard JSON is committed in the `packages/otlp-bridge` package and importable into a fresh Grafana instance.

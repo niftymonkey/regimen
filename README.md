@@ -35,7 +35,7 @@ flowchart LR
 
 ## Install
 
-A full install is this hub plus the two instruments, cloned as siblings under one parent directory (the hub finds them by name next to itself). Feedback and Enforcement come from `regimen install`; the Guidance skills install separately.
+A full install is a single clone of this monorepo. Feedback and Enforcement come from `regimen install`; the Guidance skills install separately.
 
 ### Prerequisites (only if missing)
 
@@ -47,12 +47,10 @@ A full install is this hub plus the two instruments, cloned as siblings under on
 
 ```bash
 git clone https://github.com/niftymonkey/regimen.git
-git clone https://github.com/niftymonkey/regimen-feedback.git
-git clone https://github.com/niftymonkey/regimen-enforcement.git
 cd regimen && ./install.sh
 ```
 
-`./install.sh` installs dependencies, then runs `regimen install`, the thin orchestrator that shells out to each instrument's own install verb (Feedback, then Enforcement) and self-links the hub bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run, `regimen install` and `regimen uninstall` work from anywhere. Useful flags: `--dry-run` previews every step and changes nothing, `--codex-home <dir>` targets a non-default Codex home, and `--gate <name>` (repeatable) or `--no-gates` selects which Enforcement gates wire.
+`./install.sh` installs workspace dependencies, then runs `regimen install`, the thin orchestrator (the `@regimen/cli` package) that shells out to each instrument's own install verb (Feedback, then Enforcement) and self-links the `regimen` bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run, `regimen install` and `regimen uninstall` work from anywhere. Useful flags: `--dry-run` previews every step and changes nothing, and `--gate <name>` (repeatable) or `--no-gates` selects which Enforcement gates wire. The harness is auto-detected per invocation, or set explicitly with the `REGIMEN_HARNESS` environment variable.
 
 ### Guidance skills (runs via npx, or bunx)
 
@@ -70,21 +68,18 @@ The CLI auto-detects the running agent, so `-a codex` pins the target and `-s '*
 ```bash
 codex features list                 # the hooks feature is on
 feedback status                     # daemon running, recent last event
-feedback evidence --harness codex   # read a captured session back
+feedback evidence                   # read a captured session back
 ls ~/.codex/skills                  # the niftymonkey and feedback skills are present
 ```
 
-### The `--codex-home` non-hermetic caveat
-
-`--codex-home` isolates ONLY the Codex home (the `hooks.json` and the installed skills under that directory). It does NOT redirect the rest of the install: the daemon and its systemd unit, the enabled flag in the Regimen data dir, and the `bun link` of each package are all GLOBAL and are not redirected by it. So a `--codex-home /tmp/...` "test" still writes the real daemon and links globally. For a more hermetic test, also set `REGIMEN_DATA_DIR` to override the data dir (the enabled flag); note the daemon/systemd unit and `bun link` remain global regardless.
-
 ## This repository
 
-Regimen is a program. This hub holds the program-level artifacts; the instruments live in their own repositories:
+Regimen is a program. This monorepo holds the program-level artifacts plus every instrument as a workspace package under `packages/`:
 
-- [`regimen-feedback`](https://github.com/niftymonkey/regimen-feedback): the Feedback instrument.
-- [`regimen-enforcement`](https://github.com/niftymonkey/regimen-enforcement): the Enforcement instrument.
-- [`skills`](https://github.com/niftymonkey/skills): high-value Guidance skills, curated and published by the author.
-- [`regimen-otlp-bridge`](https://github.com/niftymonkey/regimen-otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
+- [`packages/feedback`](packages/feedback): the Feedback instrument.
+- [`packages/enforcement`](packages/enforcement): the Enforcement instrument.
+- [`packages/otlp-bridge`](packages/otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
+- [`packages/cli`](packages/cli): the `regimen` orchestrator that installs the instruments.
+- [`skills`](https://github.com/niftymonkey/skills): high-value Guidance skills, curated and published by the author, installed separately.
 
 See [`PRD.md`](PRD.md) for what Regimen does and for whom, [`ARCHITECTURE.md`](ARCHITECTURE.md) for how it is structured, [`docs/plan.md`](docs/plan.md) for the implementation phases, and [`docs/adr/`](docs/adr/) for the decisions behind it. Work in flight is tracked on the [project board](https://github.com/orgs/niftymonkey/projects/9).

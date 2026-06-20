@@ -1,0 +1,3 @@
+# out/ is build output; *.jsonl fixtures carry intentional shapes Prettier must not rewrite.
+out/
+*.jsonl

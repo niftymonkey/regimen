@@ -1,0 +1,2 @@
+# Tracked .jsonl fixtures are sample transcripts with intentional shapes Prettier must not rewrite.
+*.jsonl

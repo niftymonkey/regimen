@@ -32,15 +32,17 @@ Two feedback loops close over the interaction:
 
 What the engineer can do when each phase of Regimen lands is detailed in the PRD's "Phases of value" section.
 
-## Repository topology
+## Package topology
 
-Regimen is a multi-repo program because instruments are independently pluggable. Settled in ADR-0004.
+Regimen is a single Bun-workspace monorepo. Each instrument is a workspace package, kept independently pluggable so an engineer can adopt one without the others.
 
-- [`regimen`](https://github.com/niftymonkey/regimen) (this repo): the hub, holding program docs (PRD, ADRs, glossary, roadmap, this shape doc).
-- [`regimen-feedback`](https://github.com/niftymonkey/regimen-feedback): the Feedback instrument.
-- [`regimen-enforcement`](https://github.com/niftymonkey/regimen-enforcement): the Enforcement instrument.
-- [`skills`](https://github.com/niftymonkey/skills): a curated source of Guidance skills the author maintains; Guidance is skills generally, this repo is one good source.
-- [`regimen-otlp-bridge`](https://github.com/niftymonkey/regimen-otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
+- The workspace root holds the program docs (PRD, ADRs, glossary, roadmap, this shape doc) and the `./install.sh` front door.
+- [`packages/cli`](packages/cli): the `@regimen/cli` package, whose `regimen` bin orchestrates installing the instruments.
+- [`packages/feedback`](packages/feedback): the Feedback instrument.
+- [`packages/enforcement`](packages/enforcement): the Enforcement instrument.
+- [`packages/otlp-bridge`](packages/otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
+- [`packages/shared`](packages/shared): the cross-package contracts the instruments share (`@regimen/shared`).
+- [`skills`](https://github.com/niftymonkey/skills): a curated source of Guidance skills the author maintains, installed separately; Guidance is skills generally, this is one good source.
 
 ## Constraints and boundaries
 

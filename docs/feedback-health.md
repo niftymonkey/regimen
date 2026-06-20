@@ -12,15 +12,15 @@ Feedback is an always-on background daemon, plus a capture hook on every session
 
 This document enumerates every operational health dimension worth caring about, what a healthy and an unhealthy reading look like for each, and a proposed shape for an enriched `feedback status`.
 
-It lives in the hub, not in `regimen-feedback`, deliberately. The files that can go wrong are written by two separate repos (`regimen-feedback` and `regimen-otlp-bridge`), and neither can own the comprehensive picture alone. Health is a cross-instrument concern, so it is documented at the program level.
+It lives at the workspace root, not inside the feedback package, deliberately. The files that can go wrong are written by two packages (the feedback package and the otlp-bridge package), and neither can own the comprehensive picture alone. Health is a cross-instrument concern, so it is documented at the program level.
 
 ## The system being watched
 
 Three writers put files into one Regimen data directory:
 
-- **The capture hook** (`regimen-feedback`) runs inside every agent session. It appends event envelopes to the buffer, and on its own failure appends to a capture-error log. It never reads the store and never knows the daemon exists.
-- **The loader daemon** (`regimen-feedback`) follows the buffer in near-real-time, translates each envelope into a canonical event, writes it into the SQLite store, and writes its own operational log. It owns buffer rotation and store maintenance.
-- **The OTLP bridge** (`regimen-otlp-bridge`, optional) reads the store read-only and streams signals to Grafana Cloud. It writes per-stream delivery cursors and its own log.
+- **The capture hook** (the feedback package) runs inside every agent session. It appends event envelopes to the buffer, and on its own failure appends to a capture-error log. It never reads the store and never knows the daemon exists.
+- **The loader daemon** (the feedback package) follows the buffer in near-real-time, translates each envelope into a canonical event, writes it into the SQLite store, and writes its own operational log. It owns buffer rotation and store maintenance.
+- **The OTLP bridge** (the otlp-bridge package, optional) reads the store read-only and streams signals to Grafana Cloud. It writes per-stream delivery cursors and its own log.
 
 The data directory is `$XDG_DATA_HOME/regimen` or `~/.local/share/regimen` on Linux, `~/Library/Application Support/regimen` on macOS, and `%APPDATA%\regimen` on Windows; `REGIMEN_DATA_DIR` overrides all of them. Its full contents:
 
@@ -38,7 +38,7 @@ The data directory is `$XDG_DATA_HOME/regimen` or `~/.local/share/regimen` on Li
 | `bridge/watermarks.json` | bridge | per-stream delivery cursors | atomic rewrite; near-constant size | small |
 | `bridge.log` (+ `.1` to `.3`) | bridge | the operational log | rolled at 1 MB, 3 copies kept | at most 4 files, 4 MB total |
 
-Three recent pieces of work shape this table. PR #17 gave the buffer daemon-owned size-and-age rotation. Issue #18 made the daemon own and size-bound both `daemon.log` and `capture-errors.log`, and cut `daemon.log` down to a readable record instead of a per-event firehose. `regimen-otlp-bridge` #10 did the same for the bridge: it now owns and bounds `bridge.log`, and folds per-tick deliveries into a periodic heartbeat so the file stays readable as well as bounded. The store's WAL behavior is settled in ADR-0005; the daemon and its health surface in ADR-0006.
+Three recent pieces of work shape this table. The buffer gained daemon-owned size-and-age rotation. The daemon was made to own and size-bound both `daemon.log` and `capture-errors.log`, cutting `daemon.log` down to a readable record instead of a per-event firehose. The otlp-bridge package did the same for the bridge: it now owns and bounds `bridge.log`, and folds per-tick deliveries into a periodic heartbeat so the file stays readable as well as bounded. The store's WAL behavior is settled in ADR-0005; the daemon and its health surface in ADR-0006.
 
 ## Health dimensions
 
