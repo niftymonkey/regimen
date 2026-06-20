@@ -1,18 +1,48 @@
 /**
- * The `feedback assess` CLI command (S3 spec section 6). Each test spawns the
- * CLI as a subprocess so argv parsing, env handling, exit codes, and stdout are
- * exercised the way an engineer's shell would. The full-pass test points the
- * adapter at a LOCAL mock Anthropic server via ANTHROPIC_BASE_URL, so the judge
- * round-trip is real wire shape but makes ZERO network calls off the machine.
+ * The `feedback assess` CLI command (S3 spec section 6), driven IN-PROCESS
+ * through the exported `runCli` entry point rather than by spawning a `bun`
+ * subprocess per assertion. The argv parsing, env handling, exit codes, and
+ * stdout/stderr are exercised the way an engineer's shell would, without paying
+ * a bun cold-start per test. The full-pass test points the adapter at a LOCAL
+ * mock Anthropic server via ANTHROPIC_BASE_URL, so the judge round-trip is real
+ * wire shape but makes ZERO network calls off the machine.
+ *
+ * Why in-process: each `Bun.spawn(["bun", CLI, ...])` paid a cold-start that
+ * historically raced this suite's per-test timeout under load. Driving `runCli`
+ * directly removes the flake. Each test runs inside an isolated env (temp
+ * REGIMEN_DATA_DIR, temp CODEX_HOME, pinned ANTHROPIC_*) with stdout/stderr
+ * captured by patching the write streams; `afterEach` restores both the env and
+ * the streams so the in-process driving leaves no global state behind.
  */
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-const CLI = join(import.meta.dir, "..", "src", "cli", "index.ts");
+import { runCli } from "../src/cli/index.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
+
+/**
+ * The per-harness marker env vars the resolver falls back to when REGIMEN_HARNESS
+ * is unset; cleared in beforeEach so the suite is independent of whichever
+ * harness CLI happens to be running it.
+ */
+const HARNESS_MARKERS = [
+  "REGIMEN_HARNESS",
+  "CLAUDECODE",
+  "CODEX_THREAD_ID",
+  "GEMINI_CLI",
+  "COPILOT_CLI",
+];
+
+/** The env keys this suite pins or clears, captured and restored per test. */
+const MANAGED_ENV = [
+  ...HARNESS_MARKERS,
+  "CODEX_HOME",
+  "REGIMEN_DATA_DIR",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_BASE_URL",
+];
 
 interface CliResult {
   exit: number;
@@ -20,29 +50,64 @@ interface CliResult {
   stderr: string;
 }
 
+let savedEnv: Record<string, string | undefined>;
+let savedStdoutWrite: typeof process.stdout.write;
+let savedStderrWrite: typeof process.stderr.write;
+const tempDirs: string[] = [];
+
+beforeEach(() => {
+  savedEnv = {};
+  for (const key of MANAGED_ENV) savedEnv[key] = process.env[key];
+  for (const marker of HARNESS_MARKERS) delete process.env[marker];
+  savedStdoutWrite = process.stdout.write.bind(process.stdout);
+  savedStderrWrite = process.stderr.write.bind(process.stderr);
+});
+
+afterEach(() => {
+  process.stdout.write = savedStdoutWrite;
+  process.stderr.write = savedStderrWrite;
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
 /**
- * Spawn the CLI with explicit env overrides and an optional working dir. Keys
- * listed in `unset` are removed from the inherited environment, so a test can
- * exercise the missing-ANTHROPIC_API_KEY path even when the developer's shell
- * has the key set.
+ * Pin explicit env overrides for one call (keys listed in `unset` are removed
+ * from process.env so a test can exercise the missing-ANTHROPIC_API_KEY path
+ * even when the developer's shell has the key set), then drive runCli
+ * in-process and capture stdout/stderr. argv mimics process.argv, so the command
+ * lands at index 2; runCli's assess path is async, so the result is awaited.
  */
 async function runCliWith(
   args: ReadonlyArray<string>,
   env: Record<string, string>,
-  cwd?: string,
   unset: ReadonlyArray<string> = [],
 ): Promise<CliResult> {
-  const merged: Record<string, string | undefined> = { ...process.env, ...env };
-  for (const key of unset) delete merged[key];
-  const proc = Bun.spawn(["bun", CLI, ...args], {
-    env: merged,
-    ...(cwd === undefined ? {} : { cwd }),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  return { exit: await proc.exited, stdout, stderr };
+  for (const [key, value] of Object.entries(env)) process.env[key] = value;
+  for (const key of unset) delete process.env[key];
+
+  let stdout = "";
+  let stderr = "";
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  const exit = await runCli(["bun", "feedback", ...args]);
+  return { exit, stdout, stderr };
 }
 
 function line(obj: unknown): string {
@@ -130,11 +195,9 @@ function startMockAnthropic(): { baseUrl: string; stop: () => void } {
 function withTemp(
   fn: (paths: { dataDir: string; codexHome: string }) => Promise<void>,
 ): Promise<void> {
-  const dataDir = mkdtempSync(join(tmpdir(), "regimen-assess-cli-"));
-  const codexHome = mkdtempSync(join(tmpdir(), "regimen-assess-home-"));
-  return fn({ dataDir, codexHome }).finally(() => {
-    rmSync(dataDir, { recursive: true, force: true });
-    rmSync(codexHome, { recursive: true, force: true });
+  return fn({
+    dataDir: tempDir("regimen-assess-cli-"),
+    codexHome: tempDir("regimen-assess-home-"),
   });
 }
 
@@ -194,7 +257,6 @@ test("feedback assess --session with no ANTHROPIC_API_KEY exits 1 with a clear e
         REGIMEN_HARNESS: "codex",
         CODEX_HOME: codexHome,
       },
-      undefined,
       ["ANTHROPIC_API_KEY"],
     );
     expect(exit).toBe(1);

@@ -23,10 +23,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isSealedSegment } from "../hooks/event-log.ts";
-import { clearEnabled, setEnabled } from "../src/enabled-flag.ts";
+import { isSealedSegment } from "../../hooks/event-log.ts";
+import { clearEnabled, setEnabled } from "../../src/enabled-flag.ts";
 
-const REPO_ROOT = join(import.meta.dir, "..");
+const REPO_ROOT = join(import.meta.dir, "..", "..");
 const HOOK = join(REPO_ROOT, "hooks", "capture.ts");
 const LOADER = join(REPO_ROOT, "src", "loader", "run.ts");
 

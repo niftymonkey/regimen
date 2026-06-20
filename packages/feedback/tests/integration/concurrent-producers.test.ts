@@ -13,11 +13,11 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { drainBuffer } from "../src/loader/drain.ts";
-import { setEnabled } from "../src/enabled-flag.ts";
-import { openStore } from "../src/store.ts";
+import { drainBuffer } from "../../src/loader/drain.ts";
+import { setEnabled } from "../../src/enabled-flag.ts";
+import { openStore } from "../../src/store.ts";
 
-const HOOK = join(import.meta.dir, "..", "hooks", "capture.ts");
+const HOOK = join(import.meta.dir, "..", "..", "hooks", "capture.ts");
 
 const SESSIONS = [
   "concurrent-s0",

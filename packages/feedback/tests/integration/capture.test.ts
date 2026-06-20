@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setEnabled } from "../src/enabled-flag.ts";
+import { setEnabled } from "../../src/enabled-flag.ts";
 
-const HOOK = join(import.meta.dir, "..", "hooks", "capture.ts");
+const HOOK = join(import.meta.dir, "..", "..", "hooks", "capture.ts");
 
 const claudePreToolUse = {
   hook_event_name: "PreToolUse",

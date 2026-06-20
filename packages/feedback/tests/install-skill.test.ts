@@ -1,39 +1,97 @@
 /**
- * The install-skill planner (pure) and the CLI command that uses it. The
- * planner is exercised directly; the command is spawned against a temp
- * CODEX_HOME so the host's real Codex home is never touched.
+ * The install-skill planner (pure) and the CLI command that uses it. The planner
+ * is exercised directly; the command is driven IN-PROCESS through the exported
+ * `runCli` entry point (rather than spawning a `bun` subprocess per assertion,
+ * which raced this suite's per-test timeout under load) against a temp
+ * CODEX_HOME, so the host's real Codex home is never touched.
+ *
+ * Each CLI test pins CODEX_HOME and REGIMEN_HARNESS in `process.env` (clearing
+ * the ambient harness markers first so the suite is independent of whichever
+ * harness CLI runs it) and captures stdout/stderr by patching the write streams;
+ * `afterEach` restores both the env and the streams.
  */
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { planSkillInstall } from "../src/cli/install/skill.ts";
 import { harnessContract } from "@regimen/shared";
-
-const CLI = join(import.meta.dir, "..", "src", "cli", "index.ts");
+import { runCli } from "../src/cli/index.ts";
 
 const CONTRACT = harnessContract("codex");
 if (CONTRACT === undefined) throw new Error("no codex contract registered");
 
-async function runCli(
+/**
+ * The per-harness marker env vars the resolver falls back to when REGIMEN_HARNESS
+ * is unset; cleared in beforeEach so the suite resolves the pinned codex harness
+ * rather than whichever harness CLI happens to be running it.
+ */
+const HARNESS_MARKERS = [
+  "REGIMEN_HARNESS",
+  "CLAUDECODE",
+  "CODEX_THREAD_ID",
+  "GEMINI_CLI",
+  "COPILOT_CLI",
+];
+
+/** The env keys this suite pins or clears, captured and restored per test. */
+const MANAGED_ENV = [...HARNESS_MARKERS, "CODEX_HOME"];
+
+let savedEnv: Record<string, string | undefined>;
+let savedStdoutWrite: typeof process.stdout.write;
+let savedStderrWrite: typeof process.stderr.write;
+const tempDirs: string[] = [];
+
+beforeEach(() => {
+  savedEnv = {};
+  for (const key of MANAGED_ENV) savedEnv[key] = process.env[key];
+  for (const marker of HARNESS_MARKERS) delete process.env[marker];
+  savedStdoutWrite = process.stdout.write.bind(process.stdout);
+  savedStderrWrite = process.stderr.write.bind(process.stderr);
+});
+
+afterEach(() => {
+  process.stdout.write = savedStdoutWrite;
+  process.stderr.write = savedStderrWrite;
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+/** Pin env overrides for one call, then drive runCli in-process. */
+async function runCliWith(
   args: ReadonlyArray<string>,
   env: Record<string, string>,
 ): Promise<{ exit: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(["bun", CLI, ...args], {
-    env: { ...process.env, ...env },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  return { exit: await proc.exited, stdout, stderr };
+  for (const [key, value] of Object.entries(env)) process.env[key] = value;
+  let stdout = "";
+  let stderr = "";
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  const exit = await runCli(["bun", "feedback", ...args]);
+  return { exit, stdout, stderr };
 }
 
 function withCodexHome(
   fn: (codexHome: string) => Promise<void>,
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "regimen-install-skill-"));
-  return fn(dir).finally(() => rmSync(dir, { recursive: true, force: true }));
+  return fn(tempDir("regimen-install-skill-"));
 }
 
 test("the planner resolves a source and harness-home target for every bundled skill", () => {
@@ -75,7 +133,7 @@ test("the skills target subdirectory is the contract's, not a hardcoded literal"
 
 test("install-skill --dry-run reports both target paths and writes nothing", async () => {
   await withCodexHome(async (codexHome) => {
-    const { exit, stdout } = await runCli(["install-skill", "--dry-run"], {
+    const { exit, stdout } = await runCliWith(["install-skill", "--dry-run"], {
       REGIMEN_HARNESS: "codex",
       CODEX_HOME: codexHome,
     });
@@ -90,7 +148,7 @@ test("install-skill --dry-run reports both target paths and writes nothing", asy
 
 test("install-skill copies both bundled SKILL.md files into CODEX_HOME/skills", async () => {
   await withCodexHome(async (codexHome) => {
-    const { exit, stdout } = await runCli(["install-skill"], {
+    const { exit, stdout } = await runCliWith(["install-skill"], {
       REGIMEN_HARNESS: "codex",
       CODEX_HOME: codexHome,
     });
@@ -115,12 +173,12 @@ test("install-skill copies both bundled SKILL.md files into CODEX_HOME/skills", 
 
 test("install-skill overwrites an existing install (idempotent re-run)", async () => {
   await withCodexHome(async (codexHome) => {
-    const first = await runCli(["install-skill"], {
+    const first = await runCliWith(["install-skill"], {
       REGIMEN_HARNESS: "codex",
       CODEX_HOME: codexHome,
     });
     expect(first.exit).toBe(0);
-    const second = await runCli(["install-skill"], {
+    const second = await runCliWith(["install-skill"], {
       REGIMEN_HARNESS: "codex",
       CODEX_HOME: codexHome,
     });

@@ -1,9 +1,28 @@
 /**
- * Feedback CLI behavior. Each test spawns the CLI as a subprocess so the
- * argv parsing, env handling, exit codes, and stdout are all exercised the
- * same way an engineer's shell would exercise them.
+ * Feedback CLI behavior, driven IN-PROCESS through the exported `runCli` entry
+ * point rather than by spawning a `bun` subprocess per assertion. The argv
+ * parsing, env handling, exit codes, and stdout/stderr are all exercised the
+ * same way an engineer's shell would exercise them, but without paying a bun
+ * cold-start per test.
+ *
+ * Why in-process: each `Bun.spawn(["bun", CLI, ...])` paid a cold-start that
+ * historically raced this suite's per-test timeout under the live capture
+ * daemon's CPU load (a flake that hit repeatedly). Driving `runCli` directly
+ * drops the per-test body to a few milliseconds and removes the flake. Each test
+ * runs inside an isolated env (temp HOME, temp REGIMEN_DATA_DIR, temp
+ * CODEX_HOME) pinned in `process.env`, with stdout/stderr captured by patching
+ * `process.stdout.write` / `process.stderr.write`; `afterEach` restores both the
+ * env and the write streams so the in-process driving leaves no global state
+ * behind.
+ *
+ * The lifecycle commands resolve "is a service installed here" from HOME (the
+ * systemd unit and the launchd plist live under it). A throwaway HOME with no
+ * service installed keeps every test off the maintainer's real
+ * `regimen-feedback.service`; the supervised branch is exercised only through an
+ * explicit seeded service file under that HOME plus `--dry-run`, so the real
+ * supervisor is never invoked.
  */
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -18,8 +37,30 @@ import { writeSessionStamp } from "../src/codex/session-stamp.ts";
 import { traceIdFor } from "@regimen/shared";
 import { isEnabled, setEnabled } from "../src/enabled-flag.ts";
 import { openStore } from "../src/store.ts";
+import { runCli } from "../src/cli/index.ts";
 
-const CLI = join(import.meta.dir, "..", "src", "cli", "index.ts");
+/**
+ * The per-harness marker env vars the resolver falls back to when REGIMEN_HARNESS
+ * is unset. The live machine running this suite can itself be inside one of these
+ * harnesses (e.g. CLAUDECODE=1), so the fail-closed tests clear all of them (and
+ * REGIMEN_HARNESS) to be hermetic rather than resolving the ambient harness.
+ */
+const HARNESS_MARKERS = [
+  "REGIMEN_HARNESS",
+  "CLAUDECODE",
+  "CODEX_THREAD_ID",
+  "GEMINI_CLI",
+  "COPILOT_CLI",
+];
+
+/** The env keys this suite pins or clears, captured and restored per test. */
+const MANAGED_ENV = [
+  ...HARNESS_MARKERS,
+  "HOME",
+  "USERPROFILE",
+  "CODEX_HOME",
+  "REGIMEN_DATA_DIR",
+];
 
 interface CliResult {
   exit: number;
@@ -27,48 +68,88 @@ interface CliResult {
   stderr: string;
 }
 
+let savedEnv: Record<string, string | undefined>;
+let savedStdoutWrite: typeof process.stdout.write;
+let savedStderrWrite: typeof process.stderr.write;
+const tempDirs: string[] = [];
+
+beforeEach(() => {
+  savedEnv = {};
+  for (const key of MANAGED_ENV) savedEnv[key] = process.env[key];
+  // Clear every ambient harness marker so the suite is independent of whichever
+  // harness CLI happens to be running it; each test pins what it needs.
+  for (const marker of HARNESS_MARKERS) delete process.env[marker];
+  savedStdoutWrite = process.stdout.write.bind(process.stdout);
+  savedStderrWrite = process.stderr.write.bind(process.stderr);
+});
+
+afterEach(() => {
+  process.stdout.write = savedStdoutWrite;
+  process.stderr.write = savedStderrWrite;
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A throwaway temp directory, auto-removed in `afterEach`. */
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+/**
+ * Drive runCli for a single command in-process, capturing stdout and stderr.
+ * argv mimics process.argv, so the command lands at index 2. runCli may return a
+ * number or a Promise<number>; awaiting a number is a no-op, so this handles
+ * both the synchronous lifecycle path and the async assess path uniformly.
+ */
+async function invoke(...args: string[]): Promise<CliResult> {
+  let stdout = "";
+  let stderr = "";
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  const exit = await runCli(["bun", "feedback", ...args]);
+  return { exit, stdout, stderr };
+}
+
 /**
  * Run the CLI against a data dir, pinning HOME to an isolated temp directory.
- *
- * The lifecycle commands resolve "is a service installed here" from HOME (the
- * systemd unit and the launchd plist live under it). Inheriting the real HOME
- * would let a test discover the maintainer's real `regimen-feedback.service`
- * and drive its supervisor, so every CLI test gets a throwaway HOME with no
- * service installed; the supervised branch is exercised only through explicit
- * fake markers under that HOME plus `--dry-run`.
+ * Inheriting the real HOME would let a test discover the maintainer's real
+ * `regimen-feedback.service` and drive its supervisor, so every CLI test gets a
+ * throwaway HOME with no service installed.
  */
-async function runCli(
+async function runDir(
   args: ReadonlyArray<string>,
   dataDir: string,
 ): Promise<CliResult> {
-  const home = mkdtempSync(join(tmpdir(), "regimen-cli-home-"));
-  try {
-    return await runCliWith(args, { REGIMEN_DATA_DIR: dataDir, HOME: home });
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
+  return runWith(args, {
+    REGIMEN_DATA_DIR: dataDir,
+    HOME: tempDir("regimen-cli-home-"),
+  });
 }
 
-/** Spawn the CLI with explicit env overrides and an optional working dir. */
-async function runCliWith(
+/** Pin explicit env overrides for one call, then drive runCli in-process. */
+async function runWith(
   args: ReadonlyArray<string>,
   env: Record<string, string>,
-  cwd?: string,
 ): Promise<CliResult> {
-  const proc = Bun.spawn(["bun", CLI, ...args], {
-    env: { ...process.env, ...env },
-    ...(cwd === undefined ? {} : { cwd }),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  return { exit: await proc.exited, stdout, stderr };
+  for (const [key, value] of Object.entries(env)) process.env[key] = value;
+  return invoke(...args);
 }
 
 function withDataDir(fn: (dataDir: string) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "regimen-cli-"));
-  return fn(dir).finally(() => rmSync(dir, { recursive: true, force: true }));
+  return fn(tempDir("regimen-cli-"));
 }
 
 /**
@@ -85,10 +166,10 @@ function withDataDirAndHome(
     seedService: () => void;
   }) => Promise<void>,
 ): Promise<void> {
-  const dataDir = mkdtempSync(join(tmpdir(), "regimen-cli-"));
-  const home = mkdtempSync(join(tmpdir(), "regimen-cli-home-"));
+  const dataDir = tempDir("regimen-cli-");
+  const home = tempDir("regimen-cli-home-");
   const run = (args: ReadonlyArray<string>): Promise<CliResult> =>
-    runCliWith(args, { REGIMEN_DATA_DIR: dataDir, HOME: home });
+    runWith(args, { REGIMEN_DATA_DIR: dataDir, HOME: home });
   const seedService = (): void => {
     if (process.platform === "linux") {
       const unitDir = join(home, ".config", "systemd", "user");
@@ -108,15 +189,12 @@ function withDataDirAndHome(
     // win32: the task XML lives under the data dir, not HOME.
     writeFileSync(join(dataDir, "regimen-feedback.task.xml"), "<Task/>\n");
   };
-  return fn({ dataDir, home, run, seedService }).finally(() => {
-    rmSync(dataDir, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
-  });
+  return fn({ dataDir, home, run, seedService });
 }
 
 test("feedback start creates the enabled flag and reports success", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit, stdout } = await runCli(["start"], dataDir);
+    const { exit, stdout } = await runDir(["start"], dataDir);
     expect(exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(true);
     expect(stdout).toContain("enabled");
@@ -125,7 +203,7 @@ test("feedback start creates the enabled flag and reports success", async () => 
 
 test("feedback start without an installed service says no daemon was launched and how to run one", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit, stdout } = await runCli(["start"], dataDir);
+    const { exit, stdout } = await runDir(["start"], dataDir);
     expect(exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(true);
     // Honest: nothing in the output may imply a daemon is now running.
@@ -137,8 +215,8 @@ test("feedback start without an installed service says no daemon was launched an
 
 test("feedback start is idempotent and reports the already-enabled state", async () => {
   await withDataDir(async (dataDir) => {
-    await runCli(["start"], dataDir);
-    const second = await runCli(["start"], dataDir);
+    await runDir(["start"], dataDir);
+    const second = await runDir(["start"], dataDir);
     expect(second.exit).toBe(0);
     expect(second.stdout).toContain("already enabled");
     expect(isEnabled(dataDir)).toBe(true);
@@ -147,9 +225,9 @@ test("feedback start is idempotent and reports the already-enabled state", async
 
 test("feedback stop removes the enabled flag", async () => {
   await withDataDir(async (dataDir) => {
-    await runCli(["start"], dataDir);
+    await runDir(["start"], dataDir);
     expect(isEnabled(dataDir)).toBe(true);
-    const { exit, stdout } = await runCli(["stop"], dataDir);
+    const { exit, stdout } = await runDir(["stop"], dataDir);
     expect(exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(false);
     expect(stdout).toContain("disabled");
@@ -158,7 +236,7 @@ test("feedback stop removes the enabled flag", async () => {
 
 test("feedback stop is idempotent and reports the already-disabled state", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit, stdout } = await runCli(["stop"], dataDir);
+    const { exit, stdout } = await runDir(["stop"], dataDir);
     expect(exit).toBe(0);
     expect(stdout).toContain("already disabled");
   });
@@ -166,8 +244,8 @@ test("feedback stop is idempotent and reports the already-disabled state", async
 
 test("feedback stop without an installed service explains the manual daemon self-exits on the poll cadence", async () => {
   await withDataDir(async (dataDir) => {
-    await runCli(["start"], dataDir);
-    const { exit, stdout } = await runCli(["stop"], dataDir);
+    await runDir(["start"], dataDir);
+    const { exit, stdout } = await runDir(["stop"], dataDir);
     expect(exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(false);
     expect(stdout).toContain("disabled");
@@ -177,11 +255,11 @@ test("feedback stop without an installed service explains the manual daemon self
 
 test("feedback restart leaves the flag enabled regardless of starting state", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit } = await runCli(["restart"], dataDir);
+    const { exit } = await runDir(["restart"], dataDir);
     expect(exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(true);
 
-    const second = await runCli(["restart"], dataDir);
+    const second = await runDir(["restart"], dataDir);
     expect(second.exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(true);
   });
@@ -195,7 +273,7 @@ test("feedback restart fails loudly when an unsupervised daemon is alive instead
     // the CLI printed success. Restart cannot relaunch a manual daemon, so it
     // must fail loudly rather than report a restart that did not happen.
     writeFileSync(join(dataDir, "daemon.pid"), `${process.pid}\n`);
-    const { exit, stderr, stdout } = await runCli(["restart"], dataDir);
+    const { exit, stderr, stdout } = await runDir(["restart"], dataDir);
     expect(exit).not.toBe(0);
     expect(stderr).toContain("cannot be restarted");
     expect(stderr).toContain(String(process.pid));
@@ -275,7 +353,7 @@ test("feedback restart --dry-run previews the supervisor restart command and lea
 
 test("feedback start --dry-run with no service installed previews without enabling capture", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit, stdout } = await runCli(["start", "--dry-run"], dataDir);
+    const { exit, stdout } = await runDir(["start", "--dry-run"], dataDir);
     expect(exit).toBe(0);
     // The preview must not flip the capture gate (ADR-0006), and the output
     // must not claim an enable that did not happen.
@@ -288,7 +366,7 @@ test("feedback start --dry-run with no service installed previews without enabli
 test("feedback stop --dry-run with no service installed previews without stopping capture", async () => {
   await withDataDir(async (dataDir) => {
     setEnabled(dataDir);
-    const { exit, stdout } = await runCli(["stop", "--dry-run"], dataDir);
+    const { exit, stdout } = await runDir(["stop", "--dry-run"], dataDir);
     expect(exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(true);
     expect(stdout).toContain("would disable feedback");
@@ -299,7 +377,7 @@ test("feedback stop --dry-run with no service installed previews without stoppin
 test("feedback restart --dry-run with no service installed reports an already-enabled flag rather than claiming it would enable", async () => {
   await withDataDir(async (dataDir) => {
     setEnabled(dataDir);
-    const { exit, stdout } = await runCli(["restart", "--dry-run"], dataDir);
+    const { exit, stdout } = await runDir(["restart", "--dry-run"], dataDir);
     expect(exit).toBe(0);
     expect(isEnabled(dataDir)).toBe(true);
     expect(stdout).toContain("already enabled");
@@ -309,7 +387,7 @@ test("feedback restart --dry-run with no service installed reports an already-en
 
 test("an unknown command exits 1 with an error on stderr", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit, stderr } = await runCli(["bogus"], dataDir);
+    const { exit, stderr } = await runDir(["bogus"], dataDir);
     expect(exit).toBe(1);
     expect(stderr).toContain("unknown command");
   });
@@ -317,7 +395,7 @@ test("an unknown command exits 1 with an error on stderr", async () => {
 
 test("feedback status reports disabled when the flag is absent and no daemon is running", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit, stdout } = await runCli(["status"], dataDir);
+    const { exit, stdout } = await runDir(["status"], dataDir);
     expect(exit).toBe(0);
     expect(stdout).toContain("feedback: disabled");
     expect(stdout).toContain("daemon: not running");
@@ -344,7 +422,7 @@ test("feedback purge discards the buffer segments but keeps the store and logs",
     store.close();
     writeFileSync(join(dataDir, "daemon.log"), "started\n");
 
-    const { exit, stdout } = await runCli(["purge"], dataDir);
+    const { exit, stdout } = await runDir(["purge"], dataDir);
 
     expect(exit).toBe(0);
     expect(stdout).toContain("buffer purged");
@@ -364,7 +442,7 @@ test("feedback purge --all also drops the SQLite store and the daemon logs", asy
     writeFileSync(join(dataDir, "capture-errors.log"), "boom\n");
     expect(existsSync(join(dataDir, "feedback.db"))).toBe(true);
 
-    const { exit, stdout } = await runCli(["purge", "--all"], dataDir);
+    const { exit, stdout } = await runDir(["purge", "--all"], dataDir);
 
     expect(exit).toBe(0);
     expect(stdout).toContain("store purged");
@@ -382,7 +460,7 @@ test("feedback purge refuses to run while the daemon is alive", async () => {
     const bufferDir = seedBuffer(dataDir);
     writeFileSync(join(dataDir, "daemon.pid"), `${process.pid}\n`);
 
-    const { exit, stderr } = await runCli(["purge"], dataDir);
+    const { exit, stderr } = await runDir(["purge"], dataDir);
 
     expect(exit).toBe(1);
     expect(stderr).toContain("daemon is running");
@@ -399,7 +477,7 @@ test("feedback purge --force purges despite a running daemon", async () => {
     const bufferDir = seedBuffer(dataDir);
     writeFileSync(join(dataDir, "daemon.pid"), `${process.pid}\n`);
 
-    const { exit, stdout } = await runCli(["purge", "--force"], dataDir);
+    const { exit, stdout } = await runDir(["purge", "--force"], dataDir);
 
     expect(exit).toBe(0);
     expect(stdout).toContain("buffer purged");
@@ -423,7 +501,7 @@ test("feedback evidence prints the digest JSON for a seeded session", async () =
     });
     store.close();
 
-    const { exit, stdout } = await runCli(
+    const { exit, stdout } = await runDir(
       ["evidence", "--session", "cli-evidence"],
       dataDir,
     );
@@ -438,7 +516,7 @@ test("feedback evidence prints the digest JSON for a seeded session", async () =
 
 test("feedback evidence with no store file exits 0 with a known:false digest", async () => {
   await withDataDir(async (dataDir) => {
-    const { exit, stdout } = await runCli(
+    const { exit, stdout } = await runDir(
       ["evidence", "--session", "ghost"],
       dataDir,
     );
@@ -451,135 +529,97 @@ test("feedback evidence with no store file exits 0 with a known:false digest", a
 
 test("feedback evidence resolves the current session for the env-detected harness and prints its digest", async () => {
   await withDataDir(async (dataDir) => {
-    const cwd = mkdtempSync(join(tmpdir(), "regimen-codex-cwd-"));
-    const codexHome = mkdtempSync(join(tmpdir(), "regimen-codex-home-"));
-    try {
-      writeSessionStamp({
-        dataDir,
-        harness: "codex",
-        cwd,
-        sessionId: "resolved-sess",
-      });
-      const store = openStore(join(dataDir, "feedback.db"));
-      store.insertEvent({
-        schema_version: 1,
-        timestamp: "2026-06-03T12:00:00.000Z",
-        session_id: "resolved-sess",
-        harness: "codex",
-        event_type: "session.start",
-        trace_id: traceIdFor("resolved-sess"),
-        span_phase: "start",
-        span_name: "session",
-        attributes: {},
-      });
-      store.close();
+    const codexHome = tempDir("regimen-codex-home-");
+    // The codex resolver keys the stamp by a hash of the cwd it is given; the
+    // command resolves the current session from `process.cwd()`, so stamping
+    // the live process cwd is what makes the producer and consumer agree
+    // without forking the process working directory.
+    const cwd = process.cwd();
+    writeSessionStamp({
+      dataDir,
+      harness: "codex",
+      cwd,
+      sessionId: "resolved-sess",
+    });
+    const store = openStore(join(dataDir, "feedback.db"));
+    store.insertEvent({
+      schema_version: 1,
+      timestamp: "2026-06-03T12:00:00.000Z",
+      session_id: "resolved-sess",
+      harness: "codex",
+      event_type: "session.start",
+      trace_id: traceIdFor("resolved-sess"),
+      span_phase: "start",
+      span_name: "session",
+      attributes: {},
+    });
+    store.close();
 
-      const { exit, stdout } = await runCliWith(
-        ["evidence"],
-        {
-          REGIMEN_DATA_DIR: dataDir,
-          REGIMEN_HARNESS: "codex",
-          CODEX_HOME: codexHome,
-        },
-        cwd,
-      );
+    const { exit, stdout } = await runWith(["evidence"], {
+      REGIMEN_DATA_DIR: dataDir,
+      REGIMEN_HARNESS: "codex",
+      CODEX_HOME: codexHome,
+    });
 
-      expect(exit).toBe(0);
-      const digest = JSON.parse(stdout);
-      expect(digest.known).toBe(true);
-      expect(digest.sessionId).toBe("resolved-sess");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(codexHome, { recursive: true, force: true });
-    }
+    expect(exit).toBe(0);
+    const digest = JSON.parse(stdout);
+    expect(digest.known).toBe(true);
+    expect(digest.sessionId).toBe("resolved-sess");
   });
 });
 
 test("feedback evidence with nothing to resolve prints an unknown digest", async () => {
   await withDataDir(async (dataDir) => {
-    const cwd = mkdtempSync(join(tmpdir(), "regimen-codex-cwd-"));
-    const codexHome = mkdtempSync(join(tmpdir(), "regimen-codex-home-"));
-    try {
-      const { exit, stdout } = await runCliWith(
-        ["evidence"],
-        {
-          REGIMEN_DATA_DIR: dataDir,
-          REGIMEN_HARNESS: "codex",
-          CODEX_HOME: codexHome,
-        },
-        cwd,
-      );
+    const codexHome = tempDir("regimen-codex-home-");
+    const { exit, stdout } = await runWith(["evidence"], {
+      REGIMEN_DATA_DIR: dataDir,
+      REGIMEN_HARNESS: "codex",
+      CODEX_HOME: codexHome,
+    });
 
-      expect(exit).toBe(0);
-      const digest = JSON.parse(stdout);
-      expect(digest.known).toBe(false);
-      expect(digest.note).toContain("resolve");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(codexHome, { recursive: true, force: true });
-    }
+    expect(exit).toBe(0);
+    const digest = JSON.parse(stdout);
+    expect(digest.known).toBe(false);
+    expect(digest.note).toContain("resolve");
   });
 });
 
 test("feedback evidence fails closed when REGIMEN_HARNESS names an unregistered harness", async () => {
   await withDataDir(async (dataDir) => {
-    const cwd = mkdtempSync(join(tmpdir(), "regimen-evidence-cwd-"));
-    try {
-      const { exit, stdout, stderr } = await runCliWith(
-        ["evidence"],
-        { REGIMEN_DATA_DIR: dataDir, REGIMEN_HARNESS: "gemini" },
-        cwd,
-      );
-      expect(exit).not.toBe(0);
-      expect(stderr).toContain("unsupported harness");
-      expect(stdout).toBe("");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
+    const { exit, stdout, stderr } = await runWith(["evidence"], {
+      REGIMEN_DATA_DIR: dataDir,
+      REGIMEN_HARNESS: "gemini",
+    });
+    expect(exit).not.toBe(0);
+    expect(stderr).toContain("unsupported harness");
+    expect(stdout).toBe("");
   });
 });
 
 test("feedback evidence fails fast when no home and no CODEX_HOME are set", async () => {
   await withDataDir(async (dataDir) => {
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) env[key] = value;
-    }
-    delete env.HOME;
-    delete env.USERPROFILE;
-    delete env.CODEX_HOME;
-    env.REGIMEN_DATA_DIR = dataDir;
-    env.REGIMEN_HARNESS = "codex";
-    const proc = Bun.spawn(["bun", CLI, "evidence"], {
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
+    // Clear HOME/USERPROFILE and CODEX_HOME so the command has no config home to
+    // resolve; afterEach restores them. REGIMEN_HARNESS is pinned to codex.
+    delete process.env.HOME;
+    delete process.env.USERPROFILE;
+    delete process.env.CODEX_HOME;
+    const { exit, stderr } = await runWith(["evidence"], {
+      REGIMEN_DATA_DIR: dataDir,
+      REGIMEN_HARNESS: "codex",
     });
-    const stderr = await new Response(proc.stderr).text();
-    expect(await proc.exited).toBe(1);
+    expect(exit).toBe(1);
     expect(stderr).toContain("HOME");
   });
 });
 
 test("feedback evidence fails closed when no harness can be resolved", async () => {
   await withDataDir(async (dataDir) => {
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) env[key] = value;
-    }
-    delete env.CLAUDECODE;
-    delete env.CODEX_THREAD_ID;
-    delete env.GEMINI_CLI;
-    delete env.COPILOT_CLI;
-    delete env.REGIMEN_HARNESS;
-    env.REGIMEN_DATA_DIR = dataDir;
-    const proc = Bun.spawn(["bun", CLI, "evidence"], {
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
+    // Every ambient harness marker is already cleared in beforeEach; pin only
+    // the data dir so the resolver has nothing to go on and must refuse.
+    const { exit, stderr } = await runWith(["evidence"], {
+      REGIMEN_DATA_DIR: dataDir,
     });
-    const stderr = await new Response(proc.stderr).text();
-    expect(await proc.exited).toBe(1);
+    expect(exit).toBe(1);
     expect(stderr).toContain("could not determine the harness");
   });
 });
@@ -604,7 +644,7 @@ test("feedback status reports the last event timestamp and the buffer backlog", 
     writeFileSync(join(dataDir, "buffer", "current.jsonl"), "x".repeat(1024));
 
     setEnabled(dataDir);
-    const { exit, stdout } = await runCli(["status"], dataDir);
+    const { exit, stdout } = await runDir(["status"], dataDir);
     expect(exit).toBe(0);
     expect(stdout).toContain("feedback: enabled");
     expect(stdout).toContain("2026-05-21T12:00:00.000Z");

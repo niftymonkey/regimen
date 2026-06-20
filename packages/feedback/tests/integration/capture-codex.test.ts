@@ -2,10 +2,10 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readSessionStamp } from "../src/codex/session-stamp.ts";
-import { setEnabled } from "../src/enabled-flag.ts";
+import { readSessionStamp } from "../../src/codex/session-stamp.ts";
+import { setEnabled } from "../../src/enabled-flag.ts";
 
-const HOOK = join(import.meta.dir, "..", "hooks", "capture-codex.ts");
+const HOOK = join(import.meta.dir, "..", "..", "hooks", "capture-codex.ts");
 
 const codexSessionStart = {
   hook_event_name: "SessionStart",
