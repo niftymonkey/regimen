@@ -28,9 +28,15 @@ content=$(printf '%s' "$input" | jq -r '
 ')
 
 if printf '%s' "$content" | LC_ALL=C grep -q $'\xe2\x80\x94'; then
-  command -v bun >/dev/null 2>&1 &&
-    printf '%s' "$input" | bun "$EMITTER" --from-hook \
-      --gate "$GATE_ID" --harness "${REGIMEN_HARNESS:-claude}" --reason "$REASON"
+  # Block unconditionally; record the denial only when the harness is known.
+  # The harness is the value the installer baked into REGIMEN_HARNESS; with none
+  # set the gate still blocks but skips the emit rather than stamping a wrong
+  # harness, matching the rm-rf gate's no-default behavior.
+  if [ -n "${REGIMEN_HARNESS:-}" ]; then
+    command -v bun >/dev/null 2>&1 &&
+      printf '%s' "$input" | bun "$EMITTER" --from-hook \
+        --gate "$GATE_ID" --harness "$REGIMEN_HARNESS" --reason "$REASON"
+  fi
   printf '%s\n' "Blocked: $REASON" >&2
   exit 2
 fi

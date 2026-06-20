@@ -32,9 +32,15 @@ fi
 
 # An inline message body: <<EOF, <<'EOF', <<"EOF", <<-EOF, any tag name.
 if printf '%s' "$cmd" | grep -qE "<<-?[[:space:]]*['\"]?[A-Za-z_][A-Za-z0-9_]*"; then
-  command -v bun >/dev/null 2>&1 &&
-    printf '%s' "$input" | bun "$EMITTER" --from-hook \
-      --gate "$GATE_ID" --harness "${REGIMEN_HARNESS:-claude}" --reason "$REASON"
+  # Block unconditionally; record the denial only when the harness is known.
+  # The harness is the value the installer baked into REGIMEN_HARNESS; with none
+  # set the gate still blocks but skips the emit rather than stamping a wrong
+  # harness, matching the rm-rf gate's no-default behavior.
+  if [ -n "${REGIMEN_HARNESS:-}" ]; then
+    command -v bun >/dev/null 2>&1 &&
+      printf '%s' "$input" | bun "$EMITTER" --from-hook \
+        --gate "$GATE_ID" --harness "$REGIMEN_HARNESS" --reason "$REASON"
+  fi
   printf '%s\n' \
     "BLOCKED: $REASON" \
     "  git commit      -> git commit -m \"single-line subject\"" \

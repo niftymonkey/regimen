@@ -23,6 +23,18 @@ const INLINE_MSG = join(
 const SESSION = "claude-test-gate-5b2c";
 const hasJq = Bun.which("jq") !== null;
 
+/**
+ * The process env with REGIMEN_HARNESS removed, so a gate spawned with it sees
+ * the variable truly unset rather than present-but-overridden. Deleting the key
+ * is unambiguous across runtimes; setting it to `undefined` relies on the
+ * spawner omitting undefined-valued keys.
+ */
+function envWithoutHarness(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.REGIMEN_HARNESS;
+  return env;
+}
+
 /** The em dash (U+2014), built from its code point so this file holds none. */
 const EM_DASH_CHAR = String.fromCharCode(0x2014);
 
@@ -238,6 +250,32 @@ test("the em-dash gate denies an em-dash edit (and records it as codex when jq i
   }
 });
 
+test("the em-dash gate blocks with no harness set, but records nothing (no claude default)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
+  try {
+    const payload = {
+      session_id: SESSION,
+      tool_name: "Edit",
+      tool_use_id: "toolu_emdash_noharness",
+      tool_input: { new_string: `a long pause ${EM_DASH_CHAR} then more` },
+    };
+    const proc = Bun.spawn(["bash", EM_DASH], {
+      stdin: new TextEncoder().encode(JSON.stringify(payload)),
+      env: { ...envWithoutHarness(), REGIMEN_DATA_DIR: dir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stderr = await new Response(proc.stderr).text();
+    // Blocks unconditionally...
+    expect(await proc.exited).toBe(2);
+    expect(stderr).toContain("Blocked");
+    // ...but stamps no telemetry with a defaulted harness when none is set.
+    expect(readEvents(dir)).toEqual([]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the em-dash gate allows content with no em dash", async () => {
   const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
   try {
@@ -290,6 +328,34 @@ test("the inline-message gate denies a heredoc git commit (and records it when j
         tool_call_id: "toolu_heredoc",
       });
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the inline-message gate blocks with no harness set, but records nothing (no claude default)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
+  try {
+    const payload = {
+      session_id: SESSION,
+      tool_name: "Bash",
+      tool_use_id: "toolu_heredoc_noharness",
+      tool_input: {
+        command: "git commit -F - <<EOF\nmy subject\n\nbody\nEOF",
+      },
+    };
+    const proc = Bun.spawn(["bash", INLINE_MSG], {
+      stdin: new TextEncoder().encode(JSON.stringify(payload)),
+      env: { ...envWithoutHarness(), REGIMEN_DATA_DIR: dir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stderr = await new Response(proc.stderr).text();
+    // Blocks unconditionally...
+    expect(await proc.exited).toBe(2);
+    expect(stderr).toContain("BLOCKED");
+    // ...but stamps no telemetry with a defaulted harness when none is set.
+    expect(readEvents(dir)).toEqual([]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
