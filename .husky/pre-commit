@@ -1,2 +1,22 @@
+set -e
+
 bunx lint-staged
-bun run check
+
+# Run a workspace package's full `check` only when that package has staged
+# changes, each in isolation, so a single-package commit stays fast and
+# concurrent commits do not contend on every suite at once. A change under
+# packages/shared checks all packages, since every instrument can depend on it.
+# ponytail: "shared -> check all" is a coarse blast radius; make it
+# dependency-graph aware only if the full run becomes a real bottleneck.
+changed=$(git diff --cached --name-only --diff-filter=ACMR \
+  | sed -n 's#^packages/\([^/]*\)/.*#\1#p' \
+  | sort -u)
+
+if echo "$changed" | grep -qx shared; then
+  changed="cli enforcement feedback otlp-bridge shared"
+fi
+
+for pkg in $changed; do
+  echo "check: @regimen/$pkg"
+  (cd "packages/$pkg" && bun run check)
+done
