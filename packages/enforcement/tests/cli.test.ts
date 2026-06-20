@@ -59,10 +59,23 @@ interface Leaf {
   _regimen?: { v: number; role: string; id?: string };
 }
 
-function readHooks(codexHome: string): {
+interface ParsedHooksFile {
   hooks?: Record<string, Array<{ hooks: Leaf[] }>>;
-} {
+  [key: string]: unknown;
+}
+
+function readHooks(codexHome: string): ParsedHooksFile {
   return JSON.parse(readFileSync(join(codexHome, "hooks.json"), "utf8"));
+}
+
+function readHooksFileNamed(home: string, fileName: string): ParsedHooksFile {
+  return JSON.parse(readFileSync(join(home, fileName), "utf8"));
+}
+
+function gateLeaves(parsed: ParsedHooksFile): Leaf[] {
+  return (parsed.hooks?.PreToolUse ?? [])
+    .flatMap((g) => g.hooks)
+    .filter((l) => l._regimen?.role === "gate");
 }
 
 test("wire-gates writes hooks.json with all three gates on PreToolUse by default", async () => {
@@ -130,14 +143,69 @@ test("wire-gates detects claude from its CLI marker and bakes it into every gate
     });
     expect(exit).toBe(0);
 
-    const commands = (readHooks(claudeHome).hooks?.PreToolUse ?? [])
-      .flatMap((g) => g.hooks)
-      .filter((l) => l._regimen?.role === "gate")
-      .map((l) => l.command);
+    // Claude's hooks live in settings.json per the shared contract, not hooks.json.
+    const commands = gateLeaves(
+      readHooksFileNamed(claudeHome, "settings.json"),
+    ).map((l) => l.command);
     expect(commands.length).toBeGreaterThan(0);
     for (const command of commands) {
       expect(command).toContain("REGIMEN_HARNESS=claude");
     }
+  });
+});
+
+test("wire-gates writes Claude's gates to settings.json, preserving co-hosted config and capture/user leaves", async () => {
+  await withCodexHome(async (claudeHome) => {
+    // Claude's settings.json co-hosts other config (permissions, env) and may
+    // already carry Feedback's capture leaf and a user's own hook. An
+    // Enforcement gate install must merge into that file, not overwrite it.
+    const existing = {
+      permissions: { allow: ["Read", "Bash(git status *)"] },
+      env: { FOO: "bar" },
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command: "bun /home/me/capture.ts",
+                _regimen: { v: 1, role: "capture" },
+              },
+              { type: "command", command: "bun /home/me/my-gate.ts" },
+            ],
+          },
+        ],
+      },
+    };
+    writeFileSync(join(claudeHome, "settings.json"), JSON.stringify(existing));
+
+    const { exit } = await runCli(["wire-gates"], {
+      CLAUDE_CONFIG_DIR: claudeHome,
+      REGIMEN_HARNESS: "claude",
+    });
+    expect(exit).toBe(0);
+
+    // The gates landed in settings.json (the contract's per-harness file), not
+    // a stray hooks.json.
+    expect(existsSync(join(claudeHome, "hooks.json"))).toBe(false);
+    const parsed = readHooksFileNamed(claudeHome, "settings.json");
+
+    // Co-hosted top-level config survives verbatim.
+    expect(parsed.permissions).toEqual({
+      allow: ["Read", "Bash(git status *)"],
+    });
+    expect(parsed.env).toEqual({ FOO: "bar" });
+
+    // Enforcement's gates are present, baked for claude.
+    const gateIds = gateLeaves(parsed).map((l) => l._regimen?.id);
+    expect(gateIds).toEqual(["rm-rf", "em-dash", "inline-message"]);
+
+    // The capture leaf and the user's own hook both survive.
+    const allLeaves = (parsed.hooks?.PreToolUse ?? []).flatMap((g) => g.hooks);
+    expect(allLeaves.some((l) => l._regimen?.role === "capture")).toBe(true);
+    expect(allLeaves.some((l) => l.command === "bun /home/me/my-gate.ts")).toBe(
+      true,
+    );
   });
 });
 
@@ -225,6 +293,54 @@ test("unwire-gates removes Enforcement's gates and keeps the user's hooks", asyn
     expect(readHooks(codexHome).hooks?.PreToolUse).toEqual([
       { hooks: [{ type: "command", command: "bun /home/me/my-gate.ts" }] },
     ]);
+  });
+});
+
+test("unwire-gates removes only Claude's gate leaves from settings.json, keeping co-hosted config and capture/user leaves", async () => {
+  await withCodexHome(async (claudeHome) => {
+    // Start from a settings.json that co-hosts config plus a capture leaf and a
+    // user hook, then add Enforcement's gates, then remove them.
+    const existing = {
+      permissions: { allow: ["Read"] },
+      env: { FOO: "bar" },
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command: "bun /home/me/capture.ts",
+                _regimen: { v: 1, role: "capture" },
+              },
+              { type: "command", command: "bun /home/me/my-gate.ts" },
+            ],
+          },
+        ],
+      },
+    };
+    writeFileSync(join(claudeHome, "settings.json"), JSON.stringify(existing));
+    const claudeEnv = {
+      CLAUDE_CONFIG_DIR: claudeHome,
+      REGIMEN_HARNESS: "claude",
+    };
+    await runCli(["wire-gates"], claudeEnv);
+
+    const { exit, stdout } = await runCli(["unwire-gates"], claudeEnv);
+    expect(exit).toBe(0);
+    expect(stdout).toContain("removed gate rm-rf on PreToolUse");
+
+    const parsed = readHooksFileNamed(claudeHome, "settings.json");
+    // Every Enforcement gate leaf is gone.
+    expect(gateLeaves(parsed)).toHaveLength(0);
+    // Co-hosted top-level config survives.
+    expect(parsed.permissions).toEqual({ allow: ["Read"] });
+    expect(parsed.env).toEqual({ FOO: "bar" });
+    // The capture leaf and the user's own hook survive.
+    const allLeaves = (parsed.hooks?.PreToolUse ?? []).flatMap((g) => g.hooks);
+    expect(allLeaves.some((l) => l._regimen?.role === "capture")).toBe(true);
+    expect(allLeaves.some((l) => l.command === "bun /home/me/my-gate.ts")).toBe(
+      true,
+    );
   });
 });
 

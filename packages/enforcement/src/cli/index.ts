@@ -82,21 +82,23 @@ function parseGates(argv: ReadonlyArray<string>): GateId[] {
   return explicit.length > 0 ? (explicit as GateId[]) : [...DEFAULT_GATES];
 }
 
-/** The harness and its config home a command targets, or null when it cannot be resolved. */
+/** The harness and the resolved hooks file a command targets, or null when it cannot be resolved. */
 interface Target {
   readonly harness: Harness;
-  readonly home: string;
+  /** Absolute path to the harness's hooks file (the contract's per-harness relativePath under the config home). */
+  readonly hooksPath: string;
 }
 
 /**
  * Resolve the harness with the shared per-invocation policy (explicit
  * REGIMEN_HARNESS, else the CLI-set marker the running harness stamped, else
- * undefined) and its config home from the env var the shared contract names
- * (e.g. CODEX_HOME), else the contract's default subdir under the user's home.
- * Fails closed: a null return means the harness could not be determined, the
- * REGIMEN_HARNESS value is unknown, the harness has no registered contract, or
- * the home directory is undefined. Every failure writes a diagnostic to stderr
- * first.
+ * undefined) and the hooks file it writes: the contract's per-harness
+ * relativePath (codex `hooks.json`, claude `settings.json`) joined under the
+ * resolved config home (the env var the shared contract names, e.g. CODEX_HOME,
+ * else the contract's default subdir under the user's home). Fails closed: a
+ * null return means the harness could not be determined, the REGIMEN_HARNESS
+ * value is unknown, the harness has no registered contract, or the home
+ * directory is undefined. Every failure writes a diagnostic to stderr first.
  */
 function resolveTarget(): Target | null {
   let harness;
@@ -122,7 +124,11 @@ function resolveTarget(): Target | null {
     process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
     return null;
   }
-  return { harness, home: resolveHarnessHome(contract, process.env, home) };
+  const configHome = resolveHarnessHome(contract, process.env, home);
+  return {
+    harness,
+    hooksPath: join(configHome, contract.hooksFile.relativePath),
+  };
 }
 
 /** The clone's absolute path: the repo root, two levels up from this file. */
@@ -166,7 +172,7 @@ function wireGates(argv: ReadonlyArray<string>): number {
   const target = resolveTarget();
   if (target === null) return 1;
   const gates = parseGates(argv);
-  const path = join(target.home, "hooks.json");
+  const path = target.hooksPath;
 
   let plan;
   try {
@@ -211,9 +217,9 @@ function wireGates(argv: ReadonlyArray<string>): number {
 function unwireGates(argv: ReadonlyArray<string>): number {
   const target = resolveTarget();
   if (target === null) return 1;
-  const path = join(target.home, "hooks.json");
+  const path = target.hooksPath;
   if (!existsSync(path)) {
-    process.stdout.write(`no hooks.json at ${path}; nothing to remove\n`);
+    process.stdout.write(`no hooks file at ${path}; nothing to remove\n`);
     return 0;
   }
 
