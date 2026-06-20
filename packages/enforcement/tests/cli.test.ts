@@ -1,9 +1,11 @@
 /**
  * The wire-gates / unwire-gates / install / uninstall CLI commands. Spawned
- * against a temp CODEX_HOME so the host's real ~/.codex is never touched. The
- * pure merge is covered by codex-gate-hooks.test.ts; here we cover the file
- * read/write, the dry-run preview, gate selection, the jq preflight, and the
- * best-effort uninstall.
+ * against a temp config home so the host's real ~/.codex is never touched. The
+ * harness and the config home travel in the environment (REGIMEN_HARNESS and the
+ * contract's config-home env var, e.g. CODEX_HOME), never as flags. The pure
+ * merge is covered by gate-hooks.test.ts; here we cover the file read/write, the
+ * dry-run preview, gate selection, the jq preflight, the fail-closed path when no
+ * harness is set, and the best-effort uninstall.
  */
 import { expect, test } from "bun:test";
 import {
@@ -20,10 +22,10 @@ const CLI = join(import.meta.dir, "..", "src", "cli", "index.ts");
 
 async function runCli(
   args: ReadonlyArray<string>,
-  env: Record<string, string> = {},
+  env: Record<string, string | undefined> = {},
 ): Promise<{ exit: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(["bun", CLI, ...args], {
-    env: { ...process.env, ...env },
+    env: { ...process.env, REGIMEN_HARNESS: "codex", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -53,7 +55,7 @@ function readHooks(codexHome: string): {
 
 test("wire-gates writes hooks.json with all three gates on PreToolUse by default", async () => {
   await withCodexHome(async (codexHome) => {
-    const { exit } = await runCli(["wire-gates", "--codex-home", codexHome]);
+    const { exit } = await runCli(["wire-gates"], { CODEX_HOME: codexHome });
     expect(exit).toBe(0);
 
     const gateIds = (readHooks(codexHome).hooks?.PreToolUse ?? [])
@@ -64,14 +66,23 @@ test("wire-gates writes hooks.json with all three gates on PreToolUse by default
   });
 });
 
+test("wire-gates fails closed when REGIMEN_HARNESS is unset", async () => {
+  await withCodexHome(async (codexHome) => {
+    const { exit, stderr } = await runCli(["wire-gates"], {
+      CODEX_HOME: codexHome,
+      REGIMEN_HARNESS: undefined,
+    });
+    expect(exit).not.toBe(0);
+    expect(stderr).toContain("REGIMEN_HARNESS");
+    expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
+  });
+});
+
 test("wire-gates --dry-run previews and writes nothing", async () => {
   await withCodexHome(async (codexHome) => {
-    const { exit, stdout } = await runCli([
-      "wire-gates",
-      "--codex-home",
-      codexHome,
-      "--dry-run",
-    ]);
+    const { exit, stdout } = await runCli(["wire-gates", "--dry-run"], {
+      CODEX_HOME: codexHome,
+    });
     expect(exit).toBe(0);
     expect(stdout).toContain("would wire gate rm-rf on PreToolUse");
     expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
@@ -89,8 +100,8 @@ test("wire-gates preserves the user's own hooks and is idempotent on re-run", as
     };
     writeFileSync(join(codexHome, "hooks.json"), JSON.stringify(userFile));
 
-    await runCli(["wire-gates", "--codex-home", codexHome]);
-    const second = await runCli(["wire-gates", "--codex-home", codexHome]);
+    await runCli(["wire-gates"], { CODEX_HOME: codexHome });
+    const second = await runCli(["wire-gates"], { CODEX_HOME: codexHome });
     expect(second.exit).toBe(0);
     expect(second.stdout).toContain("already wired");
 
@@ -104,7 +115,7 @@ test("wire-gates preserves the user's own hooks and is idempotent on re-run", as
 
 test("wire-gates --gate selects a single gate", async () => {
   await withCodexHome(async (codexHome) => {
-    await runCli(["wire-gates", "--codex-home", codexHome, "--gate", "rm-rf"]);
+    await runCli(["wire-gates", "--gate", "rm-rf"], { CODEX_HOME: codexHome });
     const gateIds = (readHooks(codexHome).hooks?.PreToolUse ?? [])
       .flatMap((g) => g.hooks)
       .filter((l) => l._regimen?.role === "gate")
@@ -115,12 +126,9 @@ test("wire-gates --gate selects a single gate", async () => {
 
 test("wire-gates --no-gates writes no gates", async () => {
   await withCodexHome(async (codexHome) => {
-    const { exit } = await runCli([
-      "wire-gates",
-      "--codex-home",
-      codexHome,
-      "--no-gates",
-    ]);
+    const { exit } = await runCli(["wire-gates", "--no-gates"], {
+      CODEX_HOME: codexHome,
+    });
     expect(exit).toBe(0);
     // With no gates and no prior file, there is nothing to wire.
     const parsed = existsSync(join(codexHome, "hooks.json"))
@@ -143,13 +151,11 @@ test("unwire-gates removes Enforcement's gates and keeps the user's hooks", asyn
       },
     };
     writeFileSync(join(codexHome, "hooks.json"), JSON.stringify(userFile));
-    await runCli(["wire-gates", "--codex-home", codexHome]);
+    await runCli(["wire-gates"], { CODEX_HOME: codexHome });
 
-    const { exit, stdout } = await runCli([
-      "unwire-gates",
-      "--codex-home",
-      codexHome,
-    ]);
+    const { exit, stdout } = await runCli(["unwire-gates"], {
+      CODEX_HOME: codexHome,
+    });
     expect(exit).toBe(0);
     expect(stdout).toContain("removed gate rm-rf on PreToolUse");
 
@@ -161,11 +167,9 @@ test("unwire-gates removes Enforcement's gates and keeps the user's hooks", asyn
 
 test("unwire-gates on a missing file is a clean no-op", async () => {
   await withCodexHome(async (codexHome) => {
-    const { exit, stdout } = await runCli([
-      "unwire-gates",
-      "--codex-home",
-      codexHome,
-    ]);
+    const { exit, stdout } = await runCli(["unwire-gates"], {
+      CODEX_HOME: codexHome,
+    });
     expect(exit).toBe(0);
     expect(stdout).toContain("nothing to remove");
   });
@@ -175,28 +179,25 @@ test("a shell gate without jq on PATH warns; rm-rf alone does not", async () => 
   await withCodexHome(async (codexHome) => {
     const bunOnlyPath = dirname(process.execPath);
 
-    const shell = await runCli(
-      ["wire-gates", "--codex-home", codexHome, "--gate", "em-dash"],
-      { PATH: bunOnlyPath },
-    );
+    const shell = await runCli(["wire-gates", "--gate", "em-dash"], {
+      CODEX_HOME: codexHome,
+      PATH: bunOnlyPath,
+    });
     expect(shell.stderr).toContain("jq");
 
-    const tsOnly = await runCli(
-      ["wire-gates", "--codex-home", codexHome, "--gate", "rm-rf"],
-      { PATH: bunOnlyPath },
-    );
+    const tsOnly = await runCli(["wire-gates", "--gate", "rm-rf"], {
+      CODEX_HOME: codexHome,
+      PATH: bunOnlyPath,
+    });
     expect(tsOnly.stderr).not.toContain("jq");
   });
 });
 
 test("install --dry-run previews the gate wiring and writes nothing", async () => {
   await withCodexHome(async (codexHome) => {
-    const { exit, stdout } = await runCli([
-      "install",
-      "--codex-home",
-      codexHome,
-      "--dry-run",
-    ]);
+    const { exit, stdout } = await runCli(["install", "--dry-run"], {
+      CODEX_HOME: codexHome,
+    });
     expect(exit).toBe(0);
     expect(stdout).toContain("would wire gate rm-rf on PreToolUse");
     expect(stdout).toContain("nothing was changed");
@@ -206,13 +207,13 @@ test("install --dry-run previews the gate wiring and writes nothing", async () =
 
 test("install then uninstall leaves no gate entries behind", async () => {
   await withCodexHome(async (codexHome) => {
-    await runCli(["install", "--codex-home", codexHome]);
+    await runCli(["install"], { CODEX_HOME: codexHome });
     const afterInstall = (readHooks(codexHome).hooks?.PreToolUse ?? [])
       .flatMap((g) => g.hooks)
       .filter((l) => l._regimen?.role === "gate");
     expect(afterInstall.length).toBeGreaterThan(0);
 
-    const { exit } = await runCli(["uninstall", "--codex-home", codexHome]);
+    const { exit } = await runCli(["uninstall"], { CODEX_HOME: codexHome });
     expect(exit).toBe(0);
     const gates = (readHooks(codexHome).hooks?.PreToolUse ?? [])
       .flatMap((g) => g.hooks)
@@ -229,12 +230,9 @@ test("uninstall is best effort: a failing unwire still runs later teardown", asy
       JSON.stringify({ hooks: "nope" }),
     );
 
-    const { exit, stderr } = await runCli([
-      "uninstall",
-      "--codex-home",
-      codexHome,
-      "--dry-run",
-    ]);
+    const { exit, stderr } = await runCli(["uninstall", "--dry-run"], {
+      CODEX_HOME: codexHome,
+    });
     expect(stderr).toContain("hooks");
     expect(exit).not.toBe(0);
   });

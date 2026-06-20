@@ -1,20 +1,28 @@
 #!/usr/bin/env bun
 /**
- * A reference discipline gate for the Enforcement instrument.
+ * A reference discipline gate for the Enforcement instrument, harness-agnostic
+ * by construction.
  *
- * A minimal, illustrative Claude Code PreToolUse hook. It denies a Bash tool
- * call that runs a recursive, forced `rm`, and records the denial as a
- * gate.denial event. It exists to show the pattern any discipline gate
- * follows to make its denials observable, and as the fixture the emitter's
- * integration test exercises. It is deliberately NOT registered as a live
- * hook in .claude/settings.json.
+ * A minimal, illustrative PreToolUse hook. It denies a Bash tool call that runs
+ * a recursive, forced `rm`, and records the denial as a gate.denial event. It
+ * exists to show the pattern any discipline gate follows to make its denials
+ * observable, and as the fixture the emitter's integration test exercises. It
+ * is deliberately NOT registered as a live hook; the trial config wires it as a
+ * user-level PreToolUse hook.
  *
- * The pattern, portable to any harness: when a gate denies a tool call, it
- * also invokes the gate-denial emitter with the denied call normalized into
- * flags. The harness-specific work (reading this payload shape, emitting this
- * harness's deny decision) lives here, at the gate edge; the emitter stays
- * harness-agnostic. A gate in another language does the same by running the
- * emitter as a subprocess, exactly as this one does.
+ * The deny shape Claude and Codex share is `hookSpecificOutput.permissionDecision:
+ * "deny"`, so one gate body serves both: the rule and the deny live in this
+ * portable body, and the harness label comes from REGIMEN_HARNESS (defaulting
+ * to claude, as the shell gates do). The harness-specific work (reading the
+ * PreToolUse payload shape, emitting the deny decision) lives here, at the gate
+ * edge; the emit-denial emitter stays harness-agnostic. A gate in another
+ * language does the same by running the emitter as a subprocess.
+ *
+ * Honest reliability: a PreToolUse hook is a guardrail, not a hard boundary. On
+ * Codex it does not intercept every unified_exec shell path, so a denied
+ * command can still reach the shell on builds where that path bypasses the
+ * hook. Codex's dedicated PermissionRequest hook is the stronger enforcement
+ * surface, deferred to a later phase.
  */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -87,7 +95,7 @@ async function main(): Promise<void> {
     "--session",
     readString(payload, "session_id"),
     "--harness",
-    "claude",
+    process.env.REGIMEN_HARNESS ?? "claude",
     "--tool",
     toolName,
     "--tool-call-id",

@@ -12,22 +12,22 @@ bun is needed only to record a denial. If bun is absent, a shell gate still deni
 
 ## Gates
 
-- `examples/rm-rf-gate.ts` (Claude) and `examples/rm-rf-gate-codex.ts` (Codex): deny a recursive forced `rm`.
+- `examples/rm-rf-gate.ts`: deny a recursive forced `rm`. Harness-agnostic; it stamps the recorded harness from `REGIMEN_HARNESS` (defaulting to `claude`).
 - `examples/em-dash-gate.sh`: deny a Write/Edit whose content contains an em dash (U+2014). Needs `jq` to record.
 - `examples/inline-message-guard.sh`: deny an inline shell message body on a git/gh message command. Needs `jq` to record.
 
 ## Install
 
-The monorepo's root `./install.sh` composes this instrument through `regimen install`. To run the gate-wiring step on its own from this package (it wires the gates into Codex's `~/.codex/hooks.json`):
+The monorepo's root `./install.sh` composes this instrument through `regimen install`. To run the gate-wiring step on its own from this package, set `REGIMEN_HARNESS` so it knows which harness to wire (it writes to that harness's hooks file, e.g. `~/.codex/hooks.json` for Codex; override the location with the harness's own config-home env var, e.g. `CODEX_HOME`):
 
 ```sh
-bun src/cli/index.ts wire-gates    # wire all gates
-bun src/cli/index.ts wire-gates --gate rm-rf
-bun src/cli/index.ts wire-gates --no-gates
-bun src/cli/index.ts unwire-gates  # remove exactly Enforcement's gate entries
+REGIMEN_HARNESS=codex bun src/cli/index.ts wire-gates    # wire all gates
+REGIMEN_HARNESS=codex bun src/cli/index.ts wire-gates --gate rm-rf
+REGIMEN_HARNESS=codex bun src/cli/index.ts wire-gates --no-gates
+REGIMEN_HARNESS=codex bun src/cli/index.ts unwire-gates  # remove exactly Enforcement's gate entries
 ```
 
-Flags: `--dry-run` previews every step and writes nothing, `--gate <id>` is repeatable, `--no-gates` wires none. The harness is auto-detected per invocation, or set with the `REGIMEN_HARNESS` environment variable. The installer is surgical: it never touches Feedback's capture hook or the user's own hooks.
+Flags: `--dry-run` previews every step and writes nothing, `--gate <id>` is repeatable, `--no-gates` wires none. The harness and its config home travel in the environment, not in flags: Enforcement resolves the harness from `REGIMEN_HARNESS` and fails closed when it is unset. The installer is surgical: it never touches Feedback's capture hook or the user's own hooks.
 
 ## Develop
 

@@ -1,6 +1,8 @@
 /**
- * The gate-scoped Codex `hooks.json` planner. Pure: it transforms a parsed
- * hooks.json object and the CLI does the file read/write.
+ * The gate-scoped `hooks.json` planner for the contract's nested-matcher-groups
+ * format (events to matcher-groups to command leaves). Pure: it transforms a
+ * parsed hooks.json object and the CLI does the file read/write. The wired
+ * command carries the resolved harness, so the planner is not bound to one CLI.
  *
  * Scoped clone of Feedback's capture+gate planner, GATES ONLY. Enforcement owns
  * discipline gates, not the capture hook, so this planner touches only
@@ -10,6 +12,7 @@
  * command string, so recognition survives a moved clone.
  */
 import { basename, isAbsolute } from "node:path";
+import type { Harness } from "@regimen/shared";
 import { assertSafeClonePath } from "./clone-path.ts";
 import { GATE_COMMANDS, type GateId } from "./gate-commands.ts";
 
@@ -46,6 +49,8 @@ export interface HooksFile {
 export interface GateContext {
   /** The clone's absolute path. Every command string is rooted here. */
   readonly clonePath: string;
+  /** The harness the gates are wired for; shell gates carry it as REGIMEN_HARNESS. */
+  readonly harness: Harness;
   /** Which gates to wire onto PreToolUse. */
   readonly gates: ReadonlyArray<GateId>;
 }
@@ -90,13 +95,13 @@ function commandBasename(command: string): string {
   return basename(token);
 }
 
-/** A fresh gate leaf for the given gate id and clone. */
-function gateLeaf(id: GateId, clonePath: string): LeafHook {
+/** A fresh gate leaf for the given gate id, clone, and harness. */
+function gateLeaf(id: GateId, clonePath: string, harness: Harness): LeafHook {
   const spec = GATE_COMMANDS.find((g) => g.id === id);
   if (spec === undefined) throw new Error(`unknown gate id: ${id}`);
   return {
     type: "command",
-    command: spec.command(clonePath),
+    command: spec.command(clonePath, harness),
     _regimen: { v: 1, role: "gate", id },
   };
 }
@@ -187,7 +192,7 @@ export function planGateHooks(
   const seenBasenames = new Set<string>();
   const gateLeaves: LeafHook[] = [];
   for (const id of desiredGateIds) {
-    const leaf = gateLeaf(id, ctx.clonePath);
+    const leaf = gateLeaf(id, ctx.clonePath, ctx.harness);
     const name = commandBasename(leaf.command);
     if (seenBasenames.has(name)) continue;
     seenBasenames.add(name);

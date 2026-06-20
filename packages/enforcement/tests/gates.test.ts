@@ -11,13 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const RM_RF_CLAUDE = join(import.meta.dir, "..", "examples", "rm-rf-gate.ts");
-const RM_RF_CODEX = join(
-  import.meta.dir,
-  "..",
-  "examples",
-  "rm-rf-gate-codex.ts",
-);
+const RM_RF = join(import.meta.dir, "..", "examples", "rm-rf-gate.ts");
 const EM_DASH = join(import.meta.dir, "..", "examples", "em-dash-gate.sh");
 const INLINE_MSG = join(
   import.meta.dir,
@@ -58,9 +52,13 @@ test("the rm-rf gate denies a recursive forced rm and records it", async () => {
       tool_use_id: "toolu_rmrf",
       tool_input: { command: "rm -rf ./build" },
     };
-    const proc = Bun.spawn(["bun", RM_RF_CLAUDE], {
+    const proc = Bun.spawn(["bun", RM_RF], {
       stdin: new TextEncoder().encode(JSON.stringify(payload)),
-      env: { ...process.env, REGIMEN_DATA_DIR: dir },
+      env: {
+        ...process.env,
+        REGIMEN_DATA_DIR: dir,
+        REGIMEN_HARNESS: undefined,
+      },
       stdout: "pipe",
     });
     const stdout = await new Response(proc.stdout).text();
@@ -91,9 +89,13 @@ test("the rm-rf gate denies an uppercase -R recursive forced rm", async () => {
       tool_use_id: "toolu_rmRf",
       tool_input: { command: "rm -Rf ./build" },
     };
-    const proc = Bun.spawn(["bun", RM_RF_CLAUDE], {
+    const proc = Bun.spawn(["bun", RM_RF], {
       stdin: new TextEncoder().encode(JSON.stringify(payload)),
-      env: { ...process.env, REGIMEN_DATA_DIR: dir },
+      env: {
+        ...process.env,
+        REGIMEN_DATA_DIR: dir,
+        REGIMEN_HARNESS: undefined,
+      },
       stdout: "pipe",
     });
     const stdout = await new Response(proc.stdout).text();
@@ -114,7 +116,7 @@ test("the rm-rf gate denies an uppercase -R recursive forced rm", async () => {
   }
 });
 
-test("the Codex rm-rf gate denies an uppercase -R recursive forced rm", async () => {
+test("the rm-rf gate stamps the harness from REGIMEN_HARNESS (codex) on an uppercase -R rm", async () => {
   const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
   try {
     const payload = {
@@ -125,9 +127,9 @@ test("the Codex rm-rf gate denies an uppercase -R recursive forced rm", async ()
       tool_use_id: "call_rmRf",
       tool_input: { command: "rm -Rf ./build" },
     };
-    const proc = Bun.spawn(["bun", RM_RF_CODEX], {
+    const proc = Bun.spawn(["bun", RM_RF], {
       stdin: new TextEncoder().encode(JSON.stringify(payload)),
-      env: { ...process.env, REGIMEN_DATA_DIR: dir },
+      env: { ...process.env, REGIMEN_DATA_DIR: dir, REGIMEN_HARNESS: "codex" },
       stdout: "pipe",
     });
     const stdout = await new Response(proc.stdout).text();
@@ -155,7 +157,7 @@ test("the rm-rf gate allows a benign command and records nothing", async () => {
       tool_use_id: "toolu_ls",
       tool_input: { command: "ls -la" },
     };
-    const proc = Bun.spawn(["bun", RM_RF_CLAUDE], {
+    const proc = Bun.spawn(["bun", RM_RF], {
       stdin: new TextEncoder().encode(JSON.stringify(payload)),
       env: { ...process.env, REGIMEN_DATA_DIR: dir },
       stdout: "pipe",
@@ -169,7 +171,7 @@ test("the rm-rf gate allows a benign command and records nothing", async () => {
   }
 });
 
-test("the Codex rm-rf gate stamps harness codex on the recorded denial", async () => {
+test("the rm-rf gate records REGIMEN_HARNESS=codex on the denial it emits", async () => {
   const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
   try {
     const payload = {
@@ -180,9 +182,9 @@ test("the Codex rm-rf gate stamps harness codex on the recorded denial", async (
       tool_use_id: "call_rmrf",
       tool_input: { command: "rm -rf ./build" },
     };
-    const proc = Bun.spawn(["bun", RM_RF_CODEX], {
+    const proc = Bun.spawn(["bun", RM_RF], {
       stdin: new TextEncoder().encode(JSON.stringify(payload)),
-      env: { ...process.env, REGIMEN_DATA_DIR: dir },
+      env: { ...process.env, REGIMEN_DATA_DIR: dir, REGIMEN_HARNESS: "codex" },
       stdout: "pipe",
     });
     const stdout = await new Response(proc.stdout).text();
@@ -204,7 +206,7 @@ test("the Codex rm-rf gate stamps harness codex on the recorded denial", async (
 test("the rm-rf gate fails safe on malformed stdin", async () => {
   const dir = mkdtempSync(join(tmpdir(), "regimen-enforce-gate-"));
   try {
-    const proc = Bun.spawn(["bun", RM_RF_CLAUDE], {
+    const proc = Bun.spawn(["bun", RM_RF], {
       stdin: new TextEncoder().encode("not valid json"),
       env: { ...process.env, REGIMEN_DATA_DIR: dir },
       stdout: "pipe",

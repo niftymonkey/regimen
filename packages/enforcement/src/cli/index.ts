@@ -3,27 +3,33 @@
  * The Enforcement CLI: `enforcement <command>`.
  *
  * Subcommands:
- *   install        wire the discipline gates into CODEX_HOME/hooks.json
+ *   install        wire the discipline gates into the harness's hooks file
  *   uninstall      remove Enforcement's gate entries (best effort)
  *   wire-gates     the gate-wiring step on its own
  *   unwire-gates   the gate-removal step on its own
  *
- * Flags: --dry-run (preview every step, write nothing), --codex-home <path>
- * (default ~/.codex), --gate <id> (repeatable), --no-gates. The default gate set
- * is all three. The pure planner owns the merge; this command owns the file
- * read/write, the dry-run preview, and the jq preflight. Enforcement owns gates
- * only: it never wires the capture hook (Feedback's installer does that) and
- * never touches a capture leaf or a user hook.
+ * The harness and its config home travel in the environment, not in flags:
+ * Enforcement resolves the harness from REGIMEN_HARNESS (failing closed when it
+ * is unset or unknown) and the config home from the env var the shared contract
+ * names (e.g. CODEX_HOME), else the contract's default subdir under the user's
+ * home. Flags: --dry-run (preview every step, write nothing), --gate <id>
+ * (repeatable), --no-gates. The default gate set is all three. The pure planner
+ * owns the merge; this command owns the file read/write, the dry-run preview,
+ * and the jq preflight. Enforcement owns gates only: it never wires the capture
+ * hook (Feedback's installer does that) and never touches a capture leaf or a
+ * user hook.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { type Harness, harnessContract } from "@regimen/shared";
+import { resolveHarness, resolveHarnessHome } from "../harness.ts";
 import {
   type GateChange,
   type GateId,
   type HooksFile,
   planGateHooks,
   planGateHooksRemoval,
-} from "../install/codex-gate-hooks.ts";
+} from "../install/gate-hooks.ts";
 
 export function runCli(argv: ReadonlyArray<string>): number {
   const command = argv[2];
@@ -49,16 +55,6 @@ const DEFAULT_GATES: ReadonlyArray<GateId> = [
 /** Gates that run as shell scripts and therefore need `jq` on PATH. */
 const SHELL_GATES: ReadonlySet<string> = new Set(["em-dash", "inline-message"]);
 
-/** The value following `flag` in `argv`, or undefined if absent or last. */
-function flagValue(
-  argv: ReadonlyArray<string>,
-  flag: string,
-): string | undefined {
-  const index = argv.indexOf(flag);
-  if (index === -1) return undefined;
-  return argv[index + 1];
-}
-
 /** Every value following a repeatable flag, in order. */
 function collectFlagValues(
   argv: ReadonlyArray<string>,
@@ -82,18 +78,44 @@ function parseGates(argv: ReadonlyArray<string>): GateId[] {
   return explicit.length > 0 ? (explicit as GateId[]) : [...DEFAULT_GATES];
 }
 
-/** The CODEX_HOME a command targets: `--codex-home`, else CODEX_HOME, else ~/.codex. */
-function resolveCodexHome(argv: ReadonlyArray<string>): string | null {
-  const explicit = flagValue(argv, "--codex-home");
-  if (explicit !== undefined) return explicit;
-  const fromEnv = process.env.CODEX_HOME;
-  if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
+/** The harness and its config home a command targets, or null when it cannot be resolved. */
+interface Target {
+  readonly harness: Harness;
+  readonly home: string;
+}
+
+/**
+ * Resolve the harness from REGIMEN_HARNESS and its config home from the env var
+ * the shared contract names (e.g. CODEX_HOME), else the contract's default
+ * subdir under the user's home. Fails closed: a null return means REGIMEN_HARNESS
+ * is unset, set to an unknown harness, has no registered contract, or the home
+ * directory is undefined. Every failure writes a diagnostic to stderr first.
+ */
+function resolveTarget(): Target | null {
+  let harness;
+  try {
+    harness = resolveHarness(process.env);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return null;
+  }
+  if (harness === undefined) {
+    process.stderr.write(
+      "REGIMEN_HARNESS is not set; Enforcement must be invoked with the harness in the environment\n",
+    );
+    return null;
+  }
+  const contract = harnessContract(harness);
+  if (contract === undefined) {
+    process.stderr.write(`no contract registered for harness: ${harness}\n`);
+    return null;
+  }
   const home = process.env.HOME ?? process.env.USERPROFILE;
   if (home === undefined) {
     process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
     return null;
   }
-  return join(home, ".codex");
+  return { harness, home: resolveHarnessHome(contract, process.env, home) };
 }
 
 /** The clone's absolute path: the repo root, two levels up from this file. */
@@ -101,7 +123,7 @@ function clonePath(): string {
   return join(import.meta.dir, "..", "..");
 }
 
-/** Read and parse CODEX_HOME/hooks.json, or undefined when no file exists. */
+/** Read and parse the harness's hooks.json, or undefined when no file exists. */
 function readHooksFile(path: string): HooksFile | undefined {
   if (!existsSync(path)) return undefined;
   return JSON.parse(readFileSync(path, "utf8")) as HooksFile;
@@ -128,21 +150,22 @@ function warnIfShellGateMissingJq(gates: ReadonlyArray<GateId>): void {
 }
 
 /**
- * `enforcement wire-gates`. Merge the selected gates onto PreToolUse in
- * CODEX_HOME/hooks.json idempotently, without clobbering the user's own hooks or
+ * `enforcement wire-gates`. Merge the selected gates onto PreToolUse in the
+ * harness's hooks.json idempotently, without clobbering the user's own hooks or
  * Feedback's capture leaf. The pure planner owns the merge; this owns the file
  * read/write and the dry-run preview.
  */
 function wireGates(argv: ReadonlyArray<string>): number {
-  const codexHome = resolveCodexHome(argv);
-  if (codexHome === null) return 1;
+  const target = resolveTarget();
+  if (target === null) return 1;
   const gates = parseGates(argv);
-  const path = join(codexHome, "hooks.json");
+  const path = join(target.home, "hooks.json");
 
   let plan;
   try {
     plan = planGateHooks(readHooksFile(path), {
       clonePath: clonePath(),
+      harness: target.harness,
       gates,
     });
   } catch (err) {
@@ -174,14 +197,14 @@ function wireGates(argv: ReadonlyArray<string>): number {
 
 /**
  * `enforcement unwire-gates`. Remove exactly Enforcement's gate entries from
- * CODEX_HOME/hooks.json, leaving the user's hooks and Feedback's capture leaf
+ * the harness's hooks.json, leaving the user's hooks and Feedback's capture leaf
  * intact. Writes the pruned object back; the file is left in place even when
  * empty (the user may re-add their own hooks to it).
  */
 function unwireGates(argv: ReadonlyArray<string>): number {
-  const codexHome = resolveCodexHome(argv);
-  if (codexHome === null) return 1;
-  const path = join(codexHome, "hooks.json");
+  const target = resolveTarget();
+  if (target === null) return 1;
+  const path = join(target.home, "hooks.json");
   if (!existsSync(path)) {
     process.stdout.write(`no hooks.json at ${path}; nothing to remove\n`);
     return 0;
@@ -218,7 +241,7 @@ function unwireGates(argv: ReadonlyArray<string>): number {
 /**
  * `enforcement install`: wire the discipline gates. A thin orchestrator; today
  * the gate wiring is the only step, so this delegates to wire-gates and reports
- * the run boundary. Honors `--dry-run`, `--gate`, `--no-gates`, `--codex-home`.
+ * the run boundary. Honors `--dry-run`, `--gate`, `--no-gates`.
  */
 function install(argv: ReadonlyArray<string>): number {
   const dryRun = argv.includes("--dry-run");
@@ -239,8 +262,7 @@ function install(argv: ReadonlyArray<string>): number {
  * `enforcement uninstall`: remove Enforcement's gate entries. Best effort: a
  * failing step is recorded but the rest still run, so a half-installed system
  * can always be cleaned up. `||=` would short-circuit once `failed` is non-zero
- * and skip later teardown, so set the flag explicitly. Honors `--dry-run` and
- * `--codex-home`.
+ * and skip later teardown, so set the flag explicitly. Honors `--dry-run`.
  */
 function uninstall(argv: ReadonlyArray<string>): number {
   process.stdout.write("Enforcement uninstall\n");
