@@ -146,6 +146,24 @@ function captureLeaf(ctx: WireContext): LeafHook {
 }
 
 /**
+ * A fresh capture matcher-group for one event. Most nested harnesses fire on a
+ * bare `{ hooks: [...] }` group; a harness whose descriptor carries
+ * `groupDecoration` (Gemini, per ADR-0011) requires every group to also carry a
+ * `name` (`<namePrefix><event>`, event lowercased) and a `matcher` for the hook
+ * to fire headless, so the decoration rides on the group when present.
+ */
+function captureGroup(event: string, ctx: WireContext): MatcherGroup {
+  const decoration = ctx.descriptor.capture.groupDecoration;
+  const group: MatcherGroup = { hooks: [captureLeaf(ctx)] };
+  if (decoration === undefined) return group;
+  return {
+    name: `${decoration.namePrefix}${event.toLowerCase()}`,
+    matcher: decoration.matcher,
+    ...group,
+  };
+}
+
+/**
  * Refuse a structurally malformed existing file rather than silently rewriting
  * it: a present-but-non-object `hooks`, an event whose value is not an array,
  * or a matcher-group missing its `hooks` array. The error names the offending
@@ -274,7 +292,7 @@ export function planCaptureHooks(
     const hadCapture = groups.flatMap((g) => g.hooks).some(isRegimenLeaf);
 
     const userGroups = stripRegimen(groups);
-    hooksMap[event] = [...userGroups, { hooks: [captureLeaf(ctx)] }];
+    hooksMap[event] = [...userGroups, captureGroup(event, ctx)];
 
     (hadCapture ? unchanged : added).push({ event, role: "capture" });
   }

@@ -702,6 +702,29 @@ function readHooksFile(
     | VersionedHooksFile;
 }
 
+/**
+ * The on-disk path the capture hooks file lives at for a resolved target. Most
+ * harnesses keep their hooks under the config home (`<home>/<relativePath>`). A
+ * harness whose descriptor carries a capture `groupDecoration` (Gemini, per
+ * ADR-0011) only fires PROJECT-level hooks headless, so its file is the
+ * per-workspace `<cwd>/<configSubdir>/<relativePath>` (e.g.
+ * `<cwd>/.gemini/settings.json`), where the workspace is the current directory.
+ */
+function captureHooksPath(target: HarnessTarget): string {
+  const { contract } = target.descriptor;
+  if (target.descriptor.capture.groupDecoration !== undefined) {
+    // ponytail: workspace = process.cwd(), no `--workspace` flag. Mirrors the
+    // e2e gate, which installs into the dir the agent runs in; add a flag only
+    // when a real caller needs to target a workspace other than the cwd.
+    return join(
+      process.cwd(),
+      contract.configHome.defaultSubdir,
+      contract.hooksFile.relativePath,
+    );
+  }
+  return join(target.home, contract.hooksFile.relativePath);
+}
+
 /** A one-line description of a wiring change for the CLI to print. */
 function describeChange(c: WireChange): string {
   return `capture on ${c.event}`;
@@ -719,10 +742,7 @@ function wireHooks(argv: ReadonlyArray<string>): number {
   const target = resolveHarnessTarget();
   if (target === null) return 1;
   const clonePath = resolve(import.meta.dir, "..", "..");
-  const path = join(
-    target.home,
-    target.descriptor.contract.hooksFile.relativePath,
-  );
+  const path = captureHooksPath(target);
 
   let plan;
   try {
@@ -766,10 +786,7 @@ function wireHooks(argv: ReadonlyArray<string>): number {
 function unwireHooks(argv: ReadonlyArray<string>): number {
   const target = resolveHarnessTarget();
   if (target === null) return 1;
-  const path = join(
-    target.home,
-    target.descriptor.contract.hooksFile.relativePath,
-  );
+  const path = captureHooksPath(target);
   if (!existsSync(path)) {
     process.stdout.write(`no hooks file at ${path}; nothing to remove\n`);
     return 0;

@@ -26,15 +26,31 @@ export interface CaptureLeafMarker {
 }
 
 /**
+ * The per-group decoration some `nested-matcher-groups` harnesses require on
+ * every capture hook group for the hook to fire. Gemini is the one harness that
+ * needs it (ADR-0011, docs/harness-divergences.md): a Session-1 controlled
+ * differential proved its headless run fires a group only when that group carries
+ * both a `name` and a `matcher`. The `name` is per-event (`<namePrefix><event>`,
+ * event lowercased); the `matcher` is static. Absent on harnesses whose bare
+ * groups already fire (Codex, Claude).
+ */
+export interface GroupDecoration {
+  readonly namePrefix: string;
+  readonly matcher: string;
+}
+
+/**
  * The feedback-private capture facts for one harness: the harness events the
  * capture hook subscribes to, the producer script (relative to the repo root)
- * whose `bun <clonePath>/<producerScript>` command the hooks file invokes, and
- * the leaf marker that identifies Feedback's own leaves.
+ * whose `bun <clonePath>/<producerScript>` command the hooks file invokes, the
+ * leaf marker that identifies Feedback's own leaves, and the optional per-group
+ * decoration a harness requires for its hook groups to fire.
  */
 export interface CaptureDescriptor {
   readonly events: readonly string[];
   readonly producerScript: string;
   readonly leafMarker: CaptureLeafMarker;
+  readonly groupDecoration?: GroupDecoration;
 }
 
 /**
@@ -124,6 +140,7 @@ const GEMINI_CAPTURE: CaptureDescriptor = {
   ],
   producerScript: "hooks/capture-gemini.ts",
   leafMarker: { v: 1, role: "capture" },
+  groupDecoration: { namePrefix: "regimen-capture-", matcher: "*" },
 };
 
 function descriptorFor(

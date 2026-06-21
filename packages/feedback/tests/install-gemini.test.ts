@@ -1,10 +1,13 @@
 /**
  * The Gemini install wiring, exercised through the pure planners (no subprocess,
- * no filesystem). Proves step (d) needs no new code: the generic skill planner
- * targets Gemini's `~/.gemini/skills` from the contract, and the generic capture
- * planner wires Gemini's capture events through the descriptor into its
- * settings.json (the same nested-matcher-groups shape Codex and Claude use, so
- * the planner writes Gemini's real format with no divergence), running the
+ * no filesystem). Proves step (d) needs no new code for skills: the generic skill
+ * planner targets Gemini's `~/.gemini/skills` from the contract. For capture,
+ * Gemini diverges from the other nested harnesses (see ADR-0011 and
+ * docs/harness-divergences.md): a Session-1 controlled differential proved that
+ * only a PROJECT-level `<workspace>/.gemini/settings.json` whose every hook group
+ * carries a `name` AND a `matcher` fires headless; the user-level config-home file
+ * with bare matcher-groups (no name/matcher) fires nothing. So the capture planner
+ * wires Gemini's events into name+matcher-decorated groups, running the
  * gemini-stamping producer script while preserving the rest of the hooks file.
  */
 import { expect, test } from "bun:test";
@@ -49,6 +52,16 @@ test("the capture planner wires Gemini's capture events", () => {
     "SessionEnd",
     "SessionStart",
   ]);
+});
+
+test("each Gemini capture group carries a name and a matcher (the headless-firing shape)", () => {
+  const ctx: WireContext = { descriptor: DESCRIPTOR, clonePath: CLONE };
+  const plan = planCaptureHooks(undefined, ctx);
+  for (const event of DESCRIPTOR.capture.events) {
+    const group = plan.hooks.hooks?.[event]?.[0];
+    expect(group?.matcher).toBe("*");
+    expect(group?.name).toBe(`regimen-capture-${event.toLowerCase()}`);
+  }
 });
 
 test("wiring Gemini capture preserves the hooks file's other keys and runs the gemini producer", () => {
