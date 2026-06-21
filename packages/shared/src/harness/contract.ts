@@ -32,10 +32,11 @@ export interface ConfigHome {
  *   - `versioned-command-leaves`: Copilot's shape, a `{ version, hooks: { <event>:
  *     [ leaf, ... ] } }` envelope where each leaf is a flat command object with an
  *     optional inline matcher (no nested matcher group).
- * The value is descriptive metadata: no code switches on it today (the install
- * planners read `relativePath` and structurally assume their own shape). It names
- * the harness's real on-disk format so the install planner that writes each can
- * be selected by it when that work lands.
+ * Feedback's capture-install planner branches on this value to pick the on-disk
+ * structure it writes (`planCaptureHooks` emits `nested-matcher-groups` for
+ * Codex/Claude/Gemini and `versioned-command-leaves` for Copilot). Enforcement's
+ * gate-install planner still writes only `nested-matcher-groups`, so a gate on a
+ * `versioned-command-leaves` harness is not yet supported.
  */
 /**
  * The on-disk structural format of a harness's hooks file. Named so an install
@@ -93,12 +94,12 @@ const CLAUDE_CONTRACT: HarnessContract = {
  * `nested-matcher-groups` shape Codex and Claude use: a `{ version: 1, hooks: {
  * <event>: [ leaf, ... ] } }` envelope where each leaf is a flat command object
  * (`{ type: "command", bash, powershell, command, exec, matcher? }`) with an
- * optional inline `matcher`. This row names that format accurately so the planner
- * that writes Copilot's shape can be selected by it when that work lands. NOTE:
- * no install planner writes the `versioned-command-leaves` shape yet (the
- * capture/gate planners hardcode `nested-matcher-groups` and run only for Codex
- * and Claude today), so Copilot hooks WRITING is unimplemented; this is not
- * load-bearing for the Feedback judge path (which reads transcripts, not hooks).
+ * optional inline `matcher`. Feedback's capture-install planner branches on this
+ * format and writes Copilot's `versioned-command-leaves` shape
+ * (`planVersionedCaptureHooks`), so Copilot capture hooks install end-to-end.
+ * Enforcement's gate-install planner still writes only `nested-matcher-groups`,
+ * so a Copilot enforcement gate is not yet supported; the Feedback judge path is
+ * independent of either (it reads transcripts, not hooks).
  */
 const COPILOT_CONTRACT: HarnessContract = {
   harness: "copilot",
@@ -114,10 +115,15 @@ const COPILOT_CONTRACT: HarnessContract = {
  * Gemini CLI's config home is `GEMINI_CONFIG_DIR` (default `~/.gemini`); its
  * hooks live in `settings.json` under the same event-to-matcher-groups shape as
  * Codex's `hooks.json` and Claude's `settings.json` (event -> hook definitions,
- * each with an optional `matcher` and a `hooks` array of command leaves), so
- * Gemini uses `nested-matcher-groups` with no divergence (unlike Copilot).
- * Skills install to `<configHome>/skills/<name>`. Values verified against the
- * installed `@google/gemini-cli` package's hooks reference and config docs.
+ * each with an optional `matcher` and a `hooks` array of command leaves), so the
+ * structural `format` is `nested-matcher-groups`. Gemini still diverges on the
+ * install path in two ways the other nested harnesses do not (see ADR-0011 and
+ * `docs/harness-divergences.md`): each group must carry a `name` and a `matcher`,
+ * and only a project-level `.gemini/settings.json` fires headless (a user-level
+ * `GEMINI_CONFIG_DIR/settings.json` does not), so Gemini's capture hooks install
+ * project-level, not into the config home. Skills install to
+ * `<configHome>/skills/<name>`. Values verified against the installed
+ * `@google/gemini-cli` package's hooks reference and config docs.
  */
 const GEMINI_CONTRACT: HarnessContract = {
   harness: "gemini",
