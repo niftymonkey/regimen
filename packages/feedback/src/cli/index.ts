@@ -55,6 +55,7 @@ import {
   type HooksFile,
   planCaptureHooks,
   planCaptureHooksRemoval,
+  type VersionedHooksFile,
   type WireChange,
 } from "./install/capture-hooks.ts";
 import { waitForDaemonAlive } from "./wait-for-daemon.ts";
@@ -686,10 +687,19 @@ function resolveHarnessTarget(): HarnessTarget | null {
   };
 }
 
-/** Read and parse CODEX_HOME/hooks.json, or undefined when no file exists. */
-function readHooksFile(path: string): HooksFile | undefined {
+/**
+ * Read and parse a harness hooks file, or undefined when no file exists. The
+ * concrete on-disk shape (`nested-matcher-groups` vs `versioned-command-leaves`)
+ * is selected by the planner from the descriptor's format, so the parse boundary
+ * widens to the union and the planner narrows it.
+ */
+function readHooksFile(
+  path: string,
+): HooksFile | VersionedHooksFile | undefined {
   if (!existsSync(path)) return undefined;
-  return JSON.parse(readFileSync(path, "utf8")) as HooksFile;
+  return JSON.parse(readFileSync(path, "utf8")) as
+    | HooksFile
+    | VersionedHooksFile;
 }
 
 /** A one-line description of a wiring change for the CLI to print. */
@@ -767,7 +777,10 @@ function unwireHooks(argv: ReadonlyArray<string>): number {
 
   let plan;
   try {
-    plan = planCaptureHooksRemoval(readHooksFile(path));
+    plan = planCaptureHooksRemoval(
+      readHooksFile(path),
+      target.descriptor.contract.hooksFile.format,
+    );
   } catch (err) {
     process.stderr.write(`${(err as Error).message}\n`);
     return 1;

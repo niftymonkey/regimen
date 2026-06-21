@@ -20,6 +20,7 @@
  * (and the user's own hooks) verbatim, touching only capture leaves.
  */
 import { isAbsolute, join } from "node:path";
+import type { HooksFormat } from "@regimen/shared";
 import type { HarnessDescriptor } from "../../harness/descriptor.ts";
 
 /**
@@ -56,6 +57,20 @@ export interface HooksFile {
   [key: string]: unknown;
 }
 
+/**
+ * A parsed Copilot hooks file (`versioned-command-leaves` format): a top-level
+ * `version` plus an events map whose values are FLAT leaf arrays, with no
+ * matcher-group wrapper. The structural divergence from `HooksFile` is exactly
+ * this: events to `LeafHook[]` directly rather than to `MatcherGroup[]`, plus the
+ * required `version`. The leaf identity, marker, and command are the same as the
+ * nested format. Unknown top-level keys pass through.
+ */
+export interface VersionedHooksFile {
+  version?: number;
+  hooks?: Record<string, LeafHook[]>;
+  [key: string]: unknown;
+}
+
 export interface WireContext {
   /** The harness descriptor: the events, producer script, and leaf marker. */
   readonly descriptor: HarnessDescriptor;
@@ -69,6 +84,16 @@ export interface WireChange {
   readonly role: "capture";
 }
 
+/**
+ * A wiring plan. `hooks` is the merged file object the CLI serializes back to
+ * disk. It is typed as the nested `HooksFile` because that is the only shape with
+ * matcher-group structure callers introspect directly; the Copilot
+ * (`versioned-command-leaves`) path returns a structurally different
+ * `VersionedHooksFile` here (flat leaves under a top-level `version`), which the
+ * CLI serializes identically and Copilot-format tests narrow with a cast. The two
+ * shapes are interchangeable to the serializer (both are JSON objects with an
+ * events map), so the report fields below are format-agnostic.
+ */
 export interface WirePlan {
   readonly hooks: HooksFile;
   readonly added: ReadonlyArray<WireChange>;
@@ -146,16 +171,99 @@ function assertWellFormed(existing: HooksFile | undefined): void {
   }
 }
 
-/** Merge Feedback's capture hook into a fresh-or-existing file. */
+/**
+ * Refuse a structurally malformed Copilot-format file rather than rewriting it: a
+ * present-but-non-object `hooks`, or an event whose value is not a flat array. The
+ * versioned format has no matcher-group wrapper, so there is no group `hooks`
+ * array to validate. The error names the offending path.
+ */
+function assertVersionedWellFormed(
+  existing: VersionedHooksFile | undefined,
+): void {
+  if (existing?.hooks === undefined) return;
+  const { hooks } = existing;
+  if (typeof hooks !== "object" || hooks === null || Array.isArray(hooks)) {
+    throw new Error("hooks.json: `hooks` must be an object");
+  }
+  for (const [event, leaves] of Object.entries(hooks)) {
+    if (!Array.isArray(leaves)) {
+      throw new Error(`hooks.json: hooks.${event} must be an array`);
+    }
+  }
+}
+
+/**
+ * Merge Feedback's capture hook into a Copilot-format (`versioned-command-leaves`)
+ * file: a top-level `version` plus an events map of FLAT leaf arrays.
+ */
+function planVersionedCaptureHooks(
+  existing: VersionedHooksFile | undefined,
+  ctx: WireContext,
+): WirePlan {
+  assertVersionedWellFormed(existing);
+  const base: VersionedHooksFile = existing ? structuredClone(existing) : {};
+  base.version = base.version ?? 1;
+  const hooksMap = base.hooks ?? {};
+  base.hooks = hooksMap;
+  const added: WireChange[] = [];
+  const unchanged: WireChange[] = [];
+
+  for (const event of ctx.descriptor.capture.events) {
+    const leaves = hooksMap[event] ?? [];
+    const hadCapture = leaves.some(isRegimenLeaf);
+    const userLeaves = leaves.filter((l) => !isRegimenLeaf(l));
+    hooksMap[event] = [...userLeaves, captureLeaf(ctx)];
+    (hadCapture ? unchanged : added).push({ event, role: "capture" });
+  }
+  return { hooks: base as HooksFile, added, unchanged };
+}
+
+/**
+ * Remove Feedback's capture leaves from a Copilot-format file, leaving the user's
+ * leaves, any foreign gate leaf, and the top-level `version` intact. An event left
+ * with no leaves after the strip is pruned entirely, mirroring the nested path.
+ */
+function planVersionedCaptureHooksRemoval(
+  existing: VersionedHooksFile | undefined,
+): UnwirePlan {
+  assertVersionedWellFormed(existing);
+  const base: VersionedHooksFile = existing ? structuredClone(existing) : {};
+  const removed: WireChange[] = [];
+  const hooksMap = base.hooks;
+  if (hooksMap === undefined) return { hooks: base as HooksFile, removed };
+
+  for (const [event, leaves] of Object.entries(hooksMap)) {
+    if (leaves.some(isRegimenLeaf)) removed.push({ event, role: "capture" });
+    const kept = leaves.filter((l) => !isRegimenLeaf(l));
+    if (kept.length > 0) hooksMap[event] = kept;
+    else delete hooksMap[event];
+  }
+  return { hooks: base as HooksFile, removed };
+}
+
+/**
+ * Merge Feedback's capture hook into a fresh-or-existing file, selecting the
+ * on-disk structure from the descriptor's contract format. The leaf identity,
+ * marker, and command are shared across formats; only the structure around the
+ * leaves differs (`nested-matcher-groups` wraps each leaf in a matcher-group;
+ * `versioned-command-leaves` lists flat leaves under a top-level `version`).
+ */
 export function planCaptureHooks(
-  existing: HooksFile | undefined,
+  existing: HooksFile | VersionedHooksFile | undefined,
   ctx: WireContext,
 ): WirePlan {
   if (!isAbsolute(ctx.clonePath)) {
     throw new Error(`clonePath must be absolute, got: ${ctx.clonePath}`);
   }
-  assertWellFormed(existing);
-  const base: HooksFile = existing ? structuredClone(existing) : {};
+  if (ctx.descriptor.contract.hooksFile.format === "versioned-command-leaves") {
+    return planVersionedCaptureHooks(
+      existing as VersionedHooksFile | undefined,
+      ctx,
+    );
+  }
+  const nested = existing as HooksFile | undefined;
+  assertWellFormed(nested);
+  const base: HooksFile = nested ? structuredClone(nested) : {};
   const hooksMap = base.hooks ?? {};
   base.hooks = hooksMap;
   const added: WireChange[] = [];
@@ -173,12 +281,24 @@ export function planCaptureHooks(
   return { hooks: base, added, unchanged };
 }
 
-/** Remove exactly Feedback's capture entries; leave the user's and any foreign gate leaves intact. */
+/**
+ * Remove exactly Feedback's capture entries; leave the user's and any foreign
+ * gate leaves intact. The `format` selects the on-disk structure to strip,
+ * defaulting to `nested-matcher-groups` so the three nested harnesses' callers
+ * are unchanged; Copilot's `versioned-command-leaves` is passed explicitly.
+ */
 export function planCaptureHooksRemoval(
-  existing: HooksFile | undefined,
+  existing: HooksFile | VersionedHooksFile | undefined,
+  format: HooksFormat = "nested-matcher-groups",
 ): UnwirePlan {
-  assertWellFormed(existing);
-  const base: HooksFile = existing ? structuredClone(existing) : {};
+  if (format === "versioned-command-leaves") {
+    return planVersionedCaptureHooksRemoval(
+      existing as VersionedHooksFile | undefined,
+    );
+  }
+  const nested = existing as HooksFile | undefined;
+  assertWellFormed(nested);
+  const base: HooksFile = nested ? structuredClone(nested) : {};
   const removed: WireChange[] = [];
   const hooksMap = base.hooks;
   if (hooksMap === undefined) return { hooks: base, removed };

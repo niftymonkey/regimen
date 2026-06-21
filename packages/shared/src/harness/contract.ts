@@ -37,9 +37,15 @@ export interface ConfigHome {
  * the harness's real on-disk format so the install planner that writes each can
  * be selected by it when that work lands.
  */
+/**
+ * The on-disk structural format of a harness's hooks file. Named so an install
+ * planner can branch on it (and be typed by it) rather than restating the union.
+ */
+export type HooksFormat = "nested-matcher-groups" | "versioned-command-leaves";
+
 export interface HooksFile {
   readonly relativePath: string;
-  readonly format: "nested-matcher-groups" | "versioned-command-leaves";
+  readonly format: HooksFormat;
 }
 
 /**

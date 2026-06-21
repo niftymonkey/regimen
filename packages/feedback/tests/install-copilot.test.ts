@@ -6,17 +6,20 @@
  * running the copilot-stamping producer script while preserving the rest of the
  * hooks file.
  *
- * NOTE: Copilot's real on-disk hooks file is a flat `{ version, hooks: { event:
- * [leaf] } }` envelope, not the planner's nested-matcher-groups shape. This test
- * exercises only that the descriptor flows through the shared planner producing a
- * type-valid plan; the live-capture install + translator are deferred until the
- * Copilot hook payload taxonomy is producer-confirmed.
+ * Copilot's hooks file is the flat `{ version, hooks: { event: [leaf] } }`
+ * (`versioned-command-leaves`) envelope, which the planner now emits by branching
+ * on the descriptor's contract format. The structural specifics of that path live
+ * in install-capture-hooks-versioned.test.ts; this file proves the Copilot
+ * descriptor flows through the shared `planCaptureHooks` entry point and produces
+ * the versioned shape with the copilot-stamping producer. The live-capture install
+ * + translator are deferred until the Copilot hook payload taxonomy is
+ * producer-confirmed.
  */
 import { expect, test } from "bun:test";
 import { planSkillInstall } from "../src/cli/install/skill.ts";
 import {
   planCaptureHooks,
-  type HooksFile,
+  type VersionedHooksFile,
   type WireContext,
 } from "../src/cli/install/capture-hooks.ts";
 import { harnessContract } from "@regimen/shared";
@@ -57,16 +60,19 @@ test("the capture planner wires Copilot's six capture events", () => {
 });
 
 test("wiring Copilot capture preserves the hooks file's other keys and runs the copilot producer", () => {
-  const existing: HooksFile = {
+  const existing: VersionedHooksFile = {
+    version: 1,
     permissions: { allow: ["Read", "Bash(git status *)"] },
     env: { FOO: "bar" },
   };
   const ctx: WireContext = { descriptor: DESCRIPTOR, clonePath: CLONE };
   const plan = planCaptureHooks(existing, ctx);
-  expect(plan.hooks.permissions).toEqual({
+  const file = plan.hooks as VersionedHooksFile;
+  expect(file.permissions).toEqual({
     allow: ["Read", "Bash(git status *)"],
   });
-  expect(plan.hooks.env).toEqual({ FOO: "bar" });
-  const leaf = plan.hooks.hooks?.sessionStart?.[0]?.hooks?.[0];
+  expect(file.env).toEqual({ FOO: "bar" });
+  // Versioned shape: a flat leaf directly in the event's array, no group wrapper.
+  const leaf = file.hooks?.sessionStart?.[0];
   expect(leaf?.command).toBe(`bun ${CLONE}/hooks/capture-copilot.ts`);
 });

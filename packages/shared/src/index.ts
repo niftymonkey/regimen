@@ -15,6 +15,7 @@ export {
   type ConfigHome,
   type HarnessContract,
   type HooksFile,
+  type HooksFormat,
 } from "./harness/contract.ts";
 export {
   HARNESS_ENV_MARKERS,
