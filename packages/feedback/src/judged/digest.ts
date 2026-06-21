@@ -10,6 +10,7 @@
  */
 import type { Database } from "bun:sqlite";
 import type { AnchorRef } from "../loader/reader-types.ts";
+import { sessionHarnessModel } from "./slice.ts";
 import type { JudgeProvenance, SignalName, ValueKind } from "./types.ts";
 
 export type JudgmentDigest = UnjudgedDigest | JudgedDigest;
@@ -64,6 +65,19 @@ export interface JudgedDigest {
   generatedAt: string;
   sessionId: string;
   judged: true;
+  /**
+   * The harness that produced the conversation, recovered at read time by
+   * joining `conversations` (ADR-0008's read-time slice). Never stored on a
+   * judged row; an opaque string flowing from the `conversations.harness`
+   * column.
+   */
+  harness: string;
+  /**
+   * The model the conversation ran, recovered by the same read-time join.
+   * Nullable: `conversations.model` is nullable, and a null surfaces as null
+   * rather than a crash or a fabricated value.
+   */
+  model: string | null;
   complete: boolean;
   provenance: JudgeProvenance;
   /** The conversation assessment; null when the run abstained on it. */
@@ -181,11 +195,15 @@ export function readJudgmentDigest(
     ? { value: outcomeSignal.value, anchors: outcomeSignal.anchors }
     : null;
 
+  const slice = sessionHarnessModel(db, sessionId);
+
   return {
     schemaVersion: 1,
     generatedAt: new Date(now()).toISOString(),
     sessionId,
     judged: true,
+    harness: slice?.harness ?? "",
+    model: slice?.model ?? null,
     complete: latest.complete === 1,
     provenance: {
       judgeModel: latest.judge_model,
