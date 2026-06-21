@@ -24,6 +24,7 @@ import { dirname, join } from "node:path";
 import {
   type Harness,
   harnessContract,
+  type HooksFormat,
   resolveHarnessFromEnvironment,
 } from "@regimen/shared";
 import { resolveHarnessHome } from "../harness.ts";
@@ -85,20 +86,25 @@ function parseGates(argv: ReadonlyArray<string>): GateId[] {
 /** The harness and the resolved hooks file a command targets, or null when it cannot be resolved. */
 interface Target {
   readonly harness: Harness;
-  /** Absolute path to the harness's hooks file (the contract's per-harness relativePath under the config home). */
+  /** Absolute path to the harness's hooks file. */
   readonly hooksPath: string;
+  /** The on-disk hooks format, so the remover strips the right structure. */
+  readonly format: HooksFormat;
 }
 
 /**
  * Resolve the harness with the shared per-invocation policy (explicit
  * REGIMEN_HARNESS, else the CLI-set marker the running harness stamped, else
- * undefined) and the hooks file it writes: the contract's per-harness
- * relativePath (codex `hooks.json`, claude `settings.json`) joined under the
- * resolved config home (the env var the shared contract names, e.g. CODEX_HOME,
- * else the contract's default subdir under the user's home). Fails closed: a
- * null return means the harness could not be determined, the REGIMEN_HARNESS
- * value is unknown, the harness has no registered contract, or the home
- * directory is undefined. Every failure writes a diagnostic to stderr first.
+ * undefined) and the hooks file it writes. The file path is the contract's
+ * per-harness relativePath, normally joined under the resolved config home (the
+ * env var the shared contract names, e.g. CODEX_HOME, else the contract's default
+ * subdir under the user's home). Gemini is the one scope divergence (ADR-0011,
+ * docs/harness-divergences.md): only a PROJECT-level `.gemini/settings.json` fires
+ * headless, so its gates install under the current workspace (`process.cwd()`),
+ * not the config home. Fails closed: a null return means the harness could not be
+ * determined, the REGIMEN_HARNESS value is unknown, the harness has no registered
+ * contract, or the home directory is undefined. Every failure writes a diagnostic
+ * to stderr first.
  */
 function resolveTarget(): Target | null {
   let harness;
@@ -119,6 +125,22 @@ function resolveTarget(): Target | null {
     process.stderr.write(`no contract registered for harness: ${harness}\n`);
     return null;
   }
+  const { relativePath, format } = contract.hooksFile;
+  // ponytail: the workspace is the current dir; Gemini's project-level scope is
+  // the only divergence, and no flag is exposed for it (laziest that works). The
+  // project-level file is `<cwd>/.gemini/settings.json`, so the config home's
+  // default subdir (`.gemini`) prefixes the contract's relative hooks path.
+  if (harness === "gemini") {
+    return {
+      harness,
+      hooksPath: join(
+        process.cwd(),
+        contract.configHome.defaultSubdir,
+        relativePath,
+      ),
+      format,
+    };
+  }
   const home = process.env.HOME ?? process.env.USERPROFILE;
   if (home === undefined) {
     process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
@@ -127,7 +149,8 @@ function resolveTarget(): Target | null {
   const configHome = resolveHarnessHome(contract, process.env, home);
   return {
     harness,
-    hooksPath: join(configHome, contract.hooksFile.relativePath),
+    hooksPath: join(configHome, relativePath),
+    format,
   };
 }
 
@@ -225,7 +248,7 @@ function unwireGates(argv: ReadonlyArray<string>): number {
 
   let plan;
   try {
-    plan = planGateHooksRemoval(readHooksFile(path));
+    plan = planGateHooksRemoval(readHooksFile(path), target.format);
   } catch (err) {
     process.stderr.write(`${(err as Error).message}\n`);
     return 1;
