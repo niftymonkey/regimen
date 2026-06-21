@@ -70,3 +70,25 @@ export function normalizeCodexEndReason(
   if (native === undefined) return "other";
   return CODEX_END_REASONS[native] ?? "other";
 }
+
+/**
+ * Copilot's native end reasons, mapped onto the normalized vocabulary. Copilot
+ * writes a real `session.shutdown` record carrying a `shutdownType`, but the
+ * reader synthesizes session.end from the last conversation line (honoring the
+ * `complete` flag) without reading that field, so no native reason flows
+ * through today and every Copilot session.end normalizes to the catch-all. A
+ * future `shutdownType` mapping is a one-line addition here, parallel to the
+ * Claude table.
+ */
+const COPILOT_END_REASONS: Readonly<Record<string, NormalizedEndReason>> = {};
+
+/**
+ * Map a Copilot native end reason onto the normalized vocabulary. An absent or
+ * unrecognized reason maps to `other` rather than failing.
+ */
+export function normalizeCopilotEndReason(
+  native: string | undefined,
+): NormalizedEndReason {
+  if (native === undefined) return "other";
+  return COPILOT_END_REASONS[native] ?? "other";
+}
