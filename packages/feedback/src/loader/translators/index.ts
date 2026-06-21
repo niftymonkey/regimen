@@ -16,6 +16,7 @@ import { asHarness, type Harness } from "@regimen/shared";
 import { type Envelope, type TranslateResult } from "../../envelope.ts";
 import { translateClaude } from "./claude.ts";
 import { translateCodex } from "./codex.ts";
+import { translateCopilot } from "./copilot.ts";
 import { translateGemini } from "./gemini.ts";
 import { validateV1Event } from "./v1.ts";
 
@@ -24,6 +25,7 @@ type Translator = (envelope: Envelope) => TranslateResult;
 const TRANSLATORS: ReadonlyMap<Harness, Translator> = new Map([
   ["claude", translateClaude],
   ["codex", translateCodex],
+  ["copilot", translateCopilot],
   ["gemini", translateGemini],
 ]);
 
