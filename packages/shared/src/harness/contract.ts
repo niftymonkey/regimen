@@ -26,12 +26,20 @@ export interface ConfigHome {
 
 /**
  * Where a harness keeps its hooks configuration, relative to the config home,
- * and the on-disk shape. `nested-matcher-groups` is Codex's hooks.json format
- * (events to matcher-groups to command leaves).
+ * and the on-disk shape. Two structural formats exist across the harnesses:
+ *   - `nested-matcher-groups`: Codex's hooks.json / Claude's settings.json shape
+ *     (events to matcher-groups, each group holding a command-leaf array).
+ *   - `versioned-command-leaves`: Copilot's shape, a `{ version, hooks: { <event>:
+ *     [ leaf, ... ] } }` envelope where each leaf is a flat command object with an
+ *     optional inline matcher (no nested matcher group).
+ * The value is descriptive metadata: no code switches on it today (the install
+ * planners read `relativePath` and structurally assume their own shape). It names
+ * the harness's real on-disk format so the install planner that writes each can
+ * be selected by it when that work lands.
  */
 export interface HooksFile {
   readonly relativePath: string;
-  readonly format: "nested-matcher-groups";
+  readonly format: "nested-matcher-groups" | "versioned-command-leaves";
 }
 
 /**
@@ -74,25 +82,24 @@ const CLAUDE_CONTRACT: HarnessContract = {
  * skills install to `<configHome>/skills/<name>`. Values verified against the
  * installed `@github/copilot` package and the official Copilot hooks docs.
  *
- * DIVERGENCE NOTE: Copilot's on-disk hooks file (`~/.copilot/hooks/*.json`, or
- * a plugin's `hooks/hooks.json`) is NOT the `nested-matcher-groups` shape Codex
- * and Claude use (event -> matcher-groups -> command leaves). Copilot wraps the
- * config in a `{ version: 1, hooks: { <event>: [ leaf, ... ] } }` envelope where
- * each leaf is a FLAT command object (`{ type: "command", bash, powershell,
- * command, exec, matcher? }`) with an optional inline `matcher`, not a nested
- * matcher group. The `HooksFile.format` union cannot express that today, and
- * widening it touches the enforcement gate planner, so this row records the
- * closest reasonable `relativePath` with the existing format value only to
- * satisfy the type. The hooksFile is not load-bearing for the Feedback judge
- * path (which reads transcripts, not hooks); Copilot live-capture install
- * wiring is deferred with the translator.
+ * Copilot's on-disk hooks file (`~/.copilot/hooks/*.json`, or a plugin's
+ * `hooks/hooks.json`) uses the `versioned-command-leaves` format, NOT the
+ * `nested-matcher-groups` shape Codex and Claude use: a `{ version: 1, hooks: {
+ * <event>: [ leaf, ... ] } }` envelope where each leaf is a flat command object
+ * (`{ type: "command", bash, powershell, command, exec, matcher? }`) with an
+ * optional inline `matcher`. This row names that format accurately so the planner
+ * that writes Copilot's shape can be selected by it when that work lands. NOTE:
+ * no install planner writes the `versioned-command-leaves` shape yet (the
+ * capture/gate planners hardcode `nested-matcher-groups` and run only for Codex
+ * and Claude today), so Copilot hooks WRITING is unimplemented; this is not
+ * load-bearing for the Feedback judge path (which reads transcripts, not hooks).
  */
 const COPILOT_CONTRACT: HarnessContract = {
   harness: "copilot",
   configHome: { envVar: "COPILOT_HOME", defaultSubdir: ".copilot" },
   hooksFile: {
     relativePath: "hooks/hooks.json",
-    format: "nested-matcher-groups",
+    format: "versioned-command-leaves",
   },
   skillsSubdir: "skills",
 };
