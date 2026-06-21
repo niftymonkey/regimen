@@ -1,0 +1,15 @@
+{"sessionId":"bbddfdf7-482c-4b2d-bbfb-c9ba0982f534","projectHash":"46ec758f50aec0829fdd5df4182fcd00f3fc00eb140ea618d0ee0f2440abd079","startTime":"2026-06-19T06:08:26.036Z","lastUpdated":"2026-06-19T06:08:26.036Z","kind":"main"}
+{"$set":{"messages":[{"id":"d04923d38bb0f6017037e74183378ef4","timestamp":"2026-06-19T06:08:26.036Z","type":"user","content":[{"text":"<session_context>\nThis is the Gemini CLI. We are setting up the context for our chat.\nThe project's temporary directory is: /home/eng/.gemini/tmp/dev\n</session_context>"}]}],"lastUpdated":"2026-06-19T06:08:26.036Z"}}
+{"id":"c9677e0c-c6b0-4fce-913a-ad01c9d0de44","timestamp":"2026-06-19T06:08:47.954Z","type":"user","content":[{"text":"please run: bash /tmp/harness-probe.sh /tmp/harness-probe-gemini.out"}]}
+{"$set":{"lastUpdated":"2026-06-19T06:08:47.954Z"}}
+{"id":"424b570c-8af7-4362-b336-cb3581b0507c","timestamp":"2026-06-19T06:08:55.715Z","type":"gemini","content":"I am going to execute the harness probe script to inspect the workspace environment.","thoughts":[{"subject":"Analyzing the Request","description":"REDACTED-CHAIN-OF-THOUGHT","timestamp":"2026-06-19T06:08:53.490Z"}],"tokens":{"input":14157,"output":119,"cached":0,"thoughts":549,"tool":0,"total":14825},"model":"gemini-3.5-flash"}
+{"$set":{"lastUpdated":"2026-06-19T06:08:55.715Z"}}
+{"id":"08005abc-7d19-40cc-8e5f-6e7d6dd35067","timestamp":"2026-06-19T06:08:59.186Z","type":"user","content":[{"functionResponse":{"id":"run_shell_command__gwxxh8au","name":"run_shell_command","response":{"output":"Output: wrote /tmp/harness-probe-gemini.out\nGEMINI_CLI=1"}}}]}
+{"$set":{"lastUpdated":"2026-06-19T06:08:59.186Z"}}
+{"id":"7a324da7-e4e5-47ac-ba74-5af9854fa74f","timestamp":"2026-06-19T06:09:24.727Z","type":"gemini","content":"","thoughts":[],"tokens":{"input":14868,"output":29,"cached":0,"thoughts":154,"tool":0,"total":15051},"model":"gemini-3.5-flash"}
+{"$set":{"lastUpdated":"2026-06-19T06:09:24.727Z"}}
+{"id":"info-line-0001","timestamp":"2026-06-19T06:09:24.728Z","type":"info","content":"Slash command /chat was used."}
+{"id":"5a9623d6-7564-47a9-9881-07def621a03d","timestamp":"2026-06-19T06:09:34.517Z","type":"user","content":[{"functionResponse":{"id":"read_file__qpyg356i","name":"read_file","response":{"output":"file one contents"}}},{"functionResponse":{"id":"run_shell_command__56xgcbez","name":"run_shell_command","response":{"output":"file two contents"}}}]}
+{"$set":{"lastUpdated":"2026-06-19T06:09:34.517Z"}}
+{"id":"cd9afdae-5fa7-4cbf-9dac-7f821ec1ff19","timestamp":"2026-06-19T06:09:42.762Z","type":"gemini","content":"The environment probe script has been successfully executed and the files were read.","thoughts":[],"tokens":{"input":16439,"output":62,"cached":0,"thoughts":46,"tool":0,"total":16547},"model":"gemini-3.5-flash"}
+{"$set":{"lastUpdated":"2026-06-19T06:09:42.762Z"}}

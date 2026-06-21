@@ -92,3 +92,26 @@ export function normalizeCopilotEndReason(
   if (native === undefined) return "other";
   return COPILOT_END_REASONS[native] ?? "other";
 }
+
+/**
+ * Gemini's native end reasons, mapped onto the normalized vocabulary. Gemini's
+ * `SessionEnd` hook carries a `reason` (`exit | clear | logout |
+ * prompt_input_exit | other`), but the reader synthesizes session.end from the
+ * last folded message's timestamp (honoring the `complete` flag) and reads the
+ * chats transcript, not the hook log, so no native reason flows through today
+ * and every Gemini session.end normalizes to the catch-all. A future mapping
+ * from the `SessionEnd.reason` surface is a one-line addition here, parallel to
+ * the Claude table.
+ */
+const GEMINI_END_REASONS: Readonly<Record<string, NormalizedEndReason>> = {};
+
+/**
+ * Map a Gemini native end reason onto the normalized vocabulary. An absent or
+ * unrecognized reason maps to `other` rather than failing.
+ */
+export function normalizeGeminiEndReason(
+  native: string | undefined,
+): NormalizedEndReason {
+  if (native === undefined) return "other";
+  return GEMINI_END_REASONS[native] ?? "other";
+}
