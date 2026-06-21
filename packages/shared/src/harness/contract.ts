@@ -69,11 +69,40 @@ const CLAUDE_CONTRACT: HarnessContract = {
   skillsSubdir: "skills",
 };
 
+/**
+ * GitHub Copilot CLI's config home is `COPILOT_HOME` (default `~/.copilot`);
+ * skills install to `<configHome>/skills/<name>`. Values verified against the
+ * installed `@github/copilot` package and the official Copilot hooks docs.
+ *
+ * DIVERGENCE NOTE: Copilot's on-disk hooks file (`~/.copilot/hooks/*.json`, or
+ * a plugin's `hooks/hooks.json`) is NOT the `nested-matcher-groups` shape Codex
+ * and Claude use (event -> matcher-groups -> command leaves). Copilot wraps the
+ * config in a `{ version: 1, hooks: { <event>: [ leaf, ... ] } }` envelope where
+ * each leaf is a FLAT command object (`{ type: "command", bash, powershell,
+ * command, exec, matcher? }`) with an optional inline `matcher`, not a nested
+ * matcher group. The `HooksFile.format` union cannot express that today, and
+ * widening it touches the enforcement gate planner, so this row records the
+ * closest reasonable `relativePath` with the existing format value only to
+ * satisfy the type. The hooksFile is not load-bearing for the Feedback judge
+ * path (which reads transcripts, not hooks); Copilot live-capture install
+ * wiring is deferred with the translator.
+ */
+const COPILOT_CONTRACT: HarnessContract = {
+  harness: "copilot",
+  configHome: { envVar: "COPILOT_HOME", defaultSubdir: ".copilot" },
+  hooksFile: {
+    relativePath: "hooks/hooks.json",
+    format: "nested-matcher-groups",
+  },
+  skillsSubdir: "skills",
+};
+
 /** The cross-instrument harness contracts, keyed by normalized identifier. */
 export const HARNESS_CONTRACTS: ReadonlyMap<Harness, HarnessContract> = new Map(
   [
     ["codex", CODEX_CONTRACT],
     ["claude", CLAUDE_CONTRACT],
+    ["copilot", COPILOT_CONTRACT],
   ],
 );
 

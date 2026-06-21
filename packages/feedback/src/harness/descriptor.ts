@@ -76,6 +76,29 @@ const CLAUDE_CAPTURE: CaptureDescriptor = {
   leafMarker: { v: 1, role: "capture" },
 };
 
+/**
+ * Copilot CLI's hook event names are camelCase (verified against the installed
+ * `@github/copilot` package and the official Copilot hooks docs):
+ * `sessionStart`, `sessionEnd`, `userPromptSubmitted`, `preToolUse`,
+ * `postToolUse`, `preCompact`. Only `postToolUse` has been observed firing in a
+ * real session log on this box; the rest are confirmed from the package's hook
+ * type list. The live-capture hook translator is deferred until the full hook
+ * payload taxonomy is producer-confirmed (only the reader path is wired today),
+ * so these events drive only the install plan, not a registered translator.
+ */
+const COPILOT_CAPTURE: CaptureDescriptor = {
+  events: [
+    "sessionStart",
+    "sessionEnd",
+    "userPromptSubmitted",
+    "preToolUse",
+    "postToolUse",
+    "preCompact",
+  ],
+  producerScript: "hooks/capture-copilot.ts",
+  leafMarker: { v: 1, role: "capture" },
+};
+
 function descriptorFor(
   harness: Harness,
   capture: CaptureDescriptor,
@@ -93,6 +116,7 @@ export const HARNESS_DESCRIPTORS: ReadonlyMap<Harness, HarnessDescriptor> =
   new Map([
     ["codex", descriptorFor("codex", CODEX_CAPTURE, "sessions")],
     ["claude", descriptorFor("claude", CLAUDE_CAPTURE, "projects")],
+    ["copilot", descriptorFor("copilot", COPILOT_CAPTURE, "session-state")],
   ]);
 
 /** The descriptor for `harness`, or undefined when none is registered. */
