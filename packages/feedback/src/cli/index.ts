@@ -773,6 +773,13 @@ function wireHooks(argv: ReadonlyArray<string>): number {
   for (const c of plan.added) {
     process.stdout.write(`wired ${describeChange(c)}\n`);
   }
+  // A harness whose freshly-installed hooks need a one-time trust before they
+  // fire (Codex) carries a firstUseNotice; print it so first-run capture is not
+  // silently empty. Absent on harnesses that fire fresh hooks immediately.
+  const notice = target.descriptor.capture.firstUseNotice;
+  if (notice !== undefined) {
+    process.stdout.write(`${notice}\n`);
+  }
   return 0;
 }
 

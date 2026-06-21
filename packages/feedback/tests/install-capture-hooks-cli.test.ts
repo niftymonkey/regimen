@@ -159,6 +159,27 @@ test("wire-hooks writes hooks.json with capture on five events and no gate leave
   }
 });
 
+test("wire-hooks for codex prints the fresh-hooks-need-trust notice", async () => {
+  const { exit, stdout } = await runCommand("wire-hooks");
+  expect(exit).toBe(0);
+  // Codex will not fire freshly-installed hooks until they are trusted once, so
+  // the wire surfaces a one-line notice; without it first-run capture is silently
+  // empty. The descriptor carries the message; the CLI prints it on a successful
+  // codex wire.
+  expect(stdout).toContain("trust");
+  expect(stdout).toContain("--dangerously-bypass-hook-trust");
+});
+
+test("wire-hooks for a non-codex harness prints no trust notice", async () => {
+  // Claude fires freshly-installed hooks without a trust step, so its descriptor
+  // carries no firstUseNotice and the wire stays quiet about trust. Claude's
+  // config home falls back to <HOME>/.claude (the temp HOME), so this is isolated.
+  process.env.REGIMEN_HARNESS = "claude";
+  const { exit, stdout } = await runCommand("wire-hooks");
+  expect(exit).toBe(0);
+  expect(stdout).not.toContain("trust");
+});
+
 test("wire-hooks fails closed when no harness can be resolved", async () => {
   // Clear every ambient harness marker AND the pinned override, so the resolver
   // has nothing to go on and the command must refuse rather than guess.

@@ -51,6 +51,15 @@ export interface CaptureDescriptor {
   readonly producerScript: string;
   readonly leafMarker: CaptureLeafMarker;
   readonly groupDecoration?: GroupDecoration;
+  /**
+   * A one-line notice the installer prints after a successful capture wire, for a
+   * harness whose freshly-installed hooks do not fire until the user trusts them
+   * once. Absent on harnesses that fire fresh hooks immediately (Claude, Copilot,
+   * Gemini); present only on Codex, where interactive runs silently skip untrusted
+   * hooks and headless `codex exec` needs `--dangerously-bypass-hook-trust`, so
+   * first-run capture is silently empty without the notice.
+   */
+  readonly firstUseNotice?: string;
 }
 
 /**
@@ -77,6 +86,8 @@ const CODEX_CAPTURE: CaptureDescriptor = {
   ],
   producerScript: "hooks/capture-codex.ts",
   leafMarker: { v: 1, role: "capture" },
+  firstUseNotice:
+    "Codex will not fire these hooks until you trust them once: approve the Regimen hook on first interactive run, or headless `codex exec` needs --dangerously-bypass-hook-trust.",
 };
 
 const CLAUDE_CAPTURE: CaptureDescriptor = {
