@@ -99,6 +99,33 @@ const COPILOT_CAPTURE: CaptureDescriptor = {
   leafMarker: { v: 1, role: "capture" },
 };
 
+/**
+ * Gemini CLI's hook event names are PascalCase (verified against the installed
+ * `@google/gemini-cli` package's `docs/hooks/reference.md`): the full lifecycle
+ * is `SessionStart`, `SessionEnd`, `BeforeAgent`, `AfterAgent`, `BeforeModel`,
+ * `AfterModel`, `BeforeToolSelection`, `BeforeTool`, `AfterTool`, `PreCompress`,
+ * `Notification`, `Stop`. The capture subset below mirrors how the Codex and
+ * Claude descriptors pick theirs: the session boundary (`SessionStart` /
+ * `SessionEnd`), the user-prompt-equivalent (`BeforeAgent`, which fires after a
+ * user submits a prompt and before the agent plans), the tool round-trip
+ * (`BeforeTool` / `AfterTool`), and the compaction boundary (`PreCompress`). The
+ * live-capture hook translator is deferred until the full Gemini hook payload
+ * taxonomy is producer-confirmed (only the reader path is wired today), so these
+ * events drive only the install plan, not a registered translator.
+ */
+const GEMINI_CAPTURE: CaptureDescriptor = {
+  events: [
+    "SessionStart",
+    "SessionEnd",
+    "BeforeAgent",
+    "BeforeTool",
+    "AfterTool",
+    "PreCompress",
+  ],
+  producerScript: "hooks/capture-gemini.ts",
+  leafMarker: { v: 1, role: "capture" },
+};
+
 function descriptorFor(
   harness: Harness,
   capture: CaptureDescriptor,
@@ -117,6 +144,7 @@ export const HARNESS_DESCRIPTORS: ReadonlyMap<Harness, HarnessDescriptor> =
     ["codex", descriptorFor("codex", CODEX_CAPTURE, "sessions")],
     ["claude", descriptorFor("claude", CLAUDE_CAPTURE, "projects")],
     ["copilot", descriptorFor("copilot", COPILOT_CAPTURE, "session-state")],
+    ["gemini", descriptorFor("gemini", GEMINI_CAPTURE, "tmp")],
   ]);
 
 /** The descriptor for `harness`, or undefined when none is registered. */

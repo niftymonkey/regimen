@@ -11,5 +11,5 @@ test("harnessSupport(codex) returns a bundle with descriptor, reader, resolver",
 });
 
 test("harnessSupport for a valid-but-unregistered harness returns undefined", () => {
-  expect(harnessSupport("gemini")).toBeUndefined();
+  expect(harnessSupport("cursor")).toBeUndefined();
 });

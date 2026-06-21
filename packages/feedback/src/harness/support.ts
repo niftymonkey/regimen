@@ -15,6 +15,7 @@ import type { Harness } from "@regimen/shared";
 import { claudeReader, claudeResolver } from "../claude/adapter.ts";
 import { codexReader, codexResolver } from "../codex/adapter.ts";
 import { copilotReader, copilotResolver } from "../copilot/adapter.ts";
+import { geminiReader, geminiResolver } from "../gemini/adapter.ts";
 import type { HarnessContract } from "@regimen/shared";
 import { harnessDescriptor, type HarnessDescriptor } from "./descriptor.ts";
 import type { SessionResolver, TranscriptReader } from "./ports.ts";
@@ -34,6 +35,7 @@ const ADAPTERS: ReadonlyMap<
   ["codex", { reader: codexReader, resolver: codexResolver }],
   ["claude", { reader: claudeReader, resolver: claudeResolver }],
   ["copilot", { reader: copilotReader, resolver: copilotResolver }],
+  ["gemini", { reader: geminiReader, resolver: geminiResolver }],
 ]);
 
 function supportFor(harness: Harness): HarnessSupport {
@@ -52,6 +54,7 @@ const HARNESS_SUPPORT: ReadonlyMap<Harness, HarnessSupport> = new Map([
   ["codex", supportFor("codex")],
   ["claude", supportFor("claude")],
   ["copilot", supportFor("copilot")],
+  ["gemini", supportFor("gemini")],
 ]);
 
 /** The support bundle for `harness`, or undefined when none is registered. */

@@ -104,12 +104,32 @@ const COPILOT_CONTRACT: HarnessContract = {
   skillsSubdir: "skills",
 };
 
+/**
+ * Gemini CLI's config home is `GEMINI_CONFIG_DIR` (default `~/.gemini`); its
+ * hooks live in `settings.json` under the same event-to-matcher-groups shape as
+ * Codex's `hooks.json` and Claude's `settings.json` (event -> hook definitions,
+ * each with an optional `matcher` and a `hooks` array of command leaves), so
+ * Gemini uses `nested-matcher-groups` with no divergence (unlike Copilot).
+ * Skills install to `<configHome>/skills/<name>`. Values verified against the
+ * installed `@google/gemini-cli` package's hooks reference and config docs.
+ */
+const GEMINI_CONTRACT: HarnessContract = {
+  harness: "gemini",
+  configHome: { envVar: "GEMINI_CONFIG_DIR", defaultSubdir: ".gemini" },
+  hooksFile: {
+    relativePath: "settings.json",
+    format: "nested-matcher-groups",
+  },
+  skillsSubdir: "skills",
+};
+
 /** The cross-instrument harness contracts, keyed by normalized identifier. */
 export const HARNESS_CONTRACTS: ReadonlyMap<Harness, HarnessContract> = new Map(
   [
     ["codex", CODEX_CONTRACT],
     ["claude", CLAUDE_CONTRACT],
     ["copilot", COPILOT_CONTRACT],
+    ["gemini", GEMINI_CONTRACT],
   ],
 );
 

@@ -269,14 +269,14 @@ test("a valid-but-unregistered harness fails closed and writes nothing", async (
     await expect(
       assessConversation({
         store,
-        harness: "gemini",
+        harness: "cursor",
         sessionsDir,
         sessionId: SESSION,
         llm: stubJudgeModel(TRANSCRIPT),
         runId: "run-1",
         now: () => new Date("2026-06-15T12:00:00.000Z"),
       }),
-    ).rejects.toThrow(/unsupported harness: gemini/);
+    ).rejects.toThrow(/unsupported harness: cursor/);
 
     const runCount = (
       store.db.prepare("SELECT COUNT(*) AS n FROM assessment_run").get() as {

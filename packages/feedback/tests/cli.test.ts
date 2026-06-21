@@ -588,7 +588,7 @@ test("feedback evidence fails closed when REGIMEN_HARNESS names an unregistered 
   await withDataDir(async (dataDir) => {
     const { exit, stdout, stderr } = await runWith(["evidence"], {
       REGIMEN_DATA_DIR: dataDir,
-      REGIMEN_HARNESS: "gemini",
+      REGIMEN_HARNESS: "cursor",
     });
     expect(exit).not.toBe(0);
     expect(stderr).toContain("unsupported harness");

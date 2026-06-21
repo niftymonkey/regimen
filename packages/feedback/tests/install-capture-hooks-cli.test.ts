@@ -171,9 +171,9 @@ test("wire-hooks fails closed when no harness can be resolved", async () => {
 });
 
 test("wire-hooks fails closed on a known harness with no registered descriptor", async () => {
-  // `gemini` is a valid harness identifier but has no descriptor registered
+  // `cursor` is a valid harness identifier but has no descriptor registered
   // yet, so the install path must refuse it rather than guess.
-  process.env.REGIMEN_HARNESS = "gemini";
+  process.env.REGIMEN_HARNESS = "cursor";
 
   const run = await runCommand("wire-hooks");
   expect(run.exit).not.toBe(0);
