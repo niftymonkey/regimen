@@ -543,6 +543,32 @@ function list(argv: ReadonlyArray<string>): number {
   });
 }
 
+/** The single source-of-truth usage text, shared by help (stdout) and bare/unknown (stderr). */
+export function usage(): string {
+  return `regimen <command> [flags]
+
+Lifecycle:
+  install [--all | --harnesses <h...>]   install Regimen (capture, gates, skills) for the harness(es)
+  update                                 re-resolve paths, re-run recorded installs, cycle the daemon, restamp
+  uninstall                              remove Regimen for the current harness
+  status                                 installed version, harnesses + scopes, and daemon health
+
+Daemon:
+  daemon start|stop|restart|status       control or inspect the capture daemon
+
+Read & judge:
+  evidence                               quantitative digest of the current session (free, deterministic)
+  assess                                 judged verdict of the current session (paid LLM call, writes a verdict)
+  list [--harness <h>] [--since <when>] [--json]   enumerate captured sessions
+
+Flags:
+  --dry-run                       preview without changing anything
+  --gate <name> | --no-gates      select enforcement gates (install)
+
+The harness is auto-detected per invocation, or set REGIMEN_HARNESS.
+`;
+}
+
 /**
  * Parse argv and dispatch to the owning facade in-process. argv is the program's
  * arguments with the node/script prefix already stripped (so the subcommand is
@@ -551,12 +577,15 @@ function list(argv: ReadonlyArray<string>): number {
 export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
   const command = argv[0];
   if (command === undefined) {
-    process.stderr.write(
-      "usage: regimen <install|update|uninstall|status|daemon|assess|evidence|list>\n",
-    );
+    process.stderr.write(usage());
     return 1;
   }
   switch (command) {
+    case "--help":
+    case "-h":
+    case "help":
+      process.stdout.write(usage());
+      return 0;
     case "install":
       return install(argv);
     case "update":
@@ -575,6 +604,7 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
       return list(argv);
     default:
       process.stderr.write(`unknown command: ${command}\n`);
+      process.stderr.write(usage());
       return 1;
   }
 }

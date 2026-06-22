@@ -22,6 +22,83 @@ import {
   uninstall,
 } from "../src/cli/index.ts";
 
+const COMMAND_NAMES = [
+  "install",
+  "update",
+  "uninstall",
+  "status",
+  "daemon",
+  "assess",
+  "evidence",
+  "list",
+];
+
+function captureStdout(run: () => void): string {
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    run();
+  } finally {
+    process.stdout.write = saved;
+  }
+  return stdout;
+}
+
+function captureStderr(run: () => void): string {
+  let stderr = "";
+  const saved = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    run();
+  } finally {
+    process.stderr.write = saved;
+  }
+  return stderr;
+}
+
+test("regimen --help prints the full usage to stdout and exits 0", () => {
+  let exit: number | Promise<number> = 1;
+  const stdout = captureStdout(() => {
+    exit = runCli(["--help"]);
+  });
+  expect(exit).toBe(0);
+  expect(stdout).toContain("regimen <command>");
+  for (const name of COMMAND_NAMES) {
+    expect(stdout).toContain(name);
+  }
+});
+
+test("regimen -h prints the full usage to stdout and exits 0", () => {
+  let exit: number | Promise<number> = 1;
+  const stdout = captureStdout(() => {
+    exit = runCli(["-h"]);
+  });
+  expect(exit).toBe(0);
+  expect(stdout).toContain("regimen <command>");
+  for (const name of COMMAND_NAMES) {
+    expect(stdout).toContain(name);
+  }
+});
+
+test("regimen help prints the full usage to stdout and exits 0", () => {
+  let exit: number | Promise<number> = 1;
+  const stdout = captureStdout(() => {
+    exit = runCli(["help"]);
+  });
+  expect(exit).toBe(0);
+  expect(stdout).toContain("regimen <command>");
+  for (const name of COMMAND_NAMES) {
+    expect(stdout).toContain(name);
+  }
+});
+
 interface Call {
   readonly step: string;
   readonly selfLink?: boolean;
@@ -234,34 +311,27 @@ test("regimen list dispatches to the feedback list facade and renders an empty r
   expect(JSON.parse(stdout)).toEqual([]);
 });
 
-test("an unknown command exits 1 with an error on stderr", async () => {
-  let stderr = "";
-  const saved = process.stderr.write.bind(process.stderr);
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
-    return true;
-  }) as typeof process.stderr.write;
-  try {
-    const exit = await runCli(["frobnicate"]);
-    expect(exit).toBe(1);
-  } finally {
-    process.stderr.write = saved;
+test("an unknown command names the bad command and prints the full usage to stderr, exit 1", () => {
+  let exit: number | Promise<number> = 0;
+  const stderr = captureStderr(() => {
+    exit = runCli(["bogus"]);
+  });
+  expect(exit).toBe(1);
+  expect(stderr).toContain("unknown command: bogus");
+  expect(stderr).toContain("regimen <command>");
+  for (const name of COMMAND_NAMES) {
+    expect(stderr).toContain(name);
   }
-  expect(stderr).toContain("unknown command");
 });
 
-test("no command at all prints the top-level usage and exits 1", async () => {
-  let stderr = "";
-  const saved = process.stderr.write.bind(process.stderr);
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
-    return true;
-  }) as typeof process.stderr.write;
-  try {
-    const exit = await runCli([]);
-    expect(exit).toBe(1);
-  } finally {
-    process.stderr.write = saved;
+test("no command at all prints the full usage to stderr and exits 1", () => {
+  let exit: number | Promise<number> = 0;
+  const stderr = captureStderr(() => {
+    exit = runCli([]);
+  });
+  expect(exit).toBe(1);
+  expect(stderr).toContain("regimen <command>");
+  for (const name of COMMAND_NAMES) {
+    expect(stderr).toContain(name);
   }
-  expect(stderr).toContain("usage: regimen");
 });
