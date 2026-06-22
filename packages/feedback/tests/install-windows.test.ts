@@ -31,6 +31,7 @@ test("windowsServicePath places the task XML inside the data directory", () => {
 test("windowsServiceContent wraps bun in cmd.exe to set REGIMEN_DATA_DIR, pins paths, and configures logon trigger plus restart-on-failure", () => {
   const content = windowsServiceContent(CTX);
   expect(content).toContain("<?xml");
+  expect(content).toContain('encoding="UTF-16"');
   expect(content).toContain("<Task");
   expect(content).toContain("<LogonTrigger>");
   expect(content).toContain("<RestartOnFailure>");

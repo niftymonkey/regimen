@@ -30,7 +30,7 @@ const TASK_XML_NAME = "regimen-feedback.task.xml";
 
 export function windowsServiceContent(ctx: InstallContext): string {
   const inner = `set REGIMEN_DATA_DIR=${ctx.dataDir} && "${ctx.bunPath}" "${ctx.loaderPath}" > NUL 2>&1`;
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Regimen Feedback loader</Description>
