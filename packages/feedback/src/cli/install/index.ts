@@ -45,9 +45,34 @@ import {
 
 export type { InstallContext };
 
+/**
+ * How the service file's bytes must be laid down on disk. The systemd unit and
+ * the launchd plist are UTF-8; the Windows Task Scheduler XML must be UTF-16 LE
+ * with a byte-order mark, because `schtasks /Create /XML` rejects UTF-8 input
+ * with "unable to switch the encoding".
+ */
+export type ServiceFileEncoding = "utf-8" | "utf-16le-bom";
+
+/**
+ * Encode the service file content for the target platform. UTF-8 is a plain
+ * byte encoding with no marker; "utf-16le-bom" prepends the BOM (0xFF 0xFE) and
+ * encodes the rest as UTF-16 LE, the layout `schtasks` requires.
+ */
+export function serviceFileBytes(
+  content: string,
+  encoding: ServiceFileEncoding,
+): Buffer {
+  if (encoding === "utf-16le-bom") {
+    const bom = String.fromCharCode(0xfeff);
+    return Buffer.from(`${bom}${content}`, "utf16le");
+  }
+  return Buffer.from(content, "utf-8");
+}
+
 export interface InstallPlan {
   readonly servicePath: string;
   readonly serviceContent: string;
+  readonly serviceFileEncoding: ServiceFileEncoding;
   readonly installCommands: ReadonlyArray<ReadonlyArray<string>>;
   readonly uninstallCommands: ReadonlyArray<ReadonlyArray<string>>;
   /**
@@ -72,6 +97,7 @@ export function planInstall(
     return {
       servicePath,
       serviceContent: linuxServiceContent(ctx),
+      serviceFileEncoding: "utf-8",
       installCommands: LINUX_INSTALL_COMMANDS,
       uninstallCommands: LINUX_UNINSTALL_COMMANDS,
       serviceInstalledPath: servicePath,
@@ -85,6 +111,7 @@ export function planInstall(
     return {
       servicePath,
       serviceContent: macosServiceContent(ctx),
+      serviceFileEncoding: "utf-8",
       installCommands: macosInstallCommands(servicePath),
       uninstallCommands: macosUninstallCommands(servicePath),
       serviceInstalledPath: servicePath,
@@ -99,6 +126,7 @@ export function planInstall(
     return {
       servicePath,
       serviceContent: windowsServiceContent(ctx),
+      serviceFileEncoding: "utf-16le-bom",
       installCommands: windowsInstallCommands(servicePath),
       uninstallCommands: WINDOWS_UNINSTALL_COMMANDS,
       serviceInstalledPath: servicePath,

@@ -64,7 +64,11 @@ import {
 import { openStore } from "../store.ts";
 import { assessConversation } from "../judged/assess.ts";
 import { resolveDefaultJudgeModel } from "../judged/anthropic-adapter.ts";
-import { planInstall, type InstallPlan } from "./install/index.ts";
+import {
+  planInstall,
+  serviceFileBytes,
+  type InstallPlan,
+} from "./install/index.ts";
 import { planSkillInstall } from "./install/skill.ts";
 import {
   type HooksFile,
@@ -1068,7 +1072,10 @@ export function installDaemon(options: {
   }
 
   mkdirSync(dirname(plan.servicePath), { recursive: true });
-  writeFileSync(plan.servicePath, plan.serviceContent);
+  writeFileSync(
+    plan.servicePath,
+    serviceFileBytes(plan.serviceContent, plan.serviceFileEncoding),
+  );
   process.stdout.write(`wrote ${plan.servicePath}\n`);
   return runCommands(plan.installCommands);
 }
