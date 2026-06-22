@@ -102,6 +102,7 @@ test("regimen help prints the full usage to stdout and exits 0", () => {
 interface Call {
   readonly step: string;
   readonly selfLink?: boolean;
+  readonly daemon?: boolean;
   readonly gates?: ReadonlyArray<string>;
   readonly verb?: string;
 }
@@ -121,7 +122,7 @@ function recordingSteps(
   };
   return {
     feedbackInstall: (o) =>
-      run({ step: "feedbackInstall", selfLink: o.selfLink }),
+      run({ step: "feedbackInstall", selfLink: o.selfLink, daemon: o.daemon }),
     enforcementInstall: (o) =>
       run({ step: "enforcementInstall", gates: o.gates }),
     feedbackUninstall: (o) =>
@@ -174,6 +175,21 @@ test("install --no-gates passes an empty gate set to enforcement", () => {
   install(["install", "--no-gates"], recordingSteps(calls));
   const gate = calls.find((c) => c.step === "enforcementInstall")!;
   expect(gate.gates).toEqual([]);
+});
+
+test("install --no-daemon threads daemon:false to the feedback install", () => {
+  const calls: Call[] = [];
+  const exit = install(["install", "--no-daemon"], recordingSteps(calls));
+  expect(exit).toBe(0);
+  const feedback = calls.find((c) => c.step === "feedbackInstall")!;
+  expect(feedback.daemon).toBe(false);
+});
+
+test("install without --no-daemon leaves the daemon step in place", () => {
+  const calls: Call[] = [];
+  install(["install"], recordingSteps(calls));
+  const feedback = calls.find((c) => c.step === "feedbackInstall")!;
+  expect(feedback.daemon).not.toBe(false);
 });
 
 test("uninstall tears down in reverse: gate (enforcement) before capture (feedback), self-unlink last", () => {

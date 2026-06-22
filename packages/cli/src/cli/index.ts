@@ -72,6 +72,7 @@ export interface InstrumentSteps {
     dataDir: string;
     dryRun: boolean;
     selfLink?: boolean;
+    daemon?: boolean;
   }) => number;
   readonly enforcementInstall: (options: {
     gates: ReadonlyArray<GateId>;
@@ -225,6 +226,7 @@ function runPillars(
   gates: ReadonlyArray<GateId>,
   dryRun: boolean,
   steps: InstrumentSteps,
+  daemon: boolean,
 ): number {
   const saved = process.env.REGIMEN_HARNESS;
   process.env.REGIMEN_HARNESS = harness;
@@ -233,6 +235,7 @@ function runPillars(
       dataDir: dir,
       dryRun,
       selfLink: false,
+      daemon,
     });
     if (capture !== 0) return capture;
     return steps.enforcementInstall({ gates, dryRun });
@@ -261,8 +264,9 @@ function installHarness(
   steps: InstrumentSteps,
   life: LifecycleDeps,
   manifest: Manifest | undefined,
+  daemon: boolean,
 ): { code: number; manifest: Manifest | undefined } {
-  const code = runPillars(harness, dir, gates, dryRun, steps);
+  const code = runPillars(harness, dir, gates, dryRun, steps, daemon);
   if (code !== 0 || dryRun) return { code, manifest };
 
   const pillars = gates.length > 0 ? ["feedback", "enforcement"] : ["feedback"];
@@ -281,7 +285,10 @@ function installHarness(
  * Gemini installing per-workspace (a one-line notice says so). Fail-fast: a
  * failing harness stops the run and returns its nonzero code so a partial install
  * never reports success. Each instrument install runs with `selfLink: false` so
- * only the unified bin is linked.
+ * only the unified bin is linked. `--no-daemon` threads `daemon: false` to the
+ * capture pillar so it wires hooks, skills, and the manifest without registering
+ * the loader supervisor, for accounts that cannot create a scheduled task; every
+ * other flag still applies.
  */
 export function install(
   argv: ReadonlyArray<string>,
@@ -289,6 +296,7 @@ export function install(
   life: LifecycleDeps = REAL_LIFECYCLE,
 ): number {
   const dryRun = argv.includes("--dry-run");
+  const daemon = !argv.includes("--no-daemon");
   const dir = dataDir();
   const gates = parseGates(argv);
   const targets = parseHarnessTargets(argv, life);
@@ -312,6 +320,7 @@ export function install(
       steps,
       life,
       manifest,
+      daemon,
     );
     if (result.code !== 0) return result.code;
     manifest = result.manifest;
@@ -422,7 +431,7 @@ export function update(
     const gates = entry.pillars.includes("enforcement")
       ? [...DEFAULT_GATES]
       : [];
-    const code = runPillars(entry.harness, dir, gates, dryRun, steps);
+    const code = runPillars(entry.harness, dir, gates, dryRun, steps, true);
     if (code !== 0) return code;
   }
 
@@ -564,6 +573,7 @@ Read & judge:
 Flags:
   --dry-run                       preview without changing anything
   --gate <name> | --no-gates      select enforcement gates (install)
+  --no-daemon                     install capture without the loader daemon (install)
 
 The harness is auto-detected per invocation, or set REGIMEN_HARNESS.
 `;
