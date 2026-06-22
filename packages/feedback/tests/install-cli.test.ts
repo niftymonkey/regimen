@@ -1,9 +1,9 @@
 /**
  * The CLI's install-daemon and uninstall-daemon commands exercised in
  * --dry-run mode against a temp HOME and data dir, so the supervisor on the test
- * host is never touched. Driven IN-PROCESS through the exported `runCli` entry
- * point rather than by spawning a `bun` subprocess per assertion (the cold-start
- * raced this suite's per-test timeout under load). The assertions are
+ * host is never touched. Driven IN-PROCESS through the exported command facades
+ * (ADR-0012) rather than by spawning a `bun` subprocess per assertion (the
+ * cold-start raced this suite's per-test timeout under load). The assertions are
  * Linux-specific (systemd unit, systemctl) and the tests early-return on other
  * platforms; the macOS and Windows planners are covered by their own unit tests.
  *
@@ -16,7 +16,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCli } from "../src/cli/index.ts";
+import { dispatchFeedback } from "./facade-dispatch.ts";
 
 /** The env keys this suite pins, captured and restored per test. */
 const MANAGED_ENV = ["HOME", "REGIMEN_DATA_DIR"];
@@ -51,7 +51,7 @@ function tempDir(prefix: string): string {
   return dir;
 }
 
-/** Pin env overrides for one call, then drive runCli in-process. */
+/** Pin env overrides for one call, then drive the facade dispatch in-process. */
 async function runCliWith(
   args: ReadonlyArray<string>,
   env: Record<string, string>,
@@ -67,7 +67,7 @@ async function runCliWith(
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await runCli(["bun", "feedback", ...args]);
+  const exit = await dispatchFeedback(args);
   return { exit, stdout, stderr };
 }
 

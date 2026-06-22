@@ -1,8 +1,10 @@
-#!/usr/bin/env bun
 /**
- * The Feedback CLI: `feedback <command>`.
+ * The Feedback command facade: each command is an exported library function
+ * taking a typed, already-parsed options object, the surface the unified
+ * `regimen` CLI dispatches to in-process (ADR-0012). The dispatcher owns argv
+ * parsing; these functions own the work.
  *
- * Subcommands per ADR-0006:
+ * Commands per ADR-0006:
  *   start            set the enabled flag and, if a service is installed,
  *                    start the daemon via the platform supervisor
  *   stop             clear the enabled flag and, if a service is installed,
@@ -10,12 +12,16 @@
  *   restart          delegate to the supervisor's restart so the replacement
  *                    process runs current code (service installed only)
  *   status           report enabled state, daemon liveness, freshness, backlog
- *   install-daemon   write the OS-specific user-level service definition
- *   uninstall-daemon remove that service definition
- *   install-skill    copy the bundled skills into the harness's skills dir
+ *   installDaemon    write the OS-specific user-level service definition
+ *   uninstallDaemon  remove that service definition
+ *   installSkill     copy the bundled skills into the harness's skills dir
  *   purge            discard the buffer, and with --all the store and logs too
  *   evidence         print one conversation's evidence-layer digest as JSON
  *   list             enumerate sessions by harness, model, time window, outcome
+ *   wireHooks        merge the capture hook into the harness hooks file
+ *   unwireHooks      remove the capture hook
+ *   install          stand up the Feedback pillar (capture + daemon + skills)
+ *   uninstall        tear it down in reverse (best effort)
  *
  * The lifecycle commands are supervisor-aware. The enabled flag stays the
  * single capture-and-storage privacy gate (ADR-0006): supervision controls the
@@ -40,11 +46,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import type { HarnessDescriptor } from "../harness/descriptor.ts";
 import { harnessSupport, resolveHarnessHome } from "../harness/support.ts";
-import {
-  bufferDir,
-  dataDir,
-  resolveHarnessFromEnvironment,
-} from "@regimen/shared";
+import { bufferDir, resolveHarnessFromEnvironment } from "@regimen/shared";
 import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
 import {
@@ -66,85 +68,7 @@ import {
 } from "./install/capture-hooks.ts";
 import { waitForDaemonAlive } from "./wait-for-daemon.ts";
 
-export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
-  const command = argv[2];
-  if (command === undefined) {
-    process.stderr.write("usage: feedback <command>\n");
-    return 1;
-  }
-  const dir = dataDir();
-  if (command === "start") {
-    return start({ dataDir: dir, dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "stop") {
-    return stop({ dataDir: dir, dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "restart") {
-    return restart({ dataDir: dir, dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "status") {
-    return status({ dataDir: dir });
-  }
-  if (command === "install-daemon") {
-    return installDaemon({ dataDir: dir, dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "uninstall-daemon") {
-    return uninstallDaemon({
-      dataDir: dir,
-      dryRun: argv.includes("--dry-run"),
-    });
-  }
-  if (command === "install-skill") {
-    return installSkill({ dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "purge") {
-    return purge({
-      dataDir: dir,
-      all: argv.includes("--all"),
-      force: argv.includes("--force"),
-    });
-  }
-  if (command === "evidence") {
-    const session = flagValue(argv, "--session");
-    return evidence({
-      dataDir: dir,
-      ...(session === undefined ? {} : { session }),
-    });
-  }
-  if (command === "assess") {
-    const session = flagValue(argv, "--session");
-    const judgeModel = flagValue(argv, "--judge-model");
-    return assess({
-      dataDir: dir,
-      ...(session === undefined ? {} : { session }),
-      ...(judgeModel === undefined ? {} : { judgeModel }),
-    });
-  }
-  if (command === "list") {
-    const filter: SessionFilter = {
-      ...optionalFlag(argv, "--harness", "harness"),
-      ...optionalFlag(argv, "--model", "model"),
-      ...optionalFlag(argv, "--since", "since"),
-      ...optionalFlag(argv, "--until", "until"),
-      ...optionalFlag(argv, "--outcome", "outcome"),
-    };
-    return list({ dataDir: dir, filter, asJson: argv.includes("--json") });
-  }
-  if (command === "wire-hooks") {
-    return wireHooks({ dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "unwire-hooks") {
-    return unwireHooks({ dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "install") {
-    return install({ dataDir: dir, dryRun: argv.includes("--dry-run") });
-  }
-  if (command === "uninstall") {
-    return uninstall({ dataDir: dir, dryRun: argv.includes("--dry-run") });
-  }
-  process.stderr.write(`unknown command: ${command}\n`);
-  return 1;
-}
+export type { SessionFilter, SessionSummary } from "../sessions.ts";
 
 /** How to run the daemon foreground when no supervisor is installed. */
 const FOREGROUND_HINT =
@@ -465,16 +389,6 @@ function purgeLogs(dir: string): void {
   process.stdout.write("logs purged\n");
 }
 
-/** The value following `flag` in `argv`, or undefined if absent or last. */
-function flagValue(
-  argv: ReadonlyArray<string>,
-  flag: string,
-): string | undefined {
-  const index = argv.indexOf(flag);
-  if (index === -1) return undefined;
-  return argv[index + 1];
-}
-
 /**
  * Print the evidence-layer digest for one conversation as JSON on stdout, so
  * the in-session evidence skill can read it back into the agent's context.
@@ -655,20 +569,6 @@ export async function assess(options: {
   } finally {
     store.close();
   }
-}
-
-/**
- * Project one `--flag value` pair onto a single-key partial of SessionFilter,
- * or an empty object when the flag is absent, so the filter is built by spread
- * and never carries a key the caller did not pass.
- */
-function optionalFlag(
-  argv: ReadonlyArray<string>,
-  flag: string,
-  key: keyof SessionFilter,
-): Partial<SessionFilter> {
-  const value = flagValue(argv, flag);
-  return value === undefined ? {} : { [key]: value };
 }
 
 /**
@@ -985,7 +885,11 @@ export function unwireHooks(options: { dryRun: boolean }): number {
  * pillar (gates and the denial emitter) is installed separately from
  * the enforcement package.
  */
-export function install(options: { dataDir: string; dryRun: boolean }): number {
+export function install(options: {
+  dataDir: string;
+  dryRun: boolean;
+  selfLink?: boolean;
+}): number {
   const { dataDir: dir, dryRun } = options;
   process.stdout.write("Feedback install (capture + daemon + skills)\n");
 
@@ -1007,10 +911,15 @@ export function install(options: { dataDir: string; dryRun: boolean }): number {
   const skill = installSkill({ dryRun });
   if (skill !== 0) return skill;
 
-  const link = runLifecycleCommands([["bun", "link"]], dryRun);
-  if (link !== 0) {
-    process.stderr.write("failed to link the feedback CLI onto PATH\n");
-    return link;
+  // The self-link is skipped when the unified `regimen` dispatcher composes this
+  // install: it owns the one `regimen` link (ADR-0012) so two pillars do not each
+  // link a separate bin. A standalone caller defaults to linking as before.
+  if (options.selfLink !== false) {
+    const link = runLifecycleCommands([["bun", "link"]], dryRun);
+    if (link !== 0) {
+      process.stderr.write("failed to link the feedback CLI onto PATH\n");
+      return link;
+    }
   }
 
   process.stdout.write(
@@ -1032,6 +941,7 @@ export function install(options: { dataDir: string; dryRun: boolean }): number {
 export function uninstall(options: {
   dataDir: string;
   dryRun: boolean;
+  selfLink?: boolean;
 }): number {
   const { dataDir: dir, dryRun } = options;
   process.stdout.write("Regimen uninstall\n");
@@ -1053,10 +963,15 @@ export function uninstall(options: {
   if (uninstallSkill({ dryRun }) !== 0) failed = 1;
   if (uninstallDaemon({ dataDir: dir, dryRun }) !== 0) failed = 1;
 
-  const unlink = runLifecycleCommands([["bun", "unlink"]], dryRun);
-  if (unlink !== 0) {
-    process.stderr.write("failed to unlink the feedback CLI\n");
-    failed = 1;
+  // Skipped when the unified `regimen` dispatcher composes this teardown: it owns
+  // the one `regimen` unlink (ADR-0012). A standalone caller defaults to
+  // unlinking as before.
+  if (options.selfLink !== false) {
+    const unlink = runLifecycleCommands([["bun", "unlink"]], dryRun);
+    if (unlink !== 0) {
+      process.stderr.write("failed to unlink the feedback CLI\n");
+      failed = 1;
+    }
   }
 
   process.stdout.write(
@@ -1261,8 +1176,4 @@ function humanAge(iso: string): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days}d`;
-}
-
-if (import.meta.main) {
-  process.exit(await runCli(process.argv));
 }

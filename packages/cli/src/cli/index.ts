@@ -1,41 +1,94 @@
 #!/usr/bin/env bun
 /**
- * The Regimen CLI: `regimen install` / `regimen uninstall`. A thin
- * composition root with no hidden depth: it parses argv, asks the locator to
- * resolve every instrument (failing with a distinct nonzero BEFORE any spawn if
- * one is missing), builds the pure plan, prints the CLI's composition, then
- * hands the plan and the located paths to the runner with the real spawn. The
- * depth lives in the locator and the planner; the CLI holds no logic worth deep
- * testing.
+ * The unified `regimen` CLI: the one composition root and the one argv parser
+ * (ADR-0012). It imports `@regimen/feedback` and `@regimen/enforcement` as
+ * in-process libraries and calls their typed command functions directly, rather
+ * than spawning their CLIs as subprocesses. It stays deliberately shallow: it
+ * parses argv, resolves the data dir once, dispatches each subcommand to the
+ * owning package's facade, and holds a single exit contract. The depth lives in
+ * the facades it calls.
  *
- * Harness- and model-agnostic: it spawns each instrument's CLI as a subprocess
- * and forwards exit codes; it never imports any instrument internals. The CLI
- * orchestrates Feedback and Enforcement today; the bridge is a reserved future
- * (--with-bridge is parsed and consumed but adds no step yet).
+ * The command surface is grouped by user task, not by instrument (the pillar
+ * nouns Feedback and Enforcement leave the command line). Lifecycle is flat:
+ * `regimen install` / `uninstall` / `status`. The read-and-judge primitives are
+ * flat: `regimen assess` / `evidence` / `list`. The daemon supervisor is grouped
+ * so its `start`/`status` do not collide with the program-level verbs:
+ * `regimen daemon start|stop|restart|status`. The old wiring verbs (wire-hooks,
+ * wire-gates, install-daemon, install-skill) are internal steps of
+ * `regimen install`, no longer user verbs.
+ *
+ * `regimen install` composes the per-instrument installs in order so the capture
+ * hook lands ahead of the gate on the pre-tool boundary (feedback then
+ * enforcement); `uninstall` is the reverse (gates down before capture). The
+ * single `regimen` self-link is owned here: each instrument install runs with
+ * `selfLink: false` so only one `regimen` bin is linked, not a per-instrument
+ * one. The harness-invoked scripts (capture hooks, gate scripts, the loader
+ * daemon) stay standalone and absolute-path-invoked; this collapse touches only
+ * the user-facing command layer.
  */
 import { dirname } from "node:path";
+import { dataDir } from "@regimen/shared";
 import {
-  type InstrumentName,
-  type LocateError,
-  type LocateResult,
-  type LocatorOverrides,
-  locateAll,
-} from "../locator.ts";
+  assess as feedbackAssess,
+  evidence as feedbackEvidence,
+  install as feedbackInstall,
+  list as feedbackList,
+  restart as feedbackRestart,
+  type SessionFilter,
+  start as feedbackStart,
+  status as feedbackStatus,
+  stop as feedbackStop,
+  uninstall as feedbackUninstall,
+} from "@regimen/feedback";
 import {
-  type InstallConfig,
-  type Step,
-  planInstall,
-  planUninstall,
-} from "../plan.ts";
-import { realSpawn, runSteps } from "../runner.ts";
+  type GateId,
+  install as enforcementInstall,
+  uninstall as enforcementUninstall,
+} from "@regimen/enforcement";
 
-export type Verb = "install" | "uninstall";
-
-export interface ParsedArgs {
-  readonly verb: Verb;
-  readonly config: InstallConfig;
-  readonly overrides: LocatorOverrides;
+/**
+ * The instrument install/uninstall steps the orchestrator composes, injected so
+ * the ordering and fail-fast/best-effort control flow is tested deterministically
+ * without standing up a real install. Production binds these to the in-process
+ * facades; tests pass recording fakes. This is the in-process analog of the
+ * deleted runner's spawn seam: there is no subprocess to fake, so the seam is the
+ * call itself, and a test asserts call order plus exit aggregation (ADR-0012).
+ */
+export interface InstrumentSteps {
+  readonly feedbackInstall: (options: {
+    dataDir: string;
+    dryRun: boolean;
+    selfLink?: boolean;
+  }) => number;
+  readonly enforcementInstall: (options: {
+    gates: ReadonlyArray<GateId>;
+    dryRun: boolean;
+  }) => number;
+  readonly feedbackUninstall: (options: {
+    dataDir: string;
+    dryRun: boolean;
+    selfLink?: boolean;
+  }) => number;
+  readonly enforcementUninstall: (options: { dryRun: boolean }) => number;
+  /** The one `regimen` self-link (`bun link`/`bun unlink` at the cli root). */
+  readonly selfLink: (verb: "link" | "unlink", dryRun: boolean) => number;
 }
+
+/** The production steps: the in-process facades plus the real `regimen` self-link. */
+const REAL_STEPS: InstrumentSteps = {
+  feedbackInstall,
+  enforcementInstall,
+  feedbackUninstall,
+  enforcementUninstall,
+  selfLink: realSelfLink,
+};
+
+/** The default gate set wired by `regimen install` (all three). */
+const DEFAULT_GATES: ReadonlyArray<GateId> = [
+  "rm-rf",
+  "em-dash",
+  "inline-message",
+];
 
 /** The value following `flag` in `argv`, or undefined if absent or last. */
 function flagValue(
@@ -59,135 +112,210 @@ function collectFlagValues(
   return out;
 }
 
-export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
-  const verb = argv[0];
-  if (verb !== "install" && verb !== "uninstall") {
-    throw new Error(`usage: regimen <install|uninstall> [flags]`);
-  }
-
-  const feedbackPath = flagValue(argv, "--feedback-path");
-  const enforcementPath = flagValue(argv, "--enforcement-path");
-
-  const config: InstallConfig = {
-    dryRun: argv.includes("--dry-run"),
-    gates: collectFlagValues(argv, "--gate"),
-    noGates: argv.includes("--no-gates"),
-    withBridge: argv.includes("--with-bridge"),
-  };
-
-  const overrides: LocatorOverrides = {
-    ...(feedbackPath !== undefined ? { feedbackPath } : {}),
-    ...(enforcementPath !== undefined ? { enforcementPath } : {}),
-  };
-
-  return { verb, config, overrides };
+/** The gate set `regimen install` wires: `--no-gates` for none, `--gate <id>` to override, else all three. */
+function parseGates(argv: ReadonlyArray<string>): GateId[] {
+  if (argv.includes("--no-gates")) return [];
+  const explicit = collectFlagValues(argv, "--gate");
+  return explicit.length > 0 ? (explicit as GateId[]) : [...DEFAULT_GATES];
 }
 
-/** The distinct exit code for a missing-instrument locator miss, before any spawn. */
-const EXIT_LOCATE_MISS = 2;
-
-function isLocateError(
-  value: LocateResult | LocateError,
-): value is LocateError {
-  return "message" in value;
+/** Project one `--flag value` pair onto a single-key partial of SessionFilter. */
+function optionalFilter(
+  argv: ReadonlyArray<string>,
+  flag: string,
+  key: keyof SessionFilter,
+): Partial<SessionFilter> {
+  const value = flagValue(argv, flag);
+  return value === undefined ? {} : { [key]: value };
 }
 
-export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
-  let parsed;
-  try {
-    parsed = parseArgs(argv);
-  } catch (err) {
-    process.stderr.write(`${(err as Error).message}\n`);
-    return 1;
+/**
+ * `regimen install`: install the capture pillar first, then the gate pillar, so
+ * the capture hook lands ahead of the gate on the pre-tool boundary (a denied
+ * tool call is still captured). Fail-fast: a failing step stops the run and
+ * returns its nonzero code, so a partial install never reports success. The one
+ * `regimen` self-link runs last; each instrument install runs with
+ * `selfLink: false` so only the unified bin is linked.
+ */
+export function install(
+  argv: ReadonlyArray<string>,
+  steps: InstrumentSteps = REAL_STEPS,
+): number {
+  const dryRun = argv.includes("--dry-run");
+  const dir = dataDir();
+  const gates = parseGates(argv);
+
+  process.stdout.write("Regimen install (capture then gates)\n");
+
+  const capture = steps.feedbackInstall({
+    dataDir: dir,
+    dryRun,
+    selfLink: false,
+  });
+  if (capture !== 0) return capture;
+
+  const gate = steps.enforcementInstall({ gates, dryRun });
+  if (gate !== 0) return gate;
+
+  const link = steps.selfLink("link", dryRun);
+  if (link !== 0) {
+    process.stderr.write("failed to link the regimen CLI onto PATH\n");
+    return link;
   }
-  const { verb, config, overrides } = parsed;
 
   process.stdout.write(
-    verb === "install"
-      ? "Regimen install (Feedback + Enforcement)\n"
-      : "Regimen uninstall\n",
+    dryRun
+      ? "dry run complete; nothing was changed\n"
+      : "Regimen installed; run `regimen status` to confirm the daemon is live\n",
   );
-
-  // locateAll runs for real even in dry-run (it is read-only), so a dry run
-  // surfaces missing-instrument errors exactly as a wet run would, before any
-  // subprocess spawns.
-  const cliRoot = cliPackageRoot();
-  const located = locateAll({
-    cliPackageRoot: cliRoot,
-    env: process.env,
-    overrides,
-  });
-  const misses = [...located.values()].filter(isLocateError);
-  if (misses.length > 0) {
-    for (const miss of misses) process.stderr.write(`${miss.message}\n`);
-    return EXIT_LOCATE_MISS;
-  }
-
-  const entryPaths = new Map<InstrumentName, string>();
-  const cloneRoots = new Map<InstrumentName, string>();
-  for (const [name, result] of located) {
-    if (!isLocateError(result)) {
-      entryPaths.set(name, result.entryPath);
-      cloneRoots.set(name, result.cloneRoot);
-    }
-  }
-
-  const steps =
-    verb === "install" ? planInstall(config) : planUninstall(config);
-  printPlan(steps, entryPaths, cliRoot);
-
-  const childEnv = harnessChildEnv(process.env);
-  const result = await runSteps(steps, entryPaths, cloneRoots, {
-    spawn: realSpawn,
-    failFast: verb === "install",
-    cliPackageRoot: cliRoot,
-    dryRun: config.dryRun,
-    ...(childEnv !== undefined ? { childEnv } : {}),
-  });
-  return result.exitCode;
+  return 0;
 }
 
 /**
- * The environment overlay the CLI hands each instrument child: the harness
- * identity as an opaque REGIMEN_HARNESS string, copied from the CLI's own
- * environment, so a child resolves its own harness without the CLI importing any
- * instrument internals or forwarding a --harness flag. Returns undefined when
- * REGIMEN_HARNESS is unset or empty, leaving the child to inherit the parent
- * environment unchanged (each instrument fails closed on its own if it then
- * cannot resolve a harness). Pure: same env in, same overlay out.
+ * `regimen uninstall`: tear down in reverse (gates before capture). Best effort:
+ * every step runs even if an earlier one failed, so a half-installed system can
+ * always be cleaned up; the aggregate exit is nonzero if any step failed. The one
+ * `regimen` self-unlink runs last; each instrument teardown runs with
+ * `selfLink: false`.
  */
-export function harnessChildEnv(
-  env: Record<string, string | undefined>,
-): Record<string, string> | undefined {
-  const harness = env.REGIMEN_HARNESS;
-  if (typeof harness !== "string" || harness.length === 0) return undefined;
-  return { REGIMEN_HARNESS: harness };
+export function uninstall(
+  argv: ReadonlyArray<string>,
+  steps: InstrumentSteps = REAL_STEPS,
+): number {
+  const dryRun = argv.includes("--dry-run");
+  const dir = dataDir();
+  let failed = 0;
+
+  process.stdout.write("Regimen uninstall (gates then capture)\n");
+
+  if (steps.enforcementUninstall({ dryRun }) !== 0) failed = 1;
+  if (
+    steps.feedbackUninstall({ dataDir: dir, dryRun, selfLink: false }) !== 0
+  ) {
+    failed = 1;
+  }
+
+  if (steps.selfLink("unlink", dryRun) !== 0) {
+    process.stderr.write("failed to unlink the regimen CLI\n");
+    failed = 1;
+  }
+
+  process.stdout.write(
+    dryRun
+      ? "dry run complete; nothing was changed\n"
+      : "Regimen uninstalled\n",
+  );
+  return failed;
 }
 
 /**
- * Print the CLI's computed plan so the user sees the composition before any
- * child runs: each instrument step's instrument, verb, resolved entry path, and
- * args, plus the CLI's own self-link step (`bun link`/`bun unlink` at the CLI
- * clone root), in order. Both layers preview under --dry-run (the CLI prints
- * this plan and each child still runs with --dry-run in its args; the CLI
- * self-link is previewed here and not spawned under --dry-run).
+ * Run the one `regimen` self-link as a `bun link`/`bun unlink` at the cli package
+ * root, or preview it under `--dry-run`. The cwd is the cli clone root so the
+ * link acts on the `regimen` bin, not the caller's package. This is the single
+ * self-link the install/uninstall orchestration owns; the per-instrument facades
+ * run with `selfLink: false` so only one bin is ever linked.
  */
-function printPlan(
-  steps: ReadonlyArray<Step>,
-  entryPaths: ReadonlyMap<InstrumentName, string>,
-  cliRoot: string,
-): void {
-  process.stdout.write("plan:\n");
-  for (const step of steps) {
-    if ("kind" in step) {
-      process.stdout.write(`  cli: bun ${step.verb} (cwd ${cliRoot})\n`);
-      continue;
-    }
-    const entry = entryPaths.get(step.instrument) ?? "(unresolved)";
-    const argsText = step.args.length > 0 ? ` ${step.args.join(" ")}` : "";
-    process.stdout.write(
-      `  ${step.instrument}: bun ${entry} ${step.verb}${argsText}\n`,
+function realSelfLink(verb: "link" | "unlink", dryRun: boolean): number {
+  if (dryRun) {
+    process.stdout.write(`would run: bun ${verb} (cwd ${cliPackageRoot()})\n`);
+    return 0;
+  }
+  process.stdout.write(`running: bun ${verb}\n`);
+  const proc = Bun.spawnSync({
+    cmd: ["bun", verb],
+    cwd: cliPackageRoot(),
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  if (proc.exitCode !== 0) {
+    process.stderr.write(
+      `command failed (exit ${proc.exitCode}): bun ${verb}\n`,
     );
+    return proc.exitCode ?? 1;
+  }
+  return 0;
+}
+
+/** Dispatch the grouped `regimen daemon <verb>` to the feedback lifecycle facade. */
+function daemon(argv: ReadonlyArray<string>): number | Promise<number> {
+  const verb = argv[1];
+  const dir = dataDir();
+  const dryRun = argv.includes("--dry-run");
+  if (verb === "start") return feedbackStart({ dataDir: dir, dryRun });
+  if (verb === "stop") return feedbackStop({ dataDir: dir, dryRun });
+  if (verb === "restart") return feedbackRestart({ dataDir: dir, dryRun });
+  if (verb === "status") return feedbackStatus({ dataDir: dir });
+  process.stderr.write("usage: regimen daemon <start|stop|restart|status>\n");
+  return 1;
+}
+
+/** Dispatch `regimen evidence` to the feedback evidence facade. */
+function evidence(argv: ReadonlyArray<string>): number {
+  const session = flagValue(argv, "--session");
+  return feedbackEvidence({
+    dataDir: dataDir(),
+    ...(session === undefined ? {} : { session }),
+  });
+}
+
+/** Dispatch `regimen assess` to the feedback assess facade. */
+function assess(argv: ReadonlyArray<string>): Promise<number> {
+  const session = flagValue(argv, "--session");
+  const judgeModel = flagValue(argv, "--judge-model");
+  return feedbackAssess({
+    dataDir: dataDir(),
+    ...(session === undefined ? {} : { session }),
+    ...(judgeModel === undefined ? {} : { judgeModel }),
+  });
+}
+
+/** Dispatch `regimen list` to the feedback list facade. */
+function list(argv: ReadonlyArray<string>): number {
+  const filter: SessionFilter = {
+    ...optionalFilter(argv, "--harness", "harness"),
+    ...optionalFilter(argv, "--model", "model"),
+    ...optionalFilter(argv, "--since", "since"),
+    ...optionalFilter(argv, "--until", "until"),
+    ...optionalFilter(argv, "--outcome", "outcome"),
+  };
+  return feedbackList({
+    dataDir: dataDir(),
+    filter,
+    asJson: argv.includes("--json"),
+  });
+}
+
+/**
+ * Parse argv and dispatch to the owning facade in-process. argv is the program's
+ * arguments with the node/script prefix already stripped (so the subcommand is
+ * at index 0). Returns the process exit code; an unknown command fails closed.
+ */
+export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
+  const command = argv[0];
+  if (command === undefined) {
+    process.stderr.write(
+      "usage: regimen <install|uninstall|status|daemon|assess|evidence|list>\n",
+    );
+    return 1;
+  }
+  switch (command) {
+    case "install":
+      return install(argv);
+    case "uninstall":
+      return uninstall(argv);
+    case "status":
+      return feedbackStatus({ dataDir: dataDir() });
+    case "daemon":
+      return daemon(argv);
+    case "assess":
+      return assess(argv);
+    case "evidence":
+      return evidence(argv);
+    case "list":
+      return list(argv);
+    default:
+      process.stderr.write(`unknown command: ${command}\n`);
+      return 1;
   }
 }
 

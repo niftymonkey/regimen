@@ -1,40 +1,101 @@
 /**
- * The wire-gates / unwire-gates CLI commands for the two divergent install
- * shapes. Copilot writes the `versioned-command-leaves` file at
- * `$COPILOT_HOME/hooks/hooks.json` (flat leaves under a top-level `version`, on
- * `preToolUse`). Gemini installs PROJECT-level: the gates land in
- * `<cwd>/.gemini/settings.json` (named+matched nested groups on `BeforeTool`),
- * not in the config home, because only a project-level settings file fires
- * headless (ADR-0011, docs/harness-divergences.md). The pure merge is covered by
- * gate-hooks-formats.test.ts; here we cover that the CLI writes the right file at
- * the right path with the right shape, and removes it cleanly.
+ * The wire-gates / unwire-gates commands for the two divergent install shapes,
+ * driven in-process against the exported facade functions (ADR-0012). Copilot
+ * writes the `versioned-command-leaves` file at `$COPILOT_HOME/hooks/hooks.json`
+ * (flat leaves under a top-level `version`, on `preToolUse`). Gemini installs
+ * PROJECT-level: the gates land in `<cwd>/.gemini/settings.json` (named+matched
+ * nested groups on `BeforeTool`), not in the config home, because only a
+ * project-level settings file fires headless (ADR-0011,
+ * docs/harness-divergences.md). The pure merge is covered by
+ * gate-hooks-formats.test.ts; here we cover that the command writes the right
+ * file at the right path with the right shape, and removes it cleanly.
  */
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type GateId, unwireGates, wireGates } from "../src/cli/index.ts";
 
-const CLI = join(import.meta.dir, "..", "src", "cli", "index.ts");
+const DEFAULT_GATES: ReadonlyArray<GateId> = [
+  "rm-rf",
+  "em-dash",
+  "inline-message",
+];
 
+/** Parse the gate selection out of the argv the old subprocess form carried. */
+function parseGates(args: ReadonlyArray<string>): GateId[] {
+  if (args.includes("--no-gates")) return [];
+  const selected: GateId[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const value = args[i + 1];
+    if (args[i] === "--gate" && value !== undefined) {
+      selected.push(value as GateId);
+    }
+  }
+  return selected.length > 0 ? selected : [...DEFAULT_GATES];
+}
+
+/**
+ * Drive a facade in-process with the same argv/env/cwd contract the old
+ * subprocess helper exposed, so every test below is untouched. Env overrides are
+ * applied onto process.env (undefined DELETES the key) and restored in a finally
+ * block; when a cwd is given the process is chdir'd into it for the call (the
+ * gemini project-level install reads process.cwd() directly) and restored after.
+ * stdout/stderr are captured by patching the stream writers.
+ */
 async function runCli(
   args: ReadonlyArray<string>,
   env: Record<string, string | undefined>,
   cwd?: string,
 ): Promise<{ exit: number; stdout: string; stderr: string }> {
-  const merged: Record<string, string | undefined> = { ...process.env, ...env };
-  const childEnv: Record<string, string> = {};
-  for (const [key, value] of Object.entries(merged)) {
-    if (value !== undefined) childEnv[key] = value;
+  const saved: Record<string, string | undefined> = {};
+  for (const key of Object.keys(env)) saved[key] = process.env[key];
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
-  const proc = Bun.spawn(["bun", CLI, ...args], {
-    env: childEnv,
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  return { exit: await proc.exited, stdout, stderr };
+
+  const savedCwd = process.cwd();
+  if (cwd !== undefined) process.chdir(cwd);
+
+  const realStdout = process.stdout.write.bind(process.stdout);
+  const realStderr = process.stderr.write.bind(process.stderr);
+  let stdout = "";
+  let stderr = "";
+  process.stdout.write = ((chunk: unknown) => {
+    stdout += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: unknown) => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+
+  try {
+    const command = args[0];
+    const dryRun = args.includes("--dry-run");
+    const gates = parseGates(args);
+    let exit: number;
+    switch (command) {
+      case "wire-gates":
+        exit = wireGates({ gates, dryRun });
+        break;
+      case "unwire-gates":
+        exit = unwireGates({ dryRun });
+        break;
+      default:
+        throw new Error(`unknown command in test: ${String(command)}`);
+    }
+    return { exit, stdout, stderr };
+  } finally {
+    process.stdout.write = realStdout;
+    process.stderr.write = realStderr;
+    process.chdir(savedCwd);
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 }
 
 function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {

@@ -317,3 +317,51 @@ test("uninstall is callable in-process with an options object under dry-run", as
   expect(exit).toBe(0);
   expect(stdout).toContain("dry run complete");
 });
+
+test("install previews the bun link self-link by default (standalone caller)", async () => {
+  process.env.REGIMEN_HARNESS = "codex";
+  process.env.CODEX_HOME = tempDir("regimen-facade-codex-");
+  process.env.HOME = tempDir("regimen-facade-home-");
+  const dataDir = tempDir("regimen-facade-");
+  const { exit, stdout } = await capture(() =>
+    install({ dataDir, dryRun: true }),
+  );
+  expect(exit).toBe(0);
+  expect(stdout).toContain("would run: bun link");
+});
+
+test("install with selfLink:false skips the bun link step so the dispatcher owns the one regimen link", async () => {
+  process.env.REGIMEN_HARNESS = "codex";
+  process.env.CODEX_HOME = tempDir("regimen-facade-codex-");
+  process.env.HOME = tempDir("regimen-facade-home-");
+  const dataDir = tempDir("regimen-facade-");
+  const { exit, stdout } = await capture(() =>
+    install({ dataDir, dryRun: true, selfLink: false }),
+  );
+  expect(exit).toBe(0);
+  expect(stdout).not.toContain("bun link");
+});
+
+test("uninstall previews the bun unlink self-link by default (standalone caller)", async () => {
+  process.env.REGIMEN_HARNESS = "codex";
+  process.env.CODEX_HOME = tempDir("regimen-facade-codex-");
+  process.env.HOME = tempDir("regimen-facade-home-");
+  const dataDir = tempDir("regimen-facade-");
+  const { exit, stdout } = await capture(() =>
+    uninstall({ dataDir, dryRun: true }),
+  );
+  expect(exit).toBe(0);
+  expect(stdout).toContain("would run: bun unlink");
+});
+
+test("uninstall with selfLink:false skips the bun unlink step", async () => {
+  process.env.REGIMEN_HARNESS = "codex";
+  process.env.CODEX_HOME = tempDir("regimen-facade-codex-");
+  process.env.HOME = tempDir("regimen-facade-home-");
+  const dataDir = tempDir("regimen-facade-");
+  const { exit, stdout } = await capture(() =>
+    uninstall({ dataDir, dryRun: true, selfLink: false }),
+  );
+  expect(exit).toBe(0);
+  expect(stdout).not.toContain("bun unlink");
+});

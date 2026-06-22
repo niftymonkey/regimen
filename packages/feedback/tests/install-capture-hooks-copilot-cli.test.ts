@@ -1,6 +1,7 @@
 /**
  * The wire-hooks / unwire-hooks CLI seam for Copilot (`versioned-command-leaves`),
- * driven in-process through `runCli`. The codex (nested) seam is covered by
+ * driven in-process through the exported command facades (ADR-0012). The codex
+ * (nested) seam is covered by
  * install-capture-hooks-cli.test.ts; this suite proves the same commands write and
  * strip Copilot's on-disk shape: `<COPILOT_HOME>/hooks/hooks.json` holding
  * `{ version, hooks: { <event>: [flat leaf] } }`. Each test runs inside an isolated
@@ -17,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { runCli } from "../src/cli/index.ts";
+import { dispatchFeedback } from "./facade-dispatch.ts";
 import { harnessDescriptor } from "../src/harness/descriptor.ts";
 
 const DESCRIPTOR = harnessDescriptor("copilot");
@@ -100,7 +101,7 @@ async function runCommand(...args: string[]): Promise<CliRun> {
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await runCli(["bun", "feedback", ...args]);
+  const exit = await dispatchFeedback(args);
   return { exit, stdout, stderr };
 }
 

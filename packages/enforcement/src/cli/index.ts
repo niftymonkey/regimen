@@ -1,23 +1,19 @@
-#!/usr/bin/env bun
 /**
- * The Enforcement CLI: `enforcement <command>`.
+ * The Enforcement command facade: each command is an exported library function
+ * taking a typed, already-parsed options object, the surface the unified
+ * `regimen` CLI dispatches to in-process (ADR-0012). The commands are
+ * `install`/`uninstall` (the lifecycle) and `wireGates`/`unwireGates` (the
+ * gate-wiring and gate-removal steps on their own).
  *
- * Subcommands:
- *   install        wire the discipline gates into the harness's hooks file
- *   uninstall      remove Enforcement's gate entries (best effort)
- *   wire-gates     the gate-wiring step on its own
- *   unwire-gates   the gate-removal step on its own
- *
- * The harness and its config home travel in the environment, not in flags:
+ * The harness and its config home travel in the environment, not in options:
  * Enforcement resolves the harness from REGIMEN_HARNESS (failing closed when it
  * is unset or unknown) and the config home from the env var the shared contract
  * names (e.g. CODEX_HOME), else the contract's default subdir under the user's
- * home. Flags: --dry-run (preview every step, write nothing), --gate <id>
- * (repeatable), --no-gates. The default gate set is all three. The pure planner
- * owns the merge; this command owns the file read/write, the dry-run preview,
- * and the jq preflight. Enforcement owns gates only: it never wires the capture
- * hook (Feedback's installer does that) and never touches a capture leaf or a
- * user hook.
+ * home. The options object carries the parsed gate set and the dry-run flag; the
+ * dispatcher owns argv parsing. The pure planner owns the merge; these commands
+ * own the file read/write, the dry-run preview, and the jq preflight. Enforcement
+ * owns gates only: it never wires the capture hook (Feedback's installer does
+ * that) and never touches a capture leaf or a user hook.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -36,57 +32,10 @@ import {
   planGateHooksRemoval,
 } from "../install/gate-hooks.ts";
 
-export function runCli(argv: ReadonlyArray<string>): number {
-  const command = argv[2];
-  if (command === undefined) {
-    process.stderr.write("usage: enforcement <command>\n");
-    return 1;
-  }
-  const dryRun = argv.includes("--dry-run");
-  if (command === "wire-gates") {
-    return wireGates({ gates: parseGates(argv), dryRun });
-  }
-  if (command === "unwire-gates") return unwireGates({ dryRun });
-  if (command === "install") {
-    return install({ gates: parseGates(argv), dryRun });
-  }
-  if (command === "uninstall") return uninstall({ dryRun });
-  process.stderr.write(`unknown command: ${command}\n`);
-  return 1;
-}
-
-/** The gates wired by default (all three). */
-const DEFAULT_GATES: ReadonlyArray<GateId> = [
-  "rm-rf",
-  "em-dash",
-  "inline-message",
-];
+export type { GateId } from "../install/gate-hooks.ts";
 
 /** Gates that run as shell scripts and therefore need `jq` on PATH. */
 const SHELL_GATES: ReadonlySet<string> = new Set(["em-dash", "inline-message"]);
-
-/** Every value following a repeatable flag, in order. */
-function collectFlagValues(
-  argv: ReadonlyArray<string>,
-  flag: string,
-): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === flag && argv[i + 1] !== undefined) out.push(argv[i + 1]!);
-  }
-  return out;
-}
-
-/**
- * The gate set to wire: `--no-gates` for none, one or more `--gate <id>` to
- * override, otherwise the default all-three set. Unknown ids are not rejected
- * here; the pure planner validates them and fails loudly.
- */
-function parseGates(argv: ReadonlyArray<string>): GateId[] {
-  if (argv.includes("--no-gates")) return [];
-  const explicit = collectFlagValues(argv, "--gate");
-  return explicit.length > 0 ? (explicit as GateId[]) : [...DEFAULT_GATES];
-}
 
 /** The harness and the resolved hooks file a command targets, or null when it cannot be resolved. */
 interface Target {
@@ -344,8 +293,4 @@ export function uninstall(options: UninstallOptions): number {
       : "Enforcement uninstalled\n",
   );
   return failed;
-}
-
-if (import.meta.main) {
-  process.exit(runCli(process.argv));
 }
