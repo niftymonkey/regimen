@@ -40,30 +40,57 @@ git --version    # Git for Windows; install from https://git-scm.com if missing
 ## Install
 
 ```powershell
-# 1. Clone the monorepo.
+# 1. Clone the monorepo, then work from inside it.
 git clone https://github.com/niftymonkey/regimen.git
 cd regimen
-
-# 2. Install workspace dependencies.
-bun install
-
-# 3. Choose the harness you are installing for, and preview first.
-#    There is no ./install.sh on native Windows (it is bash); call the CLI directly.
-$env:REGIMEN_HARNESS = "claude"     # or: codex | copilot | gemini
-bun packages\cli\src\cli\index.ts install --gate rm-rf --dry-run
-
-# 4. If the dry-run plan looks right, run it for real.
-bun packages\cli\src\cli\index.ts install --gate rm-rf
 ```
 
-Notes on the flags and the harness:
+`install.ps1` is the PowerShell twin of `install.sh`: it runs `bun install`, then hands your flags to `regimen install`, so you never type the `bun packages\cli\src\cli\index.ts` path by hand. (It is unverified on Windows like the rest of this path; if a flag does not reach the CLI, fall back to the explicit `bun packages\cli\src\cli\index.ts install <flags>` form.)
 
-- **Always set `$env:REGIMEN_HARNESS`** in PowerShell. Auto-detection relies on a CLI-set marker env var that a plain PowerShell session will not have, so set it explicitly.
+### Install for all four harnesses
+
+Claude, Codex, and Copilot install once into your user config homes, so one command covers them everywhere. Gemini only fires project-level hooks, so it is a separate, per-workspace step.
+
+```powershell
+# 2. The three global harnesses. Preview first, then run it for real.
+#    Repeat --harnesses per harness. Space-separating them
+#    (--harnesses claude codex copilot) silently installs only the FIRST one.
+.\install.ps1 --harnesses claude --harnesses codex --harnesses copilot --gate rm-rf --dry-run
+.\install.ps1 --harnesses claude --harnesses codex --harnesses copilot --gate rm-rf
+```
+
+That first run self-links `regimen`, so open a fresh PowerShell window for the next step (the bare `regimen` command is now on PATH).
+
+```powershell
+# 3. Gemini, once per workspace you launch gemini from. Use the bare `regimen`
+#    here, NOT install.ps1: the bootstrap returns to the clone, but Gemini's
+#    hook must land in the workspace you run it from.
+cd C:\path\to\a\gemini\workspace
+regimen install --harnesses gemini --gate rm-rf
+# repeat the cd + install in each directory you run gemini from
+```
+
+`.\install.ps1 --all` installs all four in one shot, but it drops Gemini's hook into whatever directory you ran it from, so prefer the two-step flow above unless you are already in your main Gemini workspace.
+
+### Install for a single harness
+
+To install for just one harness, set `REGIMEN_HARNESS` and drop the flag:
+
+```powershell
+$env:REGIMEN_HARNESS = "claude"   # or: codex | copilot | gemini
+.\install.ps1 --gate rm-rf
+```
+
+Notes:
+
+- **Repeat `--harnesses`, do not space-separate.** The flag takes one harness per occurrence, so `--harnesses claude codex copilot` reads only `claude` and silently drops the rest. Repeat the flag (`--harnesses claude --harnesses codex`), or use `--all`.
+- **PowerShell execution policy.** If the script is blocked ("running scripts is disabled on this system"), run it as `powershell -ExecutionPolicy Bypass -File .\install.ps1 <flags>`, or allow it for the session with `Set-ExecutionPolicy -Scope Process Bypass`.
 - **`--gate rm-rf` is deliberate on Windows.** Of the three bundled gates, only `rm-rf` is a cross-platform TypeScript script. The `em-dash` and `inline-message` gates are bash scripts and need a POSIX shell (for example Git Bash's `sh`) plus `jq` on PATH to run; on a stock Windows box they will not fire. Start with `--gate rm-rf` (or `--no-gates` for capture only), and only add the bash gates once you have a `sh` interpreter available and have verified they execute.
-- **Gemini installs per workspace.** For Gemini, run the install from inside the workspace (directory) where you launch `gemini`; the capture hook lands in `<that-dir>\.gemini\settings.json`, not a global config. The CLI prints a one-line notice when it does this.
-- **Several harnesses at once:** `bun packages\cli\src\cli\index.ts install --harnesses claude codex copilot --gate rm-rf` loops the install. Keep Gemini separate and per-workspace as above.
+- **Why Gemini is separate.** It only fires project-level hooks headless, so its capture hook must live in each workspace's `.gemini\settings.json`. The CLI prints a one-line notice when it installs per workspace.
+- **The daemon and the self-link are shared, not per-harness.** Installing three harnesses at once re-runs the daemon registration and the `bun link` idempotently (one `regimen-feedback` task, one linked `regimen`), so you do not get three daemons.
+- **The manifest records every harness** with its scope (`config-home` for the three, `workspace:<path>` for each Gemini directory), so a later `regimen update` re-applies each one in the right place.
 
-After the install self-links `regimen`, open a **new PowerShell window** so the linked `regimen` command is on PATH. In the same window you installed from, keep using the full `bun packages\cli\src\cli\index.ts <command>` form.
+After the install self-links `regimen`, open a **new PowerShell window** so the linked `regimen` command is on PATH.
 
 ## Start the daemon now
 
