@@ -1072,7 +1072,7 @@ export function uninstall(options: {
  * (the inverse of install-skill). Reuses the skill planner to locate each
  * target. A missing directory is not an error: uninstall must be idempotent.
  */
-function uninstallSkill(options: { dryRun: boolean }): number {
+export function uninstallSkill(options: { dryRun: boolean }): number {
   const target = resolveHarnessTarget();
   if (target === null) return 1;
   const bundleDir = resolve(import.meta.dir, "..", "..");

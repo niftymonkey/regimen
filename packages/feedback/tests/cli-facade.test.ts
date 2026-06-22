@@ -30,6 +30,7 @@ import {
   stop,
   uninstall,
   uninstallDaemon,
+  uninstallSkill,
   unwireHooks,
   wireHooks,
 } from "../src/cli/index.ts";
@@ -264,6 +265,16 @@ test("installSkill is callable in-process with an options object under dry-run",
   const { exit, stdout } = await capture(() => installSkill({ dryRun: true }));
   expect(exit).toBe(0);
   expect(stdout).toContain("would write");
+});
+
+test("uninstallSkill is callable in-process with an options object under dry-run", async () => {
+  process.env.REGIMEN_HARNESS = "codex";
+  process.env.CODEX_HOME = tempDir("regimen-facade-codex-");
+  const { exit, stdout } = await capture(() =>
+    uninstallSkill({ dryRun: true }),
+  );
+  expect(exit).toBe(0);
+  expect(stdout).toContain("would remove");
 });
 
 test("wireHooks is callable in-process with an options object under dry-run", async () => {
