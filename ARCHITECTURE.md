@@ -21,7 +21,7 @@ Feedback has two visible layers, both anchored to the same evidence:
 
 The unit Feedback measures is the assignment, classified by intent and rolled up by intent across conversations. Feedback measures the conversation, not the software, since software quality is not Regimen's to judge. Settled in ADR-0003.
 
-Feedback's data architecture (capture hook, JSONL buffer, loader, SQLite store) is settled in ADR-0005; the loader runs as an opt-in always-on daemon per ADR-0006. What Feedback surfaces and how is detailed in [`docs/feedback-surfacing.md`](docs/feedback-surfacing.md). The instrument's own operational health, what a healthy install looks like and what `feedback status` should surface, is specified in [`docs/feedback-health.md`](docs/feedback-health.md).
+Feedback's data architecture (capture hook, JSONL buffer, loader, SQLite store) is settled in ADR-0005; the loader runs as an opt-in always-on daemon per ADR-0006. What Feedback surfaces and how is detailed in [`docs/feedback-surfacing.md`](docs/feedback-surfacing.md). The instrument's own operational health, what a healthy install looks like and what `regimen daemon status` should surface, is specified in [`docs/feedback-health.md`](docs/feedback-health.md).
 
 ## The two loops
 

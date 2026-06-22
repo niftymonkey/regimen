@@ -7,23 +7,23 @@ description: "Pull a judged verdict on the current conversation from Regimen's F
 
 Pull a judged verdict for the _current_ conversation and read it back into context. This is the judged twin of `feedback-evidence`. Where evidence hands you deterministic facts and leaves the interpreting to you, judgment hands you the judge's interpretation already formed: an Intent, an Outcome, and an evidence-anchored assessment of how the conversation has gone so far.
 
-**This is heavier than evidence. Use it deliberately.** `feedback assess` makes a LIVE model call: it costs money and takes a few seconds, where `feedback-evidence` is free and instant. It also writes the verdict to the store. Invoke it at a MEANINGFUL checkpoint, a phase boundary, before a risky step, or when the engineer asks "is this going well?", not reflexively and not on every turn.
+**This is heavier than evidence. Use it deliberately.** `regimen assess` makes a LIVE model call: it costs money and takes a few seconds, where `regimen evidence` is free and instant. It also writes the verdict to the store. Invoke it at a MEANINGFUL checkpoint, a phase boundary, before a risky step, or when the engineer asks "is this going well?", not reflexively and not on every turn.
 
 ## Process
 
 ### 1. Run the assessment
 
 ```bash
-feedback assess
+regimen assess
 ```
 
-The command resolves the current session itself from your working directory, exactly as `feedback-evidence` does, so it needs no arguments. It detects which agent CLI it is running inside, prefers the session id the Regimen capture hook stamped for this cwd on SessionStart, and falls back to the most-recently-active session for this harness when no stamp is present. The command judges the conversation so far, supersedes any prior verdict for this session, and prints a `JudgmentDigest` as one JSON object on stdout.
+The command resolves the current session itself from your working directory, exactly as `regimen evidence` does, so it needs no arguments. It detects which agent CLI it is running inside, prefers the session id the Regimen capture hook stamped for this cwd on SessionStart, and falls back to the most-recently-active session for this harness when no stamp is present. The command judges the conversation so far, supersedes any prior verdict for this session, and prints a `JudgmentDigest` as one JSON object on stdout.
 
-Unlike `feedback evidence`, this command makes a network call to the judge model and writes the verdict to the local store.
+Unlike `regimen evidence`, this command makes a network call to the judge model and writes the verdict to the local store.
 
 ### 2. Handle the outcome
 
-- **`feedback: command not found`**: the Feedback instrument is not installed on this machine. Tell the engineer, and stop; there is nothing to assess.
+- **`regimen: command not found`**: Regimen is not installed on this machine. Tell the engineer, and stop; there is nothing to assess.
 - **`could not determine the harness`**: the CLI could not tell which agent harness it is running inside. This is an environment problem, not a session problem. Say so, and stop.
 - **`"judged": false`**: the unjudged branch. Feedback is off, no assessment has run yet, or the transcript could not be read. The `note` field says which. Report it plainly, and stop; there is no verdict to lean on.
 - **`"judged": true`**: a verdict came back. Continue to step 3.
@@ -53,6 +53,6 @@ If the engineer asked, report the verdict concisely: Intent, Outcome, and the gi
 
 ## Notes
 
-- Session-id resolution is the only harness-specific step. The `feedback assess` command and the digest it prints are harness-agnostic; the CLI auto-detects the harness and selects the right resolver. Resolution has the same one known limitation as evidence: if two sessions run in the same working directory at once, the per-cwd stamp cannot tell them apart, and the most-recently-active session wins.
+- Session-id resolution is the only harness-specific step. The `regimen assess` command and the digest it prints are harness-agnostic; the CLI auto-detects the harness and selects the right resolver. Resolution has the same one known limitation as evidence: if two sessions run in the same working directory at once, the per-cwd stamp cannot tell them apart, and the most-recently-active session wins.
 - The conversation is open when you invoke this, so the verdict judges the conversation _so far_, not a finished session. Re-running later supersedes it with a fresh verdict over more of the conversation.
 - This costs money and takes a few seconds, and it writes to the store. That is the price of a verdict over raw facts. Invoke it at meaningful checkpoints, not reflexively.
