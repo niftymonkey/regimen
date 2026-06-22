@@ -187,8 +187,72 @@ test("resolveDefaultJudgeModel honors the model override and an env base URL", a
   expect(sent.model).toBe("claude-sonnet-4-6");
 });
 
-test("resolveDefaultJudgeModel throws when ANTHROPIC_API_KEY is absent", () => {
-  expect(() => resolveDefaultJudgeModel({ env: {} })).toThrow(
-    /ANTHROPIC_API_KEY/,
-  );
+test("resolveDefaultJudgeModel falls back to the claude CLI adapter when the key is absent but claude is on PATH", async () => {
+  const captured: { args: ReadonlyArray<string>; input: string }[] = [];
+  const llm = resolveDefaultJudgeModel({
+    env: {},
+    claudeOnPath: () => true,
+    run: (args, input) => {
+      captured.push({ args, input });
+      return Promise.resolve({
+        stdout: JSON.stringify({
+          subtype: "success",
+          is_error: false,
+          result: "{}",
+          modelUsage: { "claude-haiku-4-5-20251001": {} },
+        }),
+        stderr: "",
+        exitCode: 0,
+      });
+    },
+  });
+
+  const response = await llm.complete({ system: "s", user: "u" });
+  expect(response.model).toBe("claude-haiku-4-5-20251001");
+  expect(captured).toHaveLength(1);
+  expect(captured[0]!.args).toContain("--print");
+  expect(captured[0]!.args).toContain("--output-format");
+  // No --judge-model was passed, so the CLI path omits --model entirely.
+  expect(captured[0]!.args).not.toContain("--model");
+});
+
+test("resolveDefaultJudgeModel throws when ANTHROPIC_API_KEY is absent and claude is not on PATH", () => {
+  expect(() =>
+    resolveDefaultJudgeModel({ env: {}, claudeOnPath: () => false }),
+  ).toThrow(/ANTHROPIC_API_KEY/);
+});
+
+test("judgeVia 'cli' uses the CLI adapter even when a key is present", async () => {
+  const captured: { args: ReadonlyArray<string>; input: string }[] = [];
+  const llm = resolveDefaultJudgeModel({
+    env: { ANTHROPIC_API_KEY: "sk-ant-env" },
+    judgeVia: "cli",
+    run: (args, input) => {
+      captured.push({ args, input });
+      return Promise.resolve({
+        stdout: JSON.stringify({
+          subtype: "success",
+          is_error: false,
+          result: "{}",
+          modelUsage: { "claude-haiku-4-5-20251001": {} },
+        }),
+        stderr: "",
+        exitCode: 0,
+      });
+    },
+  });
+
+  await llm.complete({ system: "s", user: "u" });
+  expect(captured).toHaveLength(1);
+  expect(captured[0]!.args).toContain("--print");
+});
+
+test("judgeVia 'api' without a key throws ANTHROPIC_API_KEY even when claude is on PATH", () => {
+  expect(() =>
+    resolveDefaultJudgeModel({
+      env: {},
+      judgeVia: "api",
+      claudeOnPath: () => true,
+    }),
+  ).toThrow(/ANTHROPIC_API_KEY/);
 });

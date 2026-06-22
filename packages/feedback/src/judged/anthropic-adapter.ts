@@ -15,6 +15,10 @@ import type {
   JudgeModelRequest,
   JudgeModelResponse,
 } from "./port.ts";
+import {
+  claudeCliJudgeModel,
+  type RunClaudeCli,
+} from "./claude-cli-adapter.ts";
 
 export interface AnthropicJudgeModelOptions {
   readonly apiKey: string;
@@ -93,10 +97,24 @@ export function anthropicJudgeModel(
 export interface ResolveDefaultJudgeModelOptions {
   /** The `--judge-model` override; omit for the env/default model. */
   readonly model?: string;
+  /**
+   * The `--judge-via` override forcing one backend: `"api"` requires
+   * ANTHROPIC_API_KEY and POSTs the Anthropic HTTP API; `"cli"` shells out to
+   * the local `claude` CLI. Omit to auto-select (key present -> API, else CLI).
+   */
+  readonly judgeVia?: "cli" | "api";
   /** Injectable for tests; defaults to process.env in production. */
   readonly env?: Record<string, string | undefined>;
   /** Injectable for tests; defaults to the global fetch in production. */
   readonly fetch?: typeof fetch;
+  /**
+   * Whether the `claude` CLI is on PATH. Injectable for tests because
+   * `Bun.which` ignores in-process PATH mutation; defaults to a real
+   * `Bun.which("claude")` check.
+   */
+  readonly claudeOnPath?: () => boolean;
+  /** Injectable for tests so the CLI adapter needs no real spawn. */
+  readonly run?: RunClaudeCli;
 }
 
 /** The default judge model and base URL when env does not override them. */
@@ -105,28 +123,58 @@ const DEFAULT_BASE_URL = "https://api.anthropic.com";
 
 /**
  * Construct the production judge adapter over the engineer's already-configured
- * Claude (spec section 3). Reads ANTHROPIC_API_KEY (required), the model
- * (ANTHROPIC_MODEL or the date-stamped default, overridden by `options.model`,
- * i.e. the --judge-model flag), and the base URL (ANTHROPIC_BASE_URL or the
- * default) from env at runtime. Never a hardcoded key. `judgeConversation` uses
- * this when `config.llm` is omitted.
+ * Claude (spec section 3), auto-selecting between the two backends.
+ *
+ * When ANTHROPIC_API_KEY is present the HTTP adapter is used (reading the model
+ * from ANTHROPIC_MODEL or the date-stamped default, overridden by
+ * `options.model` i.e. the --judge-model flag, and the base URL from
+ * ANTHROPIC_BASE_URL or the default; never a hardcoded key). When the key is
+ * absent but the `claude` CLI is on PATH the CLI adapter is used, reusing
+ * whatever auth Claude Code already has (Bedrock, OAuth, Vertex, or a direct
+ * key) with no separate key. `--judge-via` forces one backend. With neither a
+ * key nor the CLI available it throws an actionable error naming both.
+ * `judgeConversation` uses this when `config.llm` is omitted.
  */
 export function resolveDefaultJudgeModel(
   options: ResolveDefaultJudgeModelOptions = {},
 ): JudgeModelPort {
   const env = options.env ?? process.env;
   const apiKey = env.ANTHROPIC_API_KEY;
-  if (apiKey === undefined || apiKey.length === 0) {
-    throw new Error(
-      "ANTHROPIC_API_KEY is not set; the judge LLM is the engineer's configured Claude and reads its key from the environment",
-    );
-  }
-  const model = options.model ?? env.ANTHROPIC_MODEL ?? DEFAULT_JUDGE_MODEL;
-  const baseUrl = env.ANTHROPIC_BASE_URL ?? DEFAULT_BASE_URL;
-  return anthropicJudgeModel({
-    apiKey,
-    model,
-    baseUrl,
-    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-  });
+  const hasKey = apiKey !== undefined && apiKey.length > 0;
+  const claudeOnPath =
+    options.claudeOnPath ??
+    (() => Bun.which("claude", { PATH: env.PATH ?? "" }) !== null);
+
+  // The CLI adapter passes the model only when --judge-model was set, letting
+  // Claude Code choose its own default otherwise.
+  const cliAdapter = (): JudgeModelPort =>
+    claudeCliJudgeModel({
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.run === undefined ? {} : { run: options.run }),
+    });
+
+  const httpAdapter = (): JudgeModelPort => {
+    if (!hasKey) {
+      throw new Error(
+        "ANTHROPIC_API_KEY is not set; the judge LLM is the engineer's configured Claude and reads its key from the environment",
+      );
+    }
+    const model = options.model ?? env.ANTHROPIC_MODEL ?? DEFAULT_JUDGE_MODEL;
+    const baseUrl = env.ANTHROPIC_BASE_URL ?? DEFAULT_BASE_URL;
+    return anthropicJudgeModel({
+      apiKey,
+      model,
+      baseUrl,
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    });
+  };
+
+  if (options.judgeVia === "api") return httpAdapter();
+  if (options.judgeVia === "cli") return cliAdapter();
+
+  if (hasKey) return httpAdapter();
+  if (claudeOnPath()) return cliAdapter();
+  throw new Error(
+    "ANTHROPIC_API_KEY is not set and the claude CLI is not on PATH; set ANTHROPIC_API_KEY for the HTTP judge, or install/authenticate the claude CLI for the local judge",
+  );
 }

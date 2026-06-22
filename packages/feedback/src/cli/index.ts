@@ -506,6 +506,7 @@ export async function assess(options: {
   dataDir: string;
   session?: string;
   judgeModel?: string;
+  judgeVia?: "cli" | "api";
 }): Promise<number> {
   const { dataDir: dir } = options;
   // Resolve the harness first, then drive everything (config home, sessions dir,
@@ -566,15 +567,17 @@ export async function assess(options: {
   // the try keeps a missing key (or any resolution failure) on the clean
   // stderr-plus-exit-1 path rather than an unhandled rejection.
   const judgeModel = options.judgeModel;
+  const judgeVia = options.judgeVia;
 
   // Assess writes the store (events + verdict), so it opens read-write, unlike
   // the read-only evidence command. It runs regardless of the enabled flag: the
   // explicit invocation against a named transcript is the consent (spec 9.6).
   const store = openStore(join(dir, "feedback.db"));
   try {
-    const llm = resolveDefaultJudgeModel(
-      judgeModel === undefined ? {} : { model: judgeModel },
-    );
+    const llm = resolveDefaultJudgeModel({
+      ...(judgeModel === undefined ? {} : { model: judgeModel }),
+      ...(judgeVia === undefined ? {} : { judgeVia }),
+    });
     const digest = await assessConversation({
       store,
       harness,
