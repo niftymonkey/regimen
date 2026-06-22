@@ -41,6 +41,15 @@ test("windowsServiceContent wraps bun in cmd.exe to set REGIMEN_DATA_DIR, pins p
   expect(content).toContain(`REGIMEN_DATA_DIR=${CTX.dataDir}`);
 });
 
+test("windowsServiceContent quotes the cmd set assignment so REGIMEN_DATA_DIR carries no trailing space before &&", () => {
+  const content = windowsServiceContent(CTX);
+  const args = content.match(/<Arguments>([\s\S]*?)<\/Arguments>/);
+  expect(args).not.toBeNull();
+  const argsBody = args![1];
+  expect(argsBody).toContain(`set "REGIMEN_DATA_DIR=${CTX.dataDir}"`);
+  expect(argsBody).not.toContain(`set REGIMEN_DATA_DIR=`);
+});
+
 test("windowsServiceContent XML-escapes the command's & and > so the Arguments element is well-formed", () => {
   const content = windowsServiceContent(CTX);
   const args = content.match(/<Arguments>([\s\S]*?)<\/Arguments>/);
