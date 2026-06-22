@@ -74,50 +74,73 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
   }
   const dir = dataDir();
   if (command === "start") {
-    return start(dir, argv.includes("--dry-run"));
+    return start({ dataDir: dir, dryRun: argv.includes("--dry-run") });
   }
   if (command === "stop") {
-    return stop(dir, argv.includes("--dry-run"));
+    return stop({ dataDir: dir, dryRun: argv.includes("--dry-run") });
   }
   if (command === "restart") {
-    return restart(dir, argv.includes("--dry-run"));
+    return restart({ dataDir: dir, dryRun: argv.includes("--dry-run") });
   }
   if (command === "status") {
-    process.stdout.write(formatStatus(readStatus(dir)));
-    return 0;
+    return status({ dataDir: dir });
   }
   if (command === "install-daemon") {
-    return installDaemon(dir, argv.includes("--dry-run"));
+    return installDaemon({ dataDir: dir, dryRun: argv.includes("--dry-run") });
   }
   if (command === "uninstall-daemon") {
-    return uninstallDaemon(dir, argv.includes("--dry-run"));
+    return uninstallDaemon({
+      dataDir: dir,
+      dryRun: argv.includes("--dry-run"),
+    });
   }
   if (command === "install-skill") {
-    return installSkill(argv);
+    return installSkill({ dryRun: argv.includes("--dry-run") });
   }
   if (command === "purge") {
-    return purge(dir, argv.includes("--all"), argv.includes("--force"));
+    return purge({
+      dataDir: dir,
+      all: argv.includes("--all"),
+      force: argv.includes("--force"),
+    });
   }
   if (command === "evidence") {
-    return evidence(dir, argv);
+    const session = flagValue(argv, "--session");
+    return evidence({
+      dataDir: dir,
+      ...(session === undefined ? {} : { session }),
+    });
   }
   if (command === "assess") {
-    return assess(dir, argv);
+    const session = flagValue(argv, "--session");
+    const judgeModel = flagValue(argv, "--judge-model");
+    return assess({
+      dataDir: dir,
+      ...(session === undefined ? {} : { session }),
+      ...(judgeModel === undefined ? {} : { judgeModel }),
+    });
   }
   if (command === "list") {
-    return list(dir, argv);
+    const filter: SessionFilter = {
+      ...optionalFlag(argv, "--harness", "harness"),
+      ...optionalFlag(argv, "--model", "model"),
+      ...optionalFlag(argv, "--since", "since"),
+      ...optionalFlag(argv, "--until", "until"),
+      ...optionalFlag(argv, "--outcome", "outcome"),
+    };
+    return list({ dataDir: dir, filter, asJson: argv.includes("--json") });
   }
   if (command === "wire-hooks") {
-    return wireHooks(argv);
+    return wireHooks({ dryRun: argv.includes("--dry-run") });
   }
   if (command === "unwire-hooks") {
-    return unwireHooks(argv);
+    return unwireHooks({ dryRun: argv.includes("--dry-run") });
   }
   if (command === "install") {
-    return install(dir, argv);
+    return install({ dataDir: dir, dryRun: argv.includes("--dry-run") });
   }
   if (command === "uninstall") {
-    return uninstall(dir, argv);
+    return uninstall({ dataDir: dir, dryRun: argv.includes("--dry-run") });
   }
   process.stderr.write(`unknown command: ${command}\n`);
   return 1;
@@ -224,7 +247,8 @@ function daemonBecameLive(dir: string): boolean {
  * semantics stand but the output says plainly that no daemon was launched and
  * how to run one, so nothing implies a daemon is now running.
  */
-function start(dir: string, dryRun: boolean): number {
+export function start(options: { dataDir: string; dryRun: boolean }): number {
+  const { dataDir: dir, dryRun } = options;
   const lifecycle = resolveLifecycle(dir);
   if (lifecycle === null) return 1;
   const alreadyEnabled = isEnabled(dir);
@@ -272,7 +296,8 @@ function start(dir: string, dryRun: boolean): number {
  * manually-run daemon polls the flag and self-exits within a poll interval; the
  * output says so rather than implying an immediate stop.
  */
-function stop(dir: string, dryRun: boolean): number {
+export function stop(options: { dataDir: string; dryRun: boolean }): number {
+  const { dataDir: dir, dryRun } = options;
   const lifecycle = resolveLifecycle(dir);
   if (lifecycle === null) return 1;
   const wasEnabled = isEnabled(dir);
@@ -326,7 +351,8 @@ function stop(dir: string, dryRun: boolean): number {
  * no daemon running it just ensures the flag is set and points at how to run
  * one.
  */
-function restart(dir: string, dryRun: boolean): number {
+export function restart(options: { dataDir: string; dryRun: boolean }): number {
+  const { dataDir: dir, dryRun } = options;
   const lifecycle = resolveLifecycle(dir);
   if (lifecycle === null) return 1;
 
@@ -390,7 +416,17 @@ function restart(dir: string, dryRun: boolean): number {
  * A purge while the daemon is running would race its writes, so it refuses
  * unless `force` is set.
  */
-function purge(dir: string, includeStore: boolean, force: boolean): number {
+export function status(options: { dataDir: string }): number {
+  process.stdout.write(formatStatus(readStatus(options.dataDir)));
+  return 0;
+}
+
+export function purge(options: {
+  dataDir: string;
+  all: boolean;
+  force: boolean;
+}): number {
+  const { dataDir: dir, all: includeStore, force } = options;
   const daemon = readStatus(dir).daemon;
   if (!force && daemon !== "not_running" && daemon.alive) {
     process.stderr.write(
@@ -452,8 +488,11 @@ function flagValue(
  * agent's shell. Resolution is the only harness-specific step; the digest itself
  * is the same for every harness.
  */
-function evidence(dir: string, argv: ReadonlyArray<string>): number {
-  const explicit = flagValue(argv, "--session");
+export function evidence(options: {
+  dataDir: string;
+  session?: string;
+}): number {
+  const { dataDir: dir, session: explicit } = options;
   if (explicit !== undefined) return printEvidence(dir, explicit);
 
   let harness;
@@ -528,10 +567,12 @@ function printEvidence(dir: string, sessionId: string): number {
  * resolved from the environment; assess runs regardless of the enabled flag (the
  * explicit invocation is the consent, spec section 9.6).
  */
-async function assess(
-  dir: string,
-  argv: ReadonlyArray<string>,
-): Promise<number> {
+export async function assess(options: {
+  dataDir: string;
+  session?: string;
+  judgeModel?: string;
+}): Promise<number> {
+  const { dataDir: dir } = options;
   // Resolve the harness first, then drive everything (config home, sessions dir,
   // resolver, reader) from its registry entry. The harness comes from the
   // environment (REGIMEN_HARNESS or a CLI-set marker), not a flag; with neither
@@ -570,8 +611,7 @@ async function assess(
   );
   const sessionsDir = join(harnessHome, support.descriptor.transcriptsSubdir);
 
-  const explicit = flagValue(argv, "--session");
-  let sessionId: string | null = explicit ?? null;
+  let sessionId: string | null = options.session ?? null;
   if (sessionId === null) {
     sessionId = support.resolver.resolveCurrent({
       dataDir: dir,
@@ -587,10 +627,10 @@ async function assess(
   }
 
   // The judge LLM is the engineer's configured Claude, resolved from env at
-  // runtime (the --judge-model flag overrides the model). Resolving it inside
+  // runtime (the judgeModel option overrides the model). Resolving it inside
   // the try keeps a missing key (or any resolution failure) on the clean
   // stderr-plus-exit-1 path rather than an unhandled rejection.
-  const judgeModel = flagValue(argv, "--judge-model");
+  const judgeModel = options.judgeModel;
 
   // Assess writes the store (events + verdict), so it opens read-write, unlike
   // the read-only evidence command. It runs regardless of the enabled flag: the
@@ -640,16 +680,12 @@ function optionalFlag(
  * with a one-line count footer or, under `--json`, the full SessionSummary array
  * the in-session agent consumes. No LLM, no judgment, no synthesis.
  */
-function list(dir: string, argv: ReadonlyArray<string>): number {
-  const filter: SessionFilter = {
-    ...optionalFlag(argv, "--harness", "harness"),
-    ...optionalFlag(argv, "--model", "model"),
-    ...optionalFlag(argv, "--since", "since"),
-    ...optionalFlag(argv, "--until", "until"),
-    ...optionalFlag(argv, "--outcome", "outcome"),
-  };
-  const asJson = argv.includes("--json");
-
+export function list(options: {
+  dataDir: string;
+  filter: SessionFilter;
+  asJson: boolean;
+}): number {
+  const { dataDir: dir, filter, asJson } = options;
   let sessions: ReadonlyArray<SessionSummary>;
   const storePath = join(dir, "feedback.db");
   if (!existsSync(storePath)) {
@@ -724,7 +760,7 @@ function formatSessionTable(sessions: ReadonlyArray<SessionSummary>): string {
  * `--dry-run` reports the targets without writing. The bundle lives two levels
  * up from this file (the repo root's `skills/` directory).
  */
-function installSkill(argv: ReadonlyArray<string>): number {
+export function installSkill(options: { dryRun: boolean }): number {
   const target = resolveHarnessTarget();
   if (target === null) return 1;
   const bundleDir = resolve(import.meta.dir, "..", "..");
@@ -734,7 +770,7 @@ function installSkill(argv: ReadonlyArray<string>): number {
     contract: target.descriptor.contract,
   });
 
-  if (argv.includes("--dry-run")) {
+  if (options.dryRun) {
     for (const plan of plans) {
       process.stdout.write(`would write ${plan.targetPath}\n`);
     }
@@ -845,7 +881,7 @@ function describeChange(c: WireChange): string {
  * file path; the pure planner owns the merge; this command owns the file
  * read/write and the dry-run preview.
  */
-function wireHooks(argv: ReadonlyArray<string>): number {
+export function wireHooks(options: { dryRun: boolean }): number {
   const target = resolveHarnessTarget();
   if (target === null) return 1;
   const clonePath = resolve(import.meta.dir, "..", "..");
@@ -862,7 +898,7 @@ function wireHooks(argv: ReadonlyArray<string>): number {
     return 1;
   }
 
-  if (argv.includes("--dry-run")) {
+  if (options.dryRun) {
     if (plan.added.length === 0) {
       process.stdout.write(`hooks already wired in ${path}\n`);
     }
@@ -897,7 +933,7 @@ function wireHooks(argv: ReadonlyArray<string>): number {
  * back; the file is left in place even when empty (the user may re-add their own
  * hooks to it).
  */
-function unwireHooks(argv: ReadonlyArray<string>): number {
+export function unwireHooks(options: { dryRun: boolean }): number {
   const target = resolveHarnessTarget();
   if (target === null) return 1;
   const path = captureHooksPath(target);
@@ -917,7 +953,7 @@ function unwireHooks(argv: ReadonlyArray<string>): number {
     return 1;
   }
 
-  if (argv.includes("--dry-run")) {
+  if (options.dryRun) {
     if (plan.removed.length === 0) {
       process.stdout.write(`no Regimen entries in ${path}\n`);
     }
@@ -949,8 +985,8 @@ function unwireHooks(argv: ReadonlyArray<string>): number {
  * pillar (gates and the denial emitter) is installed separately from
  * the enforcement package.
  */
-function install(dir: string, argv: ReadonlyArray<string>): number {
-  const dryRun = argv.includes("--dry-run");
+export function install(options: { dataDir: string; dryRun: boolean }): number {
+  const { dataDir: dir, dryRun } = options;
   process.stdout.write("Feedback install (capture + daemon + skills)\n");
 
   if (dryRun) {
@@ -962,13 +998,13 @@ function install(dir: string, argv: ReadonlyArray<string>): number {
     process.stdout.write("feedback enabled\n");
   }
 
-  const daemon = installDaemon(dir, dryRun);
+  const daemon = installDaemon({ dataDir: dir, dryRun });
   if (daemon !== 0) return daemon;
 
-  const hooks = wireHooks(argv);
+  const hooks = wireHooks({ dryRun });
   if (hooks !== 0) return hooks;
 
-  const skill = installSkill(argv);
+  const skill = installSkill({ dryRun });
   if (skill !== 0) return skill;
 
   const link = runLifecycleCommands([["bun", "link"]], dryRun);
@@ -993,8 +1029,11 @@ function install(dir: string, argv: ReadonlyArray<string>): number {
  * system can always be cleaned up. Honors `--dry-run`; the harness is resolved
  * from the environment.
  */
-function uninstall(dir: string, argv: ReadonlyArray<string>): number {
-  const dryRun = argv.includes("--dry-run");
+export function uninstall(options: {
+  dataDir: string;
+  dryRun: boolean;
+}): number {
+  const { dataDir: dir, dryRun } = options;
   process.stdout.write("Regimen uninstall\n");
   let failed = 0;
 
@@ -1010,9 +1049,9 @@ function uninstall(dir: string, argv: ReadonlyArray<string>): number {
   // Best effort: every step runs even if an earlier one failed, so a partial
   // install can always be cleaned up. `||=` would short-circuit once `failed`
   // is non-zero and skip the remaining teardown, so set the flag explicitly.
-  if (unwireHooks(argv) !== 0) failed = 1;
-  if (uninstallSkill(argv, dryRun) !== 0) failed = 1;
-  if (uninstallDaemon(dir, dryRun) !== 0) failed = 1;
+  if (unwireHooks({ dryRun }) !== 0) failed = 1;
+  if (uninstallSkill({ dryRun }) !== 0) failed = 1;
+  if (uninstallDaemon({ dataDir: dir, dryRun }) !== 0) failed = 1;
 
   const unlink = runLifecycleCommands([["bun", "unlink"]], dryRun);
   if (unlink !== 0) {
@@ -1033,7 +1072,7 @@ function uninstall(dir: string, argv: ReadonlyArray<string>): number {
  * (the inverse of install-skill). Reuses the skill planner to locate each
  * target. A missing directory is not an error: uninstall must be idempotent.
  */
-function uninstallSkill(argv: ReadonlyArray<string>, dryRun: boolean): number {
+function uninstallSkill(options: { dryRun: boolean }): number {
   const target = resolveHarnessTarget();
   if (target === null) return 1;
   const bundleDir = resolve(import.meta.dir, "..", "..");
@@ -1043,7 +1082,7 @@ function uninstallSkill(argv: ReadonlyArray<string>, dryRun: boolean): number {
     contract: target.descriptor.contract,
   })) {
     const skillDir = dirname(plan.targetPath);
-    if (dryRun) {
+    if (options.dryRun) {
       process.stdout.write(`would remove ${skillDir}\n`);
     } else {
       rmSync(skillDir, { recursive: true, force: true });
@@ -1053,7 +1092,11 @@ function uninstallSkill(argv: ReadonlyArray<string>, dryRun: boolean): number {
   return 0;
 }
 
-function installDaemon(dir: string, dryRun: boolean): number {
+export function installDaemon(options: {
+  dataDir: string;
+  dryRun: boolean;
+}): number {
+  const { dataDir: dir, dryRun } = options;
   const home = process.env.HOME ?? process.env.USERPROFILE;
   if (home === undefined) {
     process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
@@ -1080,7 +1123,11 @@ function installDaemon(dir: string, dryRun: boolean): number {
   return runCommands(plan.installCommands);
 }
 
-function uninstallDaemon(dir: string, dryRun: boolean): number {
+export function uninstallDaemon(options: {
+  dataDir: string;
+  dryRun: boolean;
+}): number {
+  const { dataDir: dir, dryRun } = options;
   const home = process.env.HOME ?? process.env.USERPROFILE;
   if (home === undefined) {
     process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
