@@ -7,7 +7,7 @@ description: "Pull a judged verdict on the current conversation from Regimen's F
 
 Pull a judged verdict for the _current_ conversation and read it back into context. This is the judged twin of `feedback-evidence`. Where evidence hands you deterministic facts and leaves the interpreting to you, judgment hands you the judge's interpretation already formed: an Intent, an Outcome, and an evidence-anchored assessment of how the conversation has gone so far.
 
-**This is heavier than evidence. Use it deliberately.** `regimen assess` makes a LIVE model call: it costs money and takes a few seconds, where `feedback-evidence` is free and instant. It also writes the verdict to the store. Invoke it at a MEANINGFUL checkpoint, a phase boundary, before a risky step, or when the engineer asks "is this going well?", not reflexively and not on every turn.
+**This is heavier than evidence. Use it deliberately.** `regimen assess` makes a LIVE model call: it costs money and takes a few seconds, where `regimen evidence` is free and instant. It also writes the verdict to the store. Invoke it at a MEANINGFUL checkpoint, a phase boundary, before a risky step, or when the engineer asks "is this going well?", not reflexively and not on every turn.
 
 ## Process
 
@@ -17,7 +17,7 @@ Pull a judged verdict for the _current_ conversation and read it back into conte
 regimen assess
 ```
 
-The command resolves the current session itself from your working directory, exactly as `feedback-evidence` does, so it needs no arguments. It detects which agent CLI it is running inside, prefers the session id the Regimen capture hook stamped for this cwd on SessionStart, and falls back to the most-recently-active session for this harness when no stamp is present. The command judges the conversation so far, supersedes any prior verdict for this session, and prints a `JudgmentDigest` as one JSON object on stdout.
+The command resolves the current session itself from your working directory, exactly as `regimen evidence` does, so it needs no arguments. It detects which agent CLI it is running inside, prefers the session id the Regimen capture hook stamped for this cwd on SessionStart, and falls back to the most-recently-active session for this harness when no stamp is present. The command judges the conversation so far, supersedes any prior verdict for this session, and prints a `JudgmentDigest` as one JSON object on stdout.
 
 Unlike `regimen evidence`, this command makes a network call to the judge model and writes the verdict to the local store.
 
