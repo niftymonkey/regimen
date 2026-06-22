@@ -128,9 +128,17 @@ function stripRegimen(groups: MatcherGroup[]): MatcherGroup[] {
     .filter((g) => g.hooks.length > 0);
 }
 
-/** The capture hook command, rooted at the clone, from the descriptor's producer script. */
-function captureCommand(clonePath: string, producerScript: string): string {
-  return `bun ${join(clonePath, producerScript)}`;
+/**
+ * The capture hook command, rooted at the clone, from the descriptor's producer
+ * script. The joined path is forward-slashed so the command survives a
+ * POSIX-style shell on native Windows (which strips backslashes); bun resolves a
+ * forward-slash Windows path, and on Linux/macOS the replace is a no-op.
+ */
+export function captureCommand(
+  clonePath: string,
+  producerScript: string,
+): string {
+  return `bun ${join(clonePath, producerScript).replaceAll("\\", "/")}`;
 }
 
 /** A fresh capture leaf for the given clone, stamped with the descriptor's leaf marker. */

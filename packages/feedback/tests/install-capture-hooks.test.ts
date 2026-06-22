@@ -14,6 +14,7 @@
  */
 import { expect, test } from "bun:test";
 import {
+  captureCommand,
   isRegimenLeaf,
   type LeafHook,
   planCaptureHooks,
@@ -275,6 +276,24 @@ test("the plan is descriptor-driven: events and producer come from the descripto
     );
     expect(capture[0]?._regimen).toEqual(DESCRIPTOR.capture.leafMarker);
   }
+});
+
+test("a Windows-style clone path yields a forward-slash command, no backslashes", () => {
+  // A clone on native Windows reports a backslash path. The harness fires the
+  // hook through a POSIX-style shell that strips backslashes, so the command must
+  // emit forward slashes only or bun receives a separator-less, unresolvable path.
+  const command = captureCommand(
+    "C:\\Users\\me\\regimen",
+    "hooks/capture-codex.ts",
+  );
+  expect(command).toBe("bun C:/Users/me/regimen/hooks/capture-codex.ts");
+  expect(command).not.toContain("\\");
+});
+
+test("an already forward-slashed clone path is unchanged (Linux/macOS no-op)", () => {
+  expect(captureCommand("/home/me/regimen", "hooks/capture-codex.ts")).toBe(
+    "bun /home/me/regimen/hooks/capture-codex.ts",
+  );
 });
 
 test("a different harness descriptor flows through the planner unedited", () => {
