@@ -248,6 +248,13 @@ export interface InstallOptions {
   readonly gates: ReadonlyArray<GateId>;
   /** Preview every step and write nothing. */
   readonly dryRun: boolean;
+  /**
+   * The platform to install for, injectable for testing. Defaults to
+   * `process.platform`. On `win32` the gate step is skipped (the POSIX gate
+   * commands do not run on native Windows yet); every other platform installs
+   * gates as usual.
+   */
+  readonly platform?: string;
 }
 
 /**
@@ -257,6 +264,13 @@ export interface InstallOptions {
  */
 export function install(options: InstallOptions): number {
   process.stdout.write("Enforcement install (discipline gates)\n");
+
+  if ((options.platform ?? process.platform) === "win32") {
+    process.stdout.write(
+      "enforcement gates are not yet supported on native Windows; skipping (capture is unaffected)\n",
+    );
+    return 0;
+  }
 
   const gates = wireGates({ gates: options.gates, dryRun: options.dryRun });
   if (gates !== 0) return gates;
@@ -273,6 +287,12 @@ export function install(options: InstallOptions): number {
 export interface UninstallOptions {
   /** Preview every step and write nothing. */
   readonly dryRun: boolean;
+  /**
+   * The platform to uninstall for, injectable for testing. Defaults to
+   * `process.platform`. On `win32` the gate teardown is skipped (gates are
+   * never installed there); every other platform unwires as usual.
+   */
+  readonly platform?: string;
 }
 
 /**
@@ -283,6 +303,14 @@ export interface UninstallOptions {
  */
 export function uninstall(options: UninstallOptions): number {
   process.stdout.write("Enforcement uninstall\n");
+
+  if ((options.platform ?? process.platform) === "win32") {
+    process.stdout.write(
+      "enforcement gates are not yet supported on native Windows; nothing to uninstall (capture is unaffected)\n",
+    );
+    return 0;
+  }
+
   let failed = 0;
 
   if (unwireGates({ dryRun: options.dryRun }) !== 0) failed = 1;

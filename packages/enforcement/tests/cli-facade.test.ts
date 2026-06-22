@@ -9,7 +9,7 @@
  * scrubs ambient markers before calling.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -49,6 +49,22 @@ function withCodexHome(fn: (codexHome: string) => void): void {
     process.env.CODEX_HOME = prev;
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Run `fn`, returning everything it wrote to stdout. */
+function captureStdout(fn: () => void): string {
+  const original = process.stdout.write.bind(process.stdout);
+  let out = "";
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    out += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    fn();
+  } finally {
+    process.stdout.write = original;
+  }
+  return out;
 }
 
 interface Leaf {
@@ -109,5 +125,56 @@ test("uninstall removes the gates and returns 0", () => {
     const exit = uninstall({ dryRun: false });
     expect(exit).toBe(0);
     expect(gateIds(codexHome)).toEqual([]);
+  });
+});
+
+test("install on win32 skips gates, prints a notice, returns 0, writes nothing", () => {
+  withCodexHome((codexHome) => {
+    let exit = 1;
+    const out = captureStdout(() => {
+      exit = install({
+        gates: ["rm-rf", "em-dash", "inline-message"],
+        dryRun: false,
+        platform: "win32",
+      });
+    });
+    expect(exit).toBe(0);
+    expect(out).toContain("not yet supported on native Windows");
+    expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
+  });
+});
+
+test("install on win32 skips even with dryRun set", () => {
+  withCodexHome((codexHome) => {
+    let exit = 1;
+    const out = captureStdout(() => {
+      exit = install({
+        gates: ["rm-rf", "em-dash", "inline-message"],
+        dryRun: true,
+        platform: "win32",
+      });
+    });
+    expect(exit).toBe(0);
+    expect(out).toContain("not yet supported on native Windows");
+    expect(out).not.toContain("would wire");
+    expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
+  });
+});
+
+test("uninstall on win32 skips teardown, prints a notice, returns 0, touches nothing", () => {
+  withCodexHome((codexHome) => {
+    install({
+      gates: ["rm-rf", "em-dash", "inline-message"],
+      dryRun: false,
+    });
+    const before = readFileSync(join(codexHome, "hooks.json"), "utf8");
+    let exit = 1;
+    const out = captureStdout(() => {
+      exit = uninstall({ dryRun: false, platform: "win32" });
+    });
+    expect(exit).toBe(0);
+    expect(out).toContain("not yet supported on native Windows");
+    expect(readFileSync(join(codexHome, "hooks.json"), "utf8")).toBe(before);
+    expect(gateIds(codexHome)).toEqual(["rm-rf", "em-dash", "inline-message"]);
   });
 });
