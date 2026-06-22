@@ -86,6 +86,16 @@ const FOREGROUND_HINT =
   "no daemon was launched; install a supervisor with `feedback install-daemon`, or run one foreground with `bun src/loader/run.ts`";
 
 /**
+ * The one line the install prints when `--no-daemon` skips the daemon step (a
+ * non-admin account that cannot register a scheduled task, ADR follow-up). It
+ * states plainly that the loader is not running and how to drain the buffer by
+ * hand from the clone root, so capture wiring still completing is never mistaken
+ * for a live daemon.
+ */
+const DAEMON_SKIPPED_NOTICE =
+  "daemon skipped (--no-daemon); the loader is not running. Drain the buffer yourself by running: bun packages/feedback/src/loader/run.ts";
+
+/**
  * The fail-closed message when no harness can be resolved from the environment.
  * A harness is resolved from `REGIMEN_HARNESS` or a CLI-set marker env var; with
  * neither present the command refuses rather than guessing one.
@@ -923,11 +933,18 @@ export function unwireHooks(options: { dryRun: boolean }): number {
  * environment and flows through to the hooks and skill steps. The Enforcement
  * pillar (gates and the denial emitter) is installed separately from
  * the enforcement package.
+ *
+ * `daemon: false` (the unified CLI's `--no-daemon`) skips the daemon step
+ * entirely: no service file is written and no supervisor command runs, for an
+ * account that cannot register a scheduled task. The capture wiring (enable,
+ * hooks, skills, self-link) still runs, and one line states the loader is not
+ * running and how to drain the buffer by hand. Defaults to installing the daemon.
  */
 export function install(options: {
   dataDir: string;
   dryRun: boolean;
   selfLink?: boolean;
+  daemon?: boolean;
 }): number {
   const { dataDir: dir, dryRun } = options;
   process.stdout.write("Feedback install (capture + daemon + skills)\n");
@@ -941,8 +958,12 @@ export function install(options: {
     process.stdout.write("feedback enabled\n");
   }
 
-  const daemon = installDaemon({ dataDir: dir, dryRun });
-  if (daemon !== 0) return daemon;
+  if (options.daemon === false) {
+    process.stdout.write(`${DAEMON_SKIPPED_NOTICE}\n`);
+  } else {
+    const daemon = installDaemon({ dataDir: dir, dryRun });
+    if (daemon !== 0) return daemon;
+  }
 
   const hooks = wireHooks({ dryRun });
   if (hooks !== 0) return hooks;
@@ -964,7 +985,9 @@ export function install(options: {
   process.stdout.write(
     dryRun
       ? "dry run complete; nothing was changed\n"
-      : "Regimen installed; run `feedback status` to confirm the daemon is live\n",
+      : options.daemon === false
+        ? "Regimen installed without the daemon; drain the buffer yourself as noted above\n"
+        : "Regimen installed; run `feedback status` to confirm the daemon is live\n",
   );
   return 0;
 }
