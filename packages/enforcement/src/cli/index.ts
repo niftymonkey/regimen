@@ -42,10 +42,15 @@ export function runCli(argv: ReadonlyArray<string>): number {
     process.stderr.write("usage: enforcement <command>\n");
     return 1;
   }
-  if (command === "wire-gates") return wireGates(argv);
-  if (command === "unwire-gates") return unwireGates(argv);
-  if (command === "install") return install(argv);
-  if (command === "uninstall") return uninstall(argv);
+  const dryRun = argv.includes("--dry-run");
+  if (command === "wire-gates") {
+    return wireGates({ gates: parseGates(argv), dryRun });
+  }
+  if (command === "unwire-gates") return unwireGates({ dryRun });
+  if (command === "install") {
+    return install({ gates: parseGates(argv), dryRun });
+  }
+  if (command === "uninstall") return uninstall({ dryRun });
   process.stderr.write(`unknown command: ${command}\n`);
   return 1;
 }
@@ -185,16 +190,24 @@ function warnIfShellGateMissingJq(gates: ReadonlyArray<GateId>): void {
   }
 }
 
+/** The already-parsed options `wireGates` acts on. */
+export interface WireGatesOptions {
+  /** Which gates to wire onto the pre-tool boundary. */
+  readonly gates: ReadonlyArray<GateId>;
+  /** Preview every step and write nothing. */
+  readonly dryRun: boolean;
+}
+
 /**
  * `enforcement wire-gates`. Merge the selected gates onto PreToolUse in the
  * harness's hooks.json idempotently, without clobbering the user's own hooks or
  * Feedback's capture leaf. The pure planner owns the merge; this owns the file
  * read/write and the dry-run preview.
  */
-function wireGates(argv: ReadonlyArray<string>): number {
+export function wireGates(options: WireGatesOptions): number {
   const target = resolveTarget();
   if (target === null) return 1;
-  const gates = parseGates(argv);
+  const { gates } = options;
   const path = target.hooksPath;
 
   let plan;
@@ -210,7 +223,7 @@ function wireGates(argv: ReadonlyArray<string>): number {
   }
   warnIfShellGateMissingJq(gates);
 
-  if (argv.includes("--dry-run")) {
+  if (options.dryRun) {
     if (plan.added.length === 0) {
       process.stdout.write(`gates already wired in ${path}\n`);
     }
@@ -231,13 +244,19 @@ function wireGates(argv: ReadonlyArray<string>): number {
   return 0;
 }
 
+/** The already-parsed options `unwireGates` acts on. */
+export interface UnwireGatesOptions {
+  /** Preview every step and write nothing. */
+  readonly dryRun: boolean;
+}
+
 /**
  * `enforcement unwire-gates`. Remove exactly Enforcement's gate entries from
  * the harness's hooks.json, leaving the user's hooks and Feedback's capture leaf
  * intact. Writes the pruned object back; the file is left in place even when
  * empty (the user may re-add their own hooks to it).
  */
-function unwireGates(argv: ReadonlyArray<string>): number {
+export function unwireGates(options: UnwireGatesOptions): number {
   const target = resolveTarget();
   if (target === null) return 1;
   const path = target.hooksPath;
@@ -254,7 +273,7 @@ function unwireGates(argv: ReadonlyArray<string>): number {
     return 1;
   }
 
-  if (argv.includes("--dry-run")) {
+  if (options.dryRun) {
     if (plan.removed.length === 0) {
       process.stdout.write(`no Enforcement gates in ${path}\n`);
     }
@@ -274,24 +293,37 @@ function unwireGates(argv: ReadonlyArray<string>): number {
   return 0;
 }
 
+/** The already-parsed options `install` acts on. */
+export interface InstallOptions {
+  /** Which gates to wire onto the pre-tool boundary. */
+  readonly gates: ReadonlyArray<GateId>;
+  /** Preview every step and write nothing. */
+  readonly dryRun: boolean;
+}
+
 /**
  * `enforcement install`: wire the discipline gates. A thin orchestrator; today
  * the gate wiring is the only step, so this delegates to wire-gates and reports
  * the run boundary. Honors `--dry-run`, `--gate`, `--no-gates`.
  */
-function install(argv: ReadonlyArray<string>): number {
-  const dryRun = argv.includes("--dry-run");
+export function install(options: InstallOptions): number {
   process.stdout.write("Enforcement install (discipline gates)\n");
 
-  const gates = wireGates(argv);
+  const gates = wireGates({ gates: options.gates, dryRun: options.dryRun });
   if (gates !== 0) return gates;
 
   process.stdout.write(
-    dryRun
+    options.dryRun
       ? "dry run complete; nothing was changed\n"
       : "Enforcement gates installed\n",
   );
   return 0;
+}
+
+/** The already-parsed options `uninstall` acts on. */
+export interface UninstallOptions {
+  /** Preview every step and write nothing. */
+  readonly dryRun: boolean;
 }
 
 /**
@@ -300,14 +332,14 @@ function install(argv: ReadonlyArray<string>): number {
  * can always be cleaned up. `||=` would short-circuit once `failed` is non-zero
  * and skip later teardown, so set the flag explicitly. Honors `--dry-run`.
  */
-function uninstall(argv: ReadonlyArray<string>): number {
+export function uninstall(options: UninstallOptions): number {
   process.stdout.write("Enforcement uninstall\n");
   let failed = 0;
 
-  if (unwireGates(argv) !== 0) failed = 1;
+  if (unwireGates({ dryRun: options.dryRun }) !== 0) failed = 1;
 
   process.stdout.write(
-    argv.includes("--dry-run")
+    options.dryRun
       ? "dry run complete; nothing was changed\n"
       : "Enforcement uninstalled\n",
   );
