@@ -39,7 +39,39 @@ test("windowsServiceContent wraps bun in cmd.exe to set REGIMEN_DATA_DIR, pins p
   expect(content).toContain(CTX.bunPath);
   expect(content).toContain(CTX.loaderPath);
   expect(content).toContain(`REGIMEN_DATA_DIR=${CTX.dataDir}`);
-  expect(content).toContain("> NUL 2>&1");
+});
+
+test("windowsServiceContent XML-escapes the command's & and > so the Arguments element is well-formed", () => {
+  const content = windowsServiceContent(CTX);
+  const args = content.match(/<Arguments>([\s\S]*?)<\/Arguments>/);
+  expect(args).not.toBeNull();
+  const argsBody = args![1];
+  expect(argsBody).toContain("&amp;&amp;");
+  expect(argsBody).toContain("&gt; NUL 2&gt;&amp;1");
+  expect(argsBody).not.toContain(" && ");
+  expect(argsBody).not.toContain("> NUL");
+  expect(argsBody).not.toContain("2>&1");
+});
+
+test("windowsServiceContent XML-escapes special characters embedded in the data directory path", () => {
+  const content = windowsServiceContent({
+    ...CTX,
+    dataDir: "C:\\Users\\R&D\\AppData\\Roaming\\regimen",
+  });
+  const args = content.match(/<Arguments>([\s\S]*?)<\/Arguments>/);
+  expect(args).not.toBeNull();
+  const argsBody = args![1];
+  expect(argsBody).toContain("C:\\Users\\R&amp;D\\AppData\\Roaming\\regimen");
+  expect(argsBody).not.toContain("R&D");
+});
+
+test("windowsServiceContent produces a well-formed document: every & opens a valid entity reference", () => {
+  const content = windowsServiceContent({
+    ...CTX,
+    dataDir: "C:\\Users\\R&D\\AppData\\Roaming\\regimen",
+  });
+  const danglingAmpersand = /&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/;
+  expect(content).not.toMatch(danglingAmpersand);
 });
 
 test("windowsInstallCommands register the task via schtasks /create", () => {
