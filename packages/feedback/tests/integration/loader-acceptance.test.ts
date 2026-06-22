@@ -332,7 +332,11 @@ acceptanceTest(
     await withDataDir(async (dataDir) => {
       const loader = await startLoader(dataDir);
       try {
-        const cli = join(REPO_ROOT, "src", "cli", "index.ts");
+        // The `status` command is dispatched by the unified `regimen` CLI
+        // (ADR-0012); the feedback package's cli/index.ts is now a pure facade
+        // module with no argv entry point, so the subprocess targets the
+        // dispatcher bin in the sibling cli package.
+        const cli = join(REPO_ROOT, "..", "cli", "src", "cli", "index.ts");
         const proc = Bun.spawn(["bun", cli, "status"], {
           env: { ...process.env, REGIMEN_DATA_DIR: dataDir },
           stdout: "pipe",

@@ -1,14 +1,14 @@
 /**
  * The `feedback assess` CLI command (S3 spec section 6), driven IN-PROCESS
- * through the exported `runCli` entry point rather than by spawning a `bun`
- * subprocess per assertion. The argv parsing, env handling, exit codes, and
- * stdout/stderr are exercised the way an engineer's shell would, without paying
- * a bun cold-start per test. The full-pass test points the adapter at a LOCAL
- * mock Anthropic server via ANTHROPIC_BASE_URL, so the judge round-trip is real
- * wire shape but makes ZERO network calls off the machine.
+ * through the exported `assess` facade (ADR-0012) rather than by spawning a `bun`
+ * subprocess per assertion. The env handling, exit codes, and stdout/stderr are
+ * exercised the way an engineer's shell would, without paying a bun cold-start
+ * per test. The full-pass test points the adapter at a LOCAL mock Anthropic
+ * server via ANTHROPIC_BASE_URL, so the judge round-trip is real wire shape but
+ * makes ZERO network calls off the machine.
  *
  * Why in-process: each `Bun.spawn(["bun", CLI, ...])` paid a cold-start that
- * historically raced this suite's per-test timeout under load. Driving `runCli`
+ * historically raced this suite's per-test timeout under load. Calling the facade
  * directly removes the flake. Each test runs inside an isolated env (temp
  * REGIMEN_DATA_DIR, temp CODEX_HOME, pinned ANTHROPIC_*) with stdout/stderr
  * captured by patching the write streams; `afterEach` restores both the env and
@@ -18,7 +18,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCli } from "../src/cli/index.ts";
+import { dispatchFeedback } from "./facade-dispatch.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
 
@@ -84,9 +84,9 @@ function tempDir(prefix: string): string {
 /**
  * Pin explicit env overrides for one call (keys listed in `unset` are removed
  * from process.env so a test can exercise the missing-ANTHROPIC_API_KEY path
- * even when the developer's shell has the key set), then drive runCli
- * in-process and capture stdout/stderr. argv mimics process.argv, so the command
- * lands at index 2; runCli's assess path is async, so the result is awaited.
+ * even when the developer's shell has the key set), then drive the facade
+ * dispatch in-process and capture stdout/stderr. The assess facade is async, so
+ * the result is awaited.
  */
 async function runCliWith(
   args: ReadonlyArray<string>,
@@ -106,7 +106,7 @@ async function runCliWith(
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await runCli(["bun", "feedback", ...args]);
+  const exit = await dispatchFeedback(args);
   return { exit, stdout, stderr };
 }
 

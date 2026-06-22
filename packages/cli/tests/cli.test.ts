@@ -1,167 +1,257 @@
 /**
- * The Regimen CLI composition root. A thin arg-parse test (argv -> ParsedArgs) and
- * one end-to-end dry-run smoke spawned against temp instrument clones, since the
- * CLI holds no logic worth deep testing (the depth is in the locator and the
- * planner, covered by their own suites).
+ * The unified `regimen` dispatcher (ADR-0012). Two layers of coverage:
+ *
+ * 1. The install/uninstall ORCHESTRATION, driven through injected recording
+ *    steps so the load-bearing invariants are asserted deterministically without
+ *    standing up a real install: capture-before-gate ordering on install, the
+ *    reverse on uninstall, fail-fast on install (a failing step stops the run),
+ *    best-effort on uninstall (every step runs, aggregate is nonzero), and the
+ *    single `regimen` self-link with each instrument told `selfLink: false`.
+ * 2. The argv DISPATCH itself, driven in-process against the real facades for the
+ *    read-only commands (status, list, daemon status, unknown), each pinned to a
+ *    temp data dir so the host's real store is never touched.
  */
-import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { harnessChildEnv, parseArgs } from "../src/cli/index.ts";
+import {
+  type InstrumentSteps,
+  install,
+  runCli,
+  uninstall,
+} from "../src/cli/index.ts";
 
-test("parseArgs reads the verb, the shared flags, the gate flags, and the override knobs", () => {
-  const parsed = parseArgs([
-    "install",
-    "--dry-run",
-    "--gate",
-    "rm-rf",
-    "--gate",
-    "em-dash",
-    "--with-bridge",
-    "--feedback-path",
-    "/clones/regimen-feedback",
-    "--enforcement-path",
-    "/clones/regimen-enforcement",
-  ]);
-
-  expect(parsed.verb).toBe("install");
-  // No config home flag: the harness config home travels in the child env.
-  expect(parsed.config).toEqual({
-    dryRun: true,
-    gates: ["rm-rf", "em-dash"],
-    noGates: false,
-    withBridge: true,
-  });
-  expect(parsed.overrides).toEqual({
-    feedbackPath: "/clones/regimen-feedback",
-    enforcementPath: "/clones/regimen-enforcement",
-  });
-});
-
-test("parseArgs defaults: bare uninstall has no flags set", () => {
-  const parsed = parseArgs(["uninstall"]);
-  expect(parsed.verb).toBe("uninstall");
-  expect(parsed.config).toEqual({
-    dryRun: false,
-    gates: [],
-    noGates: false,
-    withBridge: false,
-  });
-  expect(parsed.overrides).toEqual({});
-});
-
-test("parseArgs reads --no-gates", () => {
-  const parsed = parseArgs(["install", "--no-gates"]);
-  expect(parsed.config.noGates).toBe(true);
-});
-
-test("harnessChildEnv copies REGIMEN_HARNESS into the child overlay when set", () => {
-  expect(harnessChildEnv({ REGIMEN_HARNESS: "codex" })).toEqual({
-    REGIMEN_HARNESS: "codex",
-  });
-});
-
-test("harnessChildEnv returns undefined when REGIMEN_HARNESS is unset or empty", () => {
-  expect(harnessChildEnv({})).toBeUndefined();
-  expect(harnessChildEnv({ REGIMEN_HARNESS: "" })).toBeUndefined();
-});
-
-const CLI_ENTRY = join(import.meta.dir, "..", "src", "cli", "index.ts");
-
-/** A runnable stub instrument CLI that echoes its argv and the harness env, exits 0. */
-const STUB_CLI = `#!/usr/bin/env bun
-process.stdout.write("STUB " + process.argv.slice(2).join(" ") + "\\n");
-process.stdout.write("STUB_HARNESS " + (process.env.REGIMEN_HARNESS ?? "") + "\\n");
-process.exit(0);
-`;
-
-function makeStubClone(parent: string, name: string): string {
-  const root = join(parent, name);
-  mkdirSync(join(root, "src", "cli"), { recursive: true });
-  writeFileSync(join(root, "src", "cli", "index.ts"), STUB_CLI);
-  return root;
+interface Call {
+  readonly step: string;
+  readonly selfLink?: boolean;
+  readonly gates?: ReadonlyArray<string>;
+  readonly verb?: string;
 }
 
-test("install --dry-run prints the ordered plan and forwards --dry-run to both children", async () => {
-  const parent = mkdtempSync(join(tmpdir(), "regimen-cli-smoke-"));
-  try {
-    const feedback = makeStubClone(parent, "regimen-feedback");
-    const enforcement = makeStubClone(parent, "regimen-enforcement");
+/**
+ * A recording fake of the instrument steps: each call is appended to `calls` in
+ * order, and a step whose name is in `fail` returns 1. The default returns 0, so
+ * a test opts a single step into failure to exercise fail-fast / best-effort.
+ */
+function recordingSteps(
+  calls: Call[],
+  fail: ReadonlySet<string> = new Set(),
+): InstrumentSteps {
+  const run = (call: Call): number => {
+    calls.push(call);
+    return fail.has(call.step) ? 1 : 0;
+  };
+  return {
+    feedbackInstall: (o) =>
+      run({ step: "feedbackInstall", selfLink: o.selfLink }),
+    enforcementInstall: (o) =>
+      run({ step: "enforcementInstall", gates: o.gates }),
+    feedbackUninstall: (o) =>
+      run({ step: "feedbackUninstall", selfLink: o.selfLink }),
+    enforcementUninstall: () => run({ step: "enforcementUninstall" }),
+    selfLink: (verb) => run({ step: "selfLink", verb }),
+  };
+}
 
-    const proc = Bun.spawn(
-      [
-        "bun",
-        CLI_ENTRY,
-        "install",
-        "--dry-run",
-        "--feedback-path",
-        feedback,
-        "--enforcement-path",
-        enforcement,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const stdout = await new Response(proc.stdout).text();
-    const exit = await proc.exited;
+test("install runs capture (feedback) before the gate (enforcement), then the one self-link", () => {
+  const calls: Call[] = [];
+  const exit = install(["install"], recordingSteps(calls));
+  expect(exit).toBe(0);
+  expect(calls.map((c) => c.step)).toEqual([
+    "feedbackInstall",
+    "enforcementInstall",
+    "selfLink",
+  ]);
+});
 
-    expect(exit).toBe(0);
-    expect(stdout).toContain("Regimen install (Feedback + Enforcement)");
-    // The plan lists feedback before enforcement.
-    expect(stdout.indexOf("feedback: bun")).toBeLessThan(
-      stdout.indexOf("enforcement: bun"),
-    );
-    // Both children actually ran with --dry-run forwarded.
-    expect(stdout).toContain("STUB install --dry-run");
-    const stubLines = stdout
-      .split("\n")
-      .filter((l) => l.startsWith("STUB install --dry-run"));
-    expect(stubLines).toHaveLength(2);
-    // The cli self-link is previewed last in the plan, after both instruments,
-    // and under --dry-run it is preview-only (it never spawns a real bun link).
-    expect(stdout).toContain("cli: bun link");
-    expect(stdout.indexOf("enforcement: bun")).toBeLessThan(
-      stdout.indexOf("cli: bun link"),
-    );
-  } finally {
-    rmSync(parent, { recursive: true, force: true });
+test("install tells each instrument selfLink:false and links the single regimen bin itself", () => {
+  const calls: Call[] = [];
+  install(["install"], recordingSteps(calls));
+  const feedback = calls.find((c) => c.step === "feedbackInstall")!;
+  expect(feedback.selfLink).toBe(false);
+  const linkCalls = calls.filter((c) => c.step === "selfLink");
+  expect(linkCalls).toHaveLength(1);
+  expect(linkCalls[0]!.verb).toBe("link");
+});
+
+test("install is fail-fast: a failing capture step stops the run and the gate never wires", () => {
+  const calls: Call[] = [];
+  const exit = install(
+    ["install"],
+    recordingSteps(calls, new Set(["feedbackInstall"])),
+  );
+  expect(exit).not.toBe(0);
+  expect(calls.map((c) => c.step)).toEqual(["feedbackInstall"]);
+});
+
+test("install wires all three gates by default", () => {
+  const calls: Call[] = [];
+  install(["install"], recordingSteps(calls));
+  const gate = calls.find((c) => c.step === "enforcementInstall")!;
+  expect(gate.gates).toEqual(["rm-rf", "em-dash", "inline-message"]);
+});
+
+test("install --no-gates passes an empty gate set to enforcement", () => {
+  const calls: Call[] = [];
+  install(["install", "--no-gates"], recordingSteps(calls));
+  const gate = calls.find((c) => c.step === "enforcementInstall")!;
+  expect(gate.gates).toEqual([]);
+});
+
+test("uninstall tears down in reverse: gate (enforcement) before capture (feedback), self-unlink last", () => {
+  const calls: Call[] = [];
+  const exit = uninstall(["uninstall"], recordingSteps(calls));
+  expect(exit).toBe(0);
+  expect(calls.map((c) => c.step)).toEqual([
+    "enforcementUninstall",
+    "feedbackUninstall",
+    "selfLink",
+  ]);
+  expect(calls.find((c) => c.step === "selfLink")!.verb).toBe("unlink");
+});
+
+test("uninstall is best-effort: a failing gate teardown still runs the later steps and aggregates nonzero", () => {
+  const calls: Call[] = [];
+  const exit = uninstall(
+    ["uninstall"],
+    recordingSteps(calls, new Set(["enforcementUninstall"])),
+  );
+  expect(exit).not.toBe(0);
+  expect(calls.map((c) => c.step)).toEqual([
+    "enforcementUninstall",
+    "feedbackUninstall",
+    "selfLink",
+  ]);
+});
+
+test("uninstall tells the feedback teardown selfLink:false so only the regimen unlink runs", () => {
+  const calls: Call[] = [];
+  uninstall(["uninstall"], recordingSteps(calls));
+  expect(calls.find((c) => c.step === "feedbackUninstall")!.selfLink).toBe(
+    false,
+  );
+});
+
+const tempDirs: string[] = [];
+let savedDataDir: string | undefined;
+
+beforeEach(() => {
+  savedDataDir = process.env.REGIMEN_DATA_DIR;
+});
+
+afterEach(() => {
+  if (savedDataDir === undefined) delete process.env.REGIMEN_DATA_DIR;
+  else process.env.REGIMEN_DATA_DIR = savedDataDir;
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("install hands the harness to each child via REGIMEN_HARNESS in the env, not a flag", async () => {
-  const parent = mkdtempSync(join(tmpdir(), "regimen-cli-harness-"));
+function tempDataDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "regimen-dispatch-"));
+  tempDirs.push(dir);
+  process.env.REGIMEN_DATA_DIR = dir;
+  return dir;
+}
+
+test("regimen status dispatches to the feedback program status", async () => {
+  tempDataDir();
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
   try {
-    const feedback = makeStubClone(parent, "regimen-feedback");
-    const enforcement = makeStubClone(parent, "regimen-enforcement");
-
-    const proc = Bun.spawn(
-      [
-        "bun",
-        CLI_ENTRY,
-        "install",
-        "--dry-run",
-        "--feedback-path",
-        feedback,
-        "--enforcement-path",
-        enforcement,
-      ],
-      {
-        env: { ...process.env, REGIMEN_HARNESS: "codex" },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-    const stdout = await new Response(proc.stdout).text();
-    expect(await proc.exited).toBe(0);
-
-    // Both children saw the harness as an env string, and neither got a flag.
-    const harnessLines = stdout
-      .split("\n")
-      .filter((l) => l.startsWith("STUB_HARNESS"));
-    expect(harnessLines).toEqual(["STUB_HARNESS codex", "STUB_HARNESS codex"]);
-    expect(stdout).not.toContain("--harness");
-    expect(stdout).not.toContain("--codex-home");
+    const exit = await runCli(["status"]);
+    expect(exit).toBe(0);
   } finally {
-    rmSync(parent, { recursive: true, force: true });
+    process.stdout.write = saved;
   }
+  expect(stdout).toContain("feedback: disabled");
+  expect(stdout).toContain("daemon: not running");
+});
+
+test("regimen daemon status dispatches to the feedback daemon status", async () => {
+  tempDataDir();
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    const exit = await runCli(["daemon", "status"]);
+    expect(exit).toBe(0);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(stdout).toContain("daemon: not running");
+});
+
+test("regimen daemon with no verb fails closed with a usage line", async () => {
+  tempDataDir();
+  let stderr = "";
+  const saved = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const exit = await runCli(["daemon"]);
+    expect(exit).toBe(1);
+  } finally {
+    process.stderr.write = saved;
+  }
+  expect(stderr).toContain("usage: regimen daemon");
+});
+
+test("regimen list dispatches to the feedback list facade and renders an empty result", async () => {
+  tempDataDir();
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    const exit = await runCli(["list", "--json"]);
+    expect(exit).toBe(0);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(JSON.parse(stdout)).toEqual([]);
+});
+
+test("an unknown command exits 1 with an error on stderr", async () => {
+  let stderr = "";
+  const saved = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const exit = await runCli(["frobnicate"]);
+    expect(exit).toBe(1);
+  } finally {
+    process.stderr.write = saved;
+  }
+  expect(stderr).toContain("unknown command");
+});
+
+test("no command at all prints the top-level usage and exits 1", async () => {
+  let stderr = "";
+  const saved = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const exit = await runCli([]);
+    expect(exit).toBe(1);
+  } finally {
+    process.stderr.write = saved;
+  }
+  expect(stderr).toContain("usage: regimen");
 });

@@ -1,8 +1,8 @@
 /**
  * The install-skill planner (pure) and the CLI command that uses it. The planner
  * is exercised directly; the command is driven IN-PROCESS through the exported
- * `runCli` entry point (rather than spawning a `bun` subprocess per assertion,
- * which raced this suite's per-test timeout under load) against a temp
+ * `installSkill` facade (ADR-0012, rather than spawning a `bun` subprocess per
+ * assertion, which raced this suite's per-test timeout under load) against a temp
  * CODEX_HOME, so the host's real Codex home is never touched.
  *
  * Each CLI test pins CODEX_HOME and REGIMEN_HARNESS in `process.env` (clearing
@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { planSkillInstall } from "../src/cli/install/skill.ts";
 import { harnessContract } from "@regimen/shared";
-import { runCli } from "../src/cli/index.ts";
+import { dispatchFeedback } from "./facade-dispatch.ts";
 
 const CONTRACT = harnessContract("codex");
 if (CONTRACT === undefined) throw new Error("no codex contract registered");
@@ -68,7 +68,7 @@ function tempDir(prefix: string): string {
   return dir;
 }
 
-/** Pin env overrides for one call, then drive runCli in-process. */
+/** Pin env overrides for one call, then drive the facade dispatch in-process. */
 async function runCliWith(
   args: ReadonlyArray<string>,
   env: Record<string, string>,
@@ -84,7 +84,7 @@ async function runCliWith(
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await runCli(["bun", "feedback", ...args]);
+  const exit = await dispatchFeedback(args);
   return { exit, stdout, stderr };
 }
 

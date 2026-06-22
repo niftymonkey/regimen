@@ -1,13 +1,14 @@
 /**
- * Feedback CLI behavior, driven IN-PROCESS through the exported `runCli` entry
- * point rather than by spawning a `bun` subprocess per assertion. The argv
- * parsing, env handling, exit codes, and stdout/stderr are all exercised the
- * same way an engineer's shell would exercise them, but without paying a bun
- * cold-start per test.
+ * Feedback CLI behavior, driven IN-PROCESS through the exported command facades
+ * (ADR-0012) rather than by spawning a `bun` subprocess per assertion. A small
+ * argv->facade dispatch maps each `feedback <command>` to its facade so the env
+ * handling, exit codes, and stdout/stderr are exercised the same way an
+ * engineer's shell would exercise them, but without paying a bun cold-start per
+ * test.
  *
  * Why in-process: each `Bun.spawn(["bun", CLI, ...])` paid a cold-start that
  * historically raced this suite's per-test timeout under the live capture
- * daemon's CPU load (a flake that hit repeatedly). Driving `runCli` directly
+ * daemon's CPU load (a flake that hit repeatedly). Calling the facades directly
  * drops the per-test body to a few milliseconds and removes the flake. Each test
  * runs inside an isolated env (temp HOME, temp REGIMEN_DATA_DIR, temp
  * CODEX_HOME) pinned in `process.env`, with stdout/stderr captured by patching
@@ -37,7 +38,7 @@ import { writeSessionStamp } from "../src/codex/session-stamp.ts";
 import { traceIdFor } from "@regimen/shared";
 import { isEnabled, setEnabled } from "../src/enabled-flag.ts";
 import { openStore } from "../src/store.ts";
-import { runCli } from "../src/cli/index.ts";
+import { dispatchFeedback } from "./facade-dispatch.ts";
 
 /**
  * The per-harness marker env vars the resolver falls back to when REGIMEN_HARNESS
@@ -103,10 +104,10 @@ function tempDir(prefix: string): string {
 }
 
 /**
- * Drive runCli for a single command in-process, capturing stdout and stderr.
- * argv mimics process.argv, so the command lands at index 2. runCli may return a
- * number or a Promise<number>; awaiting a number is a no-op, so this handles
- * both the synchronous lifecycle path and the async assess path uniformly.
+ * Drive one feedback command in-process via the facade dispatch, capturing
+ * stdout and stderr. The dispatch may return a number or a Promise<number>;
+ * awaiting a number is a no-op, so this handles both the synchronous lifecycle
+ * path and the async assess path uniformly.
  */
 async function invoke(...args: string[]): Promise<CliResult> {
   let stdout = "";
@@ -119,7 +120,7 @@ async function invoke(...args: string[]): Promise<CliResult> {
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await runCli(["bun", "feedback", ...args]);
+  const exit = await dispatchFeedback(args);
   return { exit, stdout, stderr };
 }
 
@@ -139,7 +140,7 @@ async function runDir(
   });
 }
 
-/** Pin explicit env overrides for one call, then drive runCli in-process. */
+/** Pin explicit env overrides for one call, then drive the dispatch in-process. */
 async function runWith(
   args: ReadonlyArray<string>,
   env: Record<string, string>,
@@ -382,14 +383,6 @@ test("feedback restart --dry-run with no service installed reports an already-en
     expect(isEnabled(dataDir)).toBe(true);
     expect(stdout).toContain("already enabled");
     expect(stdout).not.toContain("would enable");
-  });
-});
-
-test("an unknown command exits 1 with an error on stderr", async () => {
-  await withDataDir(async (dataDir) => {
-    const { exit, stderr } = await runDir(["bogus"], dataDir);
-    expect(exit).toBe(1);
-    expect(stderr).toContain("unknown command");
   });
 });
 

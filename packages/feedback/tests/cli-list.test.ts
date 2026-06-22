@@ -1,6 +1,6 @@
 /**
  * The `feedback list` CLI command (B.4), driven IN-PROCESS through the exported
- * runCli entry point. The selection primitive (listSessions) is unit-tested in
+ * `list` facade (ADR-0012). The selection primitive (listSessions) is unit-tested in
  * sessions.test.ts; this suite covers the CLI surface only: store-dir
  * resolution, the human-readable table, the --json array the agent consumes,
  * filter flags reaching the primitive, the missing-store empty path, and the
@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { runCli } from "../src/cli/index.ts";
+import { dispatchFeedback } from "./facade-dispatch.ts";
 import { openStore } from "../src/store.ts";
 import {
   writeAssessment,
@@ -75,7 +75,7 @@ async function runList(
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await runCli(["bun", "feedback", "list", ...args]);
+  const exit = await dispatchFeedback(["list", ...args]);
   return { exit, stdout, stderr };
 }
 

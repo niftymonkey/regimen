@@ -1,6 +1,6 @@
 /**
  * The wire-hooks / unwire-hooks / install / uninstall CLI commands (capture-only),
- * driven IN-PROCESS through the exported `runCli` entry point rather than by
+ * driven IN-PROCESS through the exported command facades (ADR-0012) rather than by
  * spawning a `bun` subprocess per assertion. The pure merge is covered by
  * install-capture-hooks.test.ts; here we cover the CLI seam: resolving the
  * harness from the environment, reading and writing the real
@@ -11,8 +11,8 @@
  * enforcement package, so no gate leaves are ever written here.
  *
  * Why in-process: each `Bun.spawn(["bun", CLI, ...])` paid a cold-start that
- * historically raced this suite's 30s per-test timeout under load. Driving
- * `runCli` directly drops the per-test body from ~200ms to ~5ms and removes the
+ * historically raced this suite's 30s per-test timeout under load. Calling the
+ * facades directly drops the per-test body from ~200ms to ~5ms and removes the
  * flake. Each test runs inside an isolated env (temp HOME, temp CODEX_HOME, temp
  * REGIMEN_DATA_DIR) pinned in `process.env`, with stdout/stderr captured by
  * patching `process.stdout.write` / `process.stderr.write`; `afterEach` restores
@@ -29,7 +29,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCli } from "../src/cli/index.ts";
+import { dispatchFeedback } from "./facade-dispatch.ts";
 
 const CAPTURE_EVENTS = [
   "SessionStart",
@@ -116,10 +116,10 @@ afterEach(() => {
 });
 
 /**
- * Drive runCli for a single command in-process, capturing stdout and stderr.
- * argv mimics process.argv, so the command lands at index 2. runCli may return a
- * number or a Promise<number>; awaiting a number is a no-op, so this handles
- * both the synchronous wire/unwire path and any async command uniformly.
+ * Drive one command in-process via the facade dispatch, capturing stdout and
+ * stderr. The dispatch may return a number or a Promise<number>; awaiting a
+ * number is a no-op, so this handles both the synchronous wire/unwire path and
+ * any async command uniformly.
  */
 async function runCommand(...args: string[]): Promise<CliRun> {
   let stdout = "";
@@ -134,7 +134,7 @@ async function runCommand(...args: string[]): Promise<CliRun> {
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await runCli(["bun", "feedback", ...args]);
+  const exit = await dispatchFeedback(args);
   return { exit, stdout, stderr };
 }
 
