@@ -15,6 +15,7 @@
  *   install-skill    copy the bundled skills into the harness's skills dir
  *   purge            discard the buffer, and with --all the store and logs too
  *   evidence         print one conversation's evidence-layer digest as JSON
+ *   list             enumerate sessions by harness, model, time window, outcome
  *
  * The lifecycle commands are supervisor-aware. The enabled flag stays the
  * single capture-and-storage privacy gate (ADR-0006): supervision controls the
@@ -46,6 +47,11 @@ import {
 } from "@regimen/shared";
 import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
+import {
+  listSessions,
+  type SessionFilter,
+  type SessionSummary,
+} from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { assessConversation } from "../judged/assess.ts";
 import { resolveDefaultJudgeModel } from "../judged/anthropic-adapter.ts";
@@ -97,6 +103,9 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
   }
   if (command === "assess") {
     return assess(dir, argv);
+  }
+  if (command === "list") {
+    return list(dir, argv);
   }
   if (command === "wire-hooks") {
     return wireHooks(argv);
@@ -606,6 +615,104 @@ async function assess(
   } finally {
     store.close();
   }
+}
+
+/**
+ * Project one `--flag value` pair onto a single-key partial of SessionFilter,
+ * or an empty object when the flag is absent, so the filter is built by spread
+ * and never carries a key the caller did not pass.
+ */
+function optionalFlag(
+  argv: ReadonlyArray<string>,
+  flag: string,
+  key: keyof SessionFilter,
+): Partial<SessionFilter> {
+  const value = flagValue(argv, flag);
+  return value === undefined ? {} : { [key]: value };
+}
+
+/**
+ * `feedback list`: enumerate stored sessions, optionally filtered by harness,
+ * model, time window (`--since`/`--until`, an ISO date or an `Nd`/`Nh` offset),
+ * and outcome. The selection primitive `listSessions` returns DATA ONLY: this
+ * command reads the store readonly, opens nothing when the store file is absent
+ * (printing an empty result and exiting 0), and renders either a compact table
+ * with a one-line count footer or, under `--json`, the full SessionSummary array
+ * the in-session agent consumes. No LLM, no judgment, no synthesis.
+ */
+function list(dir: string, argv: ReadonlyArray<string>): number {
+  const filter: SessionFilter = {
+    ...optionalFlag(argv, "--harness", "harness"),
+    ...optionalFlag(argv, "--model", "model"),
+    ...optionalFlag(argv, "--since", "since"),
+    ...optionalFlag(argv, "--until", "until"),
+    ...optionalFlag(argv, "--outcome", "outcome"),
+  };
+  const asJson = argv.includes("--json");
+
+  let sessions: ReadonlyArray<SessionSummary>;
+  const storePath = join(dir, "feedback.db");
+  if (!existsSync(storePath)) {
+    sessions = [];
+  } else {
+    let db: Database | undefined;
+    try {
+      db = new Database(storePath, { readonly: true });
+      sessions = listSessions(db, filter);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 1;
+    } finally {
+      db?.close();
+    }
+  }
+
+  process.stdout.write(
+    asJson ? `${JSON.stringify(sessions)}\n` : formatSessionTable(sessions),
+  );
+  return 0;
+}
+
+/** The list-table columns, in render order, each a (header, cell) projection. */
+const SESSION_COLUMNS: ReadonlyArray<{
+  header: string;
+  cell: (s: SessionSummary) => string;
+}> = [
+  { header: "date", cell: (s) => s.lastEventAt.slice(0, 10) },
+  { header: "harness", cell: (s) => s.harness },
+  { header: "model", cell: (s) => s.model ?? "-" },
+  { header: "events", cell: (s) => String(s.eventCount) },
+  { header: "judged", cell: (s) => (s.judged ? "y" : "n") },
+  { header: "outcome", cell: (s) => s.outcome ?? "-" },
+  { header: "session", cell: (s) => s.sessionId.slice(0, 8) },
+];
+
+/**
+ * Render sessions as a compact, column-aligned human-readable table, one row
+ * per session, under a header row and above a one-line count footer. The model
+ * and outcome fall back to `-` when null. An empty result prints just the
+ * header and the `0 sessions` footer so the command always says something
+ * concrete. Column widths size to the widest cell so the columns line up.
+ */
+function formatSessionTable(sessions: ReadonlyArray<SessionSummary>): string {
+  const widths = SESSION_COLUMNS.map((col) =>
+    sessions.reduce(
+      (max, s) => Math.max(max, col.cell(s).length),
+      col.header.length,
+    ),
+  );
+  const renderRow = (cells: ReadonlyArray<string>): string =>
+    cells
+      .map((cell, i) => cell.padEnd(widths[i]!))
+      .join("  ")
+      .trimEnd();
+
+  const header = renderRow(SESSION_COLUMNS.map((col) => col.header));
+  const rows = sessions.map((s) =>
+    renderRow(SESSION_COLUMNS.map((col) => col.cell(s))),
+  );
+  const footer = `${sessions.length} session${sessions.length === 1 ? "" : "s"}`;
+  return `${[header, ...rows, footer].join("\n")}\n`;
 }
 
 /**
