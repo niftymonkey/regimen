@@ -164,3 +164,36 @@ regimen update           # re-resolves the clone and loader paths, re-runs the
 ```powershell
 regimen uninstall
 ```
+
+## Environment check (paste this to see what is here)
+
+Before installing, or whenever something does not fire, paste this read-only block into PowerShell. It changes nothing. It reports what the install actually depends on: the OS and shell, which tools are on PATH (Bun and each harness CLI most of all), where each harness config home is, and whether Regimen is already present. Send the output back when asking for install help.
+
+```powershell
+"=== OS / shell ==="
+$PSVersionTable.PSVersion.ToString(); $PSVersionTable.PSEdition
+[System.Environment]::OSVersion.VersionString
+"ExecutionPolicy: $(Get-ExecutionPolicy)"
+
+"=== tools on PATH ==="
+foreach ($t in 'bun','git','node','npm','npx','jq','claude','codex','copilot','gemini','schtasks') {
+  $c = Get-Command $t -ErrorAction SilentlyContinue
+  if ($c) { "{0,-9}: {1}" -f $t, $c.Source } else { "{0,-9}: NOT FOUND" -f $t }
+}
+if (Get-Command bun -ErrorAction SilentlyContinue) { "bun version: $(bun --version)" }
+
+"=== harness config homes ==="
+foreach ($h in @(@('claude','.claude','CLAUDE_CONFIG_DIR'),@('codex','.codex','CODEX_HOME'),@('copilot','.copilot','COPILOT_HOME'),@('gemini','.gemini','GEMINI_CONFIG_DIR'))) {
+  $ov = [System.Environment]::GetEnvironmentVariable($h[2])
+  $p  = if ($ov) { $ov } else { Join-Path $env:USERPROFILE $h[1] }
+  "{0,-8}: {1}  (exists: {2})  {3}={4}" -f $h[0], $p, (Test-Path $p), $h[2], $ov
+}
+
+"=== regimen state ==="
+"APPDATA: $env:APPDATA"
+"data dir exists: $(Test-Path (Join-Path $env:APPDATA 'regimen'))"
+schtasks /query /tn regimen-feedback /fo LIST 2>$null | Select-String 'TaskName|Status'
+if ($LASTEXITCODE -ne 0) { "regimen-feedback task: not registered" }
+```
+
+The two things that most often explain a silent failure: Bun not on PATH (nothing can run), or a harness CLI not installed (capture has nothing to hook).
