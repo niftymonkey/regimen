@@ -14,7 +14,7 @@ The signals are deterministic facts: counts and timestamps, with no verdict atta
 ### 1. Run the evidence query
 
 ```bash
-feedback evidence
+regimen evidence
 ```
 
 The command resolves the current session itself from your working directory, so it needs no arguments. It detects which agent CLI it is running inside, prefers the session id that the Regimen capture hook stamped for this cwd on SessionStart, and falls back to the most-recently-active session for this harness when no stamp is present.
@@ -23,7 +23,7 @@ The command reads the local SQLite store directly. It makes no network call and 
 
 ### 2. Handle the outcome
 
-- **`feedback: command not found`**: the Feedback instrument is not installed on this machine. Tell the engineer, and stop; there is nothing to report.
+- **`regimen: command not found`**: Regimen is not installed on this machine. Tell the engineer, and stop; there is nothing to report.
 - **`could not determine the harness`**: the CLI could not tell which agent harness it is running inside. This is an environment problem, not a session problem. Say so, and stop.
 - **`"known": false`** with a note about resolving the session: the current session could not be identified (no stamp and no transcript found). Capture may not be installed. Say so, and stop.
 - **`"known": false`** with a note that no events were recorded yet: the store has no record of this conversation yet. The capture daemon may not have drained the buffer, which is expected early in a session. Say so, and stop.
@@ -56,6 +56,6 @@ If the engineer asked, report the relevant signals concisely. Otherwise, fold an
 
 ## Notes
 
-- Session-id resolution is the only harness-specific step. The `feedback evidence` command and the digest it print are harness-agnostic; the CLI auto-detects the harness and selects the right resolver.
+- Session-id resolution is the only harness-specific step. The `regimen evidence` command and the digest it print are harness-agnostic; the CLI auto-detects the harness and selects the right resolver.
 - Resolution has one known limitation: if two sessions run in the same working directory at once, the per-cwd stamp cannot tell them apart, and the most-recently-active session wins.
 - The digest never tells you whether something is good or bad. That is deliberate: a deterministic threshold cannot tell a disciplined refactor from thrash, but you, with the whole conversation in context, can.

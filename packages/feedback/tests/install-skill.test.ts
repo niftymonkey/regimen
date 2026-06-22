@@ -158,15 +158,15 @@ test("install-skill copies both bundled SKILL.md files into CODEX_HOME/skills", 
     expect(stdout).toContain(`installed ${evidence}`);
     const evidenceContent = readFileSync(evidence, "utf8");
     expect(evidenceContent).toContain("name: feedback-evidence");
-    // The bundled skill names no harness and uses the neutral command.
-    expect(evidenceContent).toContain("feedback evidence");
+    // The bundled skill names no harness and uses the neutral unified command.
+    expect(evidenceContent).toContain("regimen evidence");
     expect(evidenceContent).not.toContain("--harness");
 
     const judgment = join(codexHome, "skills", "feedback-judgment", "SKILL.md");
     expect(stdout).toContain(`installed ${judgment}`);
     const judgmentContent = readFileSync(judgment, "utf8");
     expect(judgmentContent).toContain("name: feedback-judgment");
-    expect(judgmentContent).toContain("feedback assess");
+    expect(judgmentContent).toContain("regimen assess");
     expect(judgmentContent).not.toContain("--harness");
   });
 });

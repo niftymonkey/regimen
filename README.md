@@ -50,7 +50,7 @@ git clone https://github.com/niftymonkey/regimen.git
 cd regimen && ./install.sh
 ```
 
-`./install.sh` installs workspace dependencies, then runs `regimen install`, the thin orchestrator (the `@regimen/cli` package) that shells out to each instrument's own install verb (Feedback, then Enforcement) and self-links the `regimen` bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run, `regimen install` and `regimen uninstall` work from anywhere. Useful flags: `--dry-run` previews every step and changes nothing, and `--gate <name>` (repeatable) or `--no-gates` selects which Enforcement gates wire. The harness is auto-detected per invocation, or set explicitly with the `REGIMEN_HARNESS` environment variable.
+`./install.sh` installs workspace dependencies, then runs `regimen install`, the unified orchestrator (the `@regimen/cli` package) that dispatches to each instrument's install logic in-process (capture first, then the gates) and self-links the `regimen` bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run, every lifecycle verb works from anywhere: `regimen install` (add the current harness), `regimen install --all` or `regimen install --harnesses <list>` (install for several harnesses at once), `regimen update` (re-resolve the install in place after the clone moves or upgrades), `regimen uninstall`, and `regimen status` (version, installed harnesses, and scopes). Useful flags: `--dry-run` previews every step and changes nothing, and `--gate <name>` (repeatable) or `--no-gates` selects which gates wire. The harness is auto-detected per invocation, or set explicitly with the `REGIMEN_HARNESS` environment variable.
 
 ### Guidance skills (runs via npx, or bunx)
 
@@ -67,8 +67,8 @@ The CLI auto-detects the running agent, so `-a codex` pins the target and `-s '*
 
 ```bash
 codex features list                 # the hooks feature is on
-feedback status                     # daemon running, recent last event
-feedback evidence                   # read a captured session back
+regimen daemon status               # daemon running, recent last event
+regimen evidence                    # read a captured session back
 ls ~/.codex/skills                  # the niftymonkey and feedback skills are present
 ```
 
