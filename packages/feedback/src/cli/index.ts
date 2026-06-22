@@ -44,9 +44,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { HarnessDescriptor } from "../harness/descriptor.ts";
+import {
+  HARNESS_DESCRIPTORS,
+  type HarnessDescriptor,
+} from "../harness/descriptor.ts";
 import { harnessSupport, resolveHarnessHome } from "../harness/support.ts";
-import { bufferDir, resolveHarnessFromEnvironment } from "@regimen/shared";
+import {
+  bufferDir,
+  type Harness,
+  resolveHarnessFromEnvironment,
+} from "@regimen/shared";
 import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
 import {
@@ -682,6 +689,34 @@ export function installSkill(options: { dryRun: boolean }): number {
     process.stdout.write(`installed ${plan.targetPath}\n`);
   }
   return 0;
+}
+
+/**
+ * The harnesses Feedback can install, in registration order: the ones with a
+ * capture descriptor. The unified CLI loops this set for `regimen install --all`
+ * so the cross-harness install never restates the harness list itself.
+ */
+export function installableHarnesses(): string[] {
+  return [...HARNESS_DESCRIPTORS.keys()];
+}
+
+/**
+ * Where a harness's capture install lands, the load-bearing manifest `scope`
+ * (ADR-0012, ADR-0011). A harness whose descriptor carries a capture
+ * `groupDecoration` (Gemini) only fires PROJECT-level hooks headless, so it
+ * installs per-workspace and the scope records that workspace as
+ * `workspace:<cwd>`; every other harness installs into its config home, scope
+ * `config-home`. Takes the workspace path so the caller pins it (the dispatcher
+ * passes the cwd, mirroring `captureHooksPath`). A harness with no descriptor
+ * (an unknown identifier) has no per-workspace requirement, so it falls to the
+ * config-home default.
+ */
+export function installScope(harness: string, workspace: string): string {
+  const descriptor = HARNESS_DESCRIPTORS.get(harness as Harness);
+  if (descriptor?.capture.groupDecoration !== undefined) {
+    return `workspace:${workspace}`;
+  }
+  return "config-home";
 }
 
 /**

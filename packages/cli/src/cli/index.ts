@@ -26,12 +26,15 @@
  * daemon) stay standalone and absolute-path-invoked; this collapse touches only
  * the user-facing command layer.
  */
-import { dirname } from "node:path";
-import { dataDir } from "@regimen/shared";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { dataDir, resolveHarnessFromEnvironment } from "@regimen/shared";
 import {
   assess as feedbackAssess,
   evidence as feedbackEvidence,
   install as feedbackInstall,
+  installableHarnesses as feedbackInstallableHarnesses,
+  installScope as feedbackInstallScope,
   list as feedbackList,
   restart as feedbackRestart,
   type SessionFilter,
@@ -45,6 +48,16 @@ import {
   install as enforcementInstall,
   uninstall as enforcementUninstall,
 } from "@regimen/enforcement";
+import {
+  type InstallMeta,
+  type Manifest,
+  type ManifestEntry,
+  manifestPath,
+  readManifest,
+  recordInstall,
+  recordUninstall,
+  writeManifest,
+} from "../manifest.ts";
 
 /**
  * The instrument install/uninstall steps the orchestrator composes, injected so
@@ -90,6 +103,44 @@ const DEFAULT_GATES: ReadonlyArray<GateId> = [
   "inline-message",
 ];
 
+/**
+ * The lifecycle seam the install manifest and `regimen update` need (ADR-0012),
+ * injected so the manifest write, the per-harness re-install on update, and the
+ * daemon cycle are asserted deterministically in a temp data dir without
+ * standing up a real OS install. Production binds these to real time, the CLI
+ * package version, the current clone's paths, and the feedback facade's scope
+ * and harness-set helpers; tests pass fakes that record calls and return fixed
+ * stamps. This is the manifest analog of `InstrumentSteps`: the seam is the call
+ * itself, and a test asserts what was recorded and what was restamped.
+ */
+export interface LifecycleDeps {
+  /** The current ISO time a fresh install or update stamps. */
+  readonly now: () => string;
+  /** The Regimen version stamp, read from the CLI package metadata. */
+  readonly regimenVersion: () => string;
+  /** The current clone root the installed absolute paths are re-resolved from. */
+  readonly clonePath: () => string;
+  /** The feedback loader entrypoint the daemon service definition points at. */
+  readonly loaderPath: () => string;
+  /** The install scope a harness lands at: `config-home` or `workspace:<cwd>`. */
+  readonly installScope: (harness: string, workspace: string) => string;
+  /** The harnesses with a capture descriptor, the `install --all` target set. */
+  readonly installableHarnesses: () => string[];
+  /** Cycle the daemon so it runs the freshly-resolved loader path (update only). */
+  readonly cycleDaemon: (dataDir: string, dryRun: boolean) => number;
+}
+
+/** The production lifecycle deps: real time, the package version, the live clone. */
+const REAL_LIFECYCLE: LifecycleDeps = {
+  now: () => new Date().toISOString(),
+  regimenVersion: cliVersion,
+  clonePath: monorepoRoot,
+  loaderPath: feedbackLoaderPath,
+  installScope: feedbackInstallScope,
+  installableHarnesses: feedbackInstallableHarnesses,
+  cycleDaemon: (dir, dryRun) => feedbackRestart({ dataDir: dir, dryRun }),
+};
+
 /** The value following `flag` in `argv`, or undefined if absent or last. */
 function flagValue(
   argv: ReadonlyArray<string>,
@@ -130,37 +181,150 @@ function optionalFilter(
 }
 
 /**
- * `regimen install`: install the capture pillar first, then the gate pillar, so
- * the capture hook lands ahead of the gate on the pre-tool boundary (a denied
- * tool call is still captured). Fail-fast: a failing step stops the run and
- * returns its nonzero code, so a partial install never reports success. The one
- * `regimen` self-link runs last; each instrument install runs with
- * `selfLink: false` so only the unified bin is linked.
+ * Resolve the harnesses a `regimen install` targets: `--all` installs every
+ * descriptor-backed harness, `--harnesses <h1> <h2> ...` installs the named
+ * subset, and with neither flag the single harness resolved from the environment
+ * (`REGIMEN_HARNESS` or a CLI-set marker). The default may be empty when no
+ * harness resolves; the per-harness install then fails closed through the
+ * facades and nothing is recorded.
+ */
+function parseHarnessTargets(
+  argv: ReadonlyArray<string>,
+  life: LifecycleDeps,
+): string[] {
+  if (argv.includes("--all")) return life.installableHarnesses();
+  const named = collectFlagValues(argv, "--harnesses");
+  if (named.length > 0) return named;
+  const resolved = resolveHarnessFromEnvironment(process.env);
+  return resolved === undefined ? [] : [resolved];
+}
+
+/** The injected manifest stamps for a fresh install or an update restamp. */
+function installMeta(life: LifecycleDeps): InstallMeta {
+  return {
+    now: life.now(),
+    regimenVersion: life.regimenVersion(),
+    clonePath: life.clonePath(),
+    loaderPath: life.loaderPath(),
+  };
+}
+
+/**
+ * Run the two install pillars for one harness, capture first then the gate (so
+ * the capture hook lands ahead of the gate on the pre-tool boundary), with
+ * `REGIMEN_HARNESS` set to this harness so the facades resolve exactly it and
+ * restored after. The gate pillar always runs (an empty gate set wires no gates
+ * but still reconciles the harness hooks file). Fail-fast: a failing capture
+ * returns its nonzero code and the gate never runs. This is the one place the
+ * per-harness install mechanics live; both `install` and `update` call it, so the
+ * env-set dance and the pillar ordering are never duplicated.
+ */
+function runPillars(
+  harness: string,
+  dir: string,
+  gates: ReadonlyArray<GateId>,
+  dryRun: boolean,
+  steps: InstrumentSteps,
+): number {
+  const saved = process.env.REGIMEN_HARNESS;
+  process.env.REGIMEN_HARNESS = harness;
+  try {
+    const capture = steps.feedbackInstall({
+      dataDir: dir,
+      dryRun,
+      selfLink: false,
+    });
+    if (capture !== 0) return capture;
+    return steps.enforcementInstall({ gates, dryRun });
+  } finally {
+    if (saved === undefined) delete process.env.REGIMEN_HARNESS;
+    else process.env.REGIMEN_HARNESS = saved;
+  }
+}
+
+/** The manifest scope marking a per-workspace install (Gemini, ADR-0011). */
+const WORKSPACE_SCOPE_PREFIX = "workspace:";
+
+/**
+ * Install one harness end to end and, on success outside a dry-run, fold the
+ * harness, its pillars, and the given install scope into the manifest. The
+ * scope is computed by the caller (so it can also drive the per-workspace
+ * notice) and recorded verbatim, honoring a harness's per-workspace install. The
+ * self-link is the dispatcher's concern, not this per-harness step.
+ */
+function installHarness(
+  harness: string,
+  scope: string,
+  dir: string,
+  gates: ReadonlyArray<GateId>,
+  dryRun: boolean,
+  steps: InstrumentSteps,
+  life: LifecycleDeps,
+  manifest: Manifest | undefined,
+): { code: number; manifest: Manifest | undefined } {
+  const code = runPillars(harness, dir, gates, dryRun, steps);
+  if (code !== 0 || dryRun) return { code, manifest };
+
+  const pillars = gates.length > 0 ? ["feedback", "enforcement"] : ["feedback"];
+  const entry: ManifestEntry = { harness, pillars, scope };
+  return {
+    code: 0,
+    manifest: recordInstall(manifest, entry, installMeta(life)),
+  };
+}
+
+/**
+ * `regimen install`: install each target harness (capture pillar then gate
+ * pillar), recording every successful install in the manifest with its pillars
+ * and scope, then the one `regimen` self-link last. The default targets the
+ * single env-resolved harness; `--all` and `--harnesses` loop the set, with
+ * Gemini installing per-workspace (a one-line notice says so). Fail-fast: a
+ * failing harness stops the run and returns its nonzero code so a partial install
+ * never reports success. Each instrument install runs with `selfLink: false` so
+ * only the unified bin is linked.
  */
 export function install(
   argv: ReadonlyArray<string>,
   steps: InstrumentSteps = REAL_STEPS,
+  life: LifecycleDeps = REAL_LIFECYCLE,
 ): number {
   const dryRun = argv.includes("--dry-run");
   const dir = dataDir();
   const gates = parseGates(argv);
+  const targets = parseHarnessTargets(argv, life);
 
   process.stdout.write("Regimen install (capture then gates)\n");
 
-  const capture = steps.feedbackInstall({
-    dataDir: dir,
-    dryRun,
-    selfLink: false,
-  });
-  if (capture !== 0) return capture;
-
-  const gate = steps.enforcementInstall({ gates, dryRun });
-  if (gate !== 0) return gate;
+  let manifest = readManifest(manifestPath(dir));
+  for (const harness of targets) {
+    const scope = life.installScope(harness, process.cwd());
+    if (scope.startsWith(WORKSPACE_SCOPE_PREFIX)) {
+      process.stdout.write(
+        `${harness} capture installs into the current workspace only\n`,
+      );
+    }
+    const result = installHarness(
+      harness,
+      scope,
+      dir,
+      gates,
+      dryRun,
+      steps,
+      life,
+      manifest,
+    );
+    if (result.code !== 0) return result.code;
+    manifest = result.manifest;
+  }
 
   const link = steps.selfLink("link", dryRun);
   if (link !== 0) {
     process.stderr.write("failed to link the regimen CLI onto PATH\n");
     return link;
+  }
+
+  if (!dryRun && manifest !== undefined) {
+    writeManifest(manifestPath(dir), manifest);
   }
 
   process.stdout.write(
@@ -176,7 +340,8 @@ export function install(
  * every step runs even if an earlier one failed, so a half-installed system can
  * always be cleaned up; the aggregate exit is nonzero if any step failed. The one
  * `regimen` self-unlink runs last; each instrument teardown runs with
- * `selfLink: false`.
+ * `selfLink: false`. Outside a dry-run it removes the env-resolved harness from
+ * the install manifest so `regimen status` no longer reports it installed.
  */
 export function uninstall(
   argv: ReadonlyArray<string>,
@@ -200,12 +365,79 @@ export function uninstall(
     failed = 1;
   }
 
+  if (!dryRun) {
+    const harness = resolveHarnessFromEnvironment(process.env);
+    const manifest = readManifest(manifestPath(dir));
+    if (harness !== undefined && manifest !== undefined) {
+      writeManifest(manifestPath(dir), recordUninstall(manifest, harness));
+    }
+  }
+
   process.stdout.write(
     dryRun
       ? "dry run complete; nothing was changed\n"
       : "Regimen uninstalled\n",
   );
   return failed;
+}
+
+/**
+ * `regimen update`: re-apply the recorded install from the CURRENT clone so a
+ * moved or upgraded clone rewrites the absolute paths baked into the installed
+ * hooks, gates, and service definition (ADR-0012). It reads the manifest and,
+ * for each recorded entry, re-runs the idempotent per-harness install honoring
+ * that entry's scope (including Gemini's recorded workspace), cycles the daemon
+ * so the supervisor runs the freshly-resolved loader path, then restamps the
+ * version, the update time, and the re-resolved clone and loader paths. With no
+ * manifest present it cannot know what to update, so it falls back to behaving
+ * like a fresh `regimen install`.
+ */
+export function update(
+  argv: ReadonlyArray<string>,
+  steps: InstrumentSteps = REAL_STEPS,
+  life: LifecycleDeps = REAL_LIFECYCLE,
+): number {
+  const dir = dataDir();
+  const existing = readManifest(manifestPath(dir));
+  if (existing === undefined) {
+    process.stdout.write(
+      "no install manifest found; running a fresh install\n",
+    );
+    return install(argv, steps, life);
+  }
+
+  const dryRun = argv.includes("--dry-run");
+  process.stdout.write("Regimen update (re-applying recorded installs)\n");
+
+  const meta = installMeta(life);
+  const updated: Manifest = {
+    ...existing,
+    regimenVersion: meta.regimenVersion,
+    clonePath: meta.clonePath,
+    loaderPath: meta.loaderPath,
+    updatedAt: meta.now,
+  };
+
+  for (const entry of existing.entries) {
+    const gates = entry.pillars.includes("enforcement")
+      ? [...DEFAULT_GATES]
+      : [];
+    const code = runPillars(entry.harness, dir, gates, dryRun, steps);
+    if (code !== 0) return code;
+  }
+
+  const cycle = life.cycleDaemon(dir, dryRun);
+  if (cycle !== 0) {
+    process.stderr.write("failed to cycle the daemon after update\n");
+    return cycle;
+  }
+
+  if (!dryRun) writeManifest(manifestPath(dir), updated);
+
+  process.stdout.write(
+    dryRun ? "dry run complete; nothing was changed\n" : "Regimen updated\n",
+  );
+  return 0;
 }
 
 /**
@@ -269,6 +501,32 @@ function assess(argv: ReadonlyArray<string>): Promise<number> {
   });
 }
 
+/**
+ * `regimen status`: surface what is installed (the manifest's version and
+ * per-harness entries with pillars and scope, plus the install and update
+ * timestamps) composed with the feedback program status (enabled state and
+ * daemon liveness) the dispatcher already owns. With no manifest it says plainly
+ * that nothing is installed yet.
+ */
+function status(): number {
+  const dir = dataDir();
+  const manifest = readManifest(manifestPath(dir));
+  if (manifest === undefined) {
+    process.stdout.write("nothing installed yet (no install manifest)\n");
+  } else {
+    process.stdout.write(`installed: regimen ${manifest.regimenVersion}\n`);
+    process.stdout.write(
+      `  installed ${manifest.installedAt}, updated ${manifest.updatedAt}\n`,
+    );
+    for (const entry of manifest.entries) {
+      process.stdout.write(
+        `  ${entry.harness}: ${entry.pillars.join(", ")} (${entry.scope})\n`,
+      );
+    }
+  }
+  return feedbackStatus({ dataDir: dir });
+}
+
 /** Dispatch `regimen list` to the feedback list facade. */
 function list(argv: ReadonlyArray<string>): number {
   const filter: SessionFilter = {
@@ -294,17 +552,19 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
   const command = argv[0];
   if (command === undefined) {
     process.stderr.write(
-      "usage: regimen <install|uninstall|status|daemon|assess|evidence|list>\n",
+      "usage: regimen <install|update|uninstall|status|daemon|assess|evidence|list>\n",
     );
     return 1;
   }
   switch (command) {
     case "install":
       return install(argv);
+    case "update":
+      return update(argv);
     case "uninstall":
       return uninstall(argv);
     case "status":
-      return feedbackStatus({ dataDir: dataDir() });
+      return status();
     case "daemon":
       return daemon(argv);
     case "assess":
@@ -322,6 +582,39 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
 /** The cli package's own root, two levels up from this file. */
 export function cliPackageRoot(): string {
   return dirname(dirname(import.meta.dir));
+}
+
+/**
+ * The monorepo clone root the install bakes absolute paths against: the parent
+ * of the cli package (`packages/cli` -> the workspace root). `regimen update`
+ * re-resolves this from the current clone so a moved or upgraded clone rewrites
+ * the paths baked into the installed hooks, gates, and service definition.
+ */
+export function monorepoRoot(): string {
+  return dirname(cliPackageRoot());
+}
+
+/**
+ * The feedback loader entrypoint the daemon service definition runs, resolved
+ * from the current clone the same way the feedback facade resolves it
+ * (`packages/feedback/src/loader/run.ts`). Recorded in the manifest so an
+ * update re-points the supervisor at the current clone's loader.
+ */
+export function feedbackLoaderPath(): string {
+  return join(
+    monorepoRoot(),
+    "packages",
+    "feedback",
+    "src",
+    "loader",
+    "run.ts",
+  );
+}
+
+/** The Regimen version stamp, read from the CLI package's own `package.json`. */
+export function cliVersion(): string {
+  const raw = readFileSync(join(cliPackageRoot(), "package.json"), "utf8");
+  return (JSON.parse(raw) as { version: string }).version;
 }
 
 if (import.meta.main) {

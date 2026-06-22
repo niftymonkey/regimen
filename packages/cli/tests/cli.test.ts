@@ -135,14 +135,24 @@ test("uninstall tells the feedback teardown selfLink:false so only the regimen u
 
 const tempDirs: string[] = [];
 let savedDataDir: string | undefined;
+let savedHarness: string | undefined;
 
+// Every test runs in an isolated temp data dir and with a pinned harness, so the
+// install/uninstall orchestration runs its per-harness path deterministically
+// (the manifest write needs a resolved harness) and never reads or writes the
+// host's real store or ambient harness markers.
 beforeEach(() => {
   savedDataDir = process.env.REGIMEN_DATA_DIR;
+  savedHarness = process.env.REGIMEN_HARNESS;
+  tempDataDir();
+  process.env.REGIMEN_HARNESS = "codex";
 });
 
 afterEach(() => {
   if (savedDataDir === undefined) delete process.env.REGIMEN_DATA_DIR;
   else process.env.REGIMEN_DATA_DIR = savedDataDir;
+  if (savedHarness === undefined) delete process.env.REGIMEN_HARNESS;
+  else process.env.REGIMEN_HARNESS = savedHarness;
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
