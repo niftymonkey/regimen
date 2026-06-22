@@ -92,10 +92,12 @@ export async function dispatchFeedback(
       );
     case "assess": {
       const judgeModel = flagValue(rest, "--judge-model");
+      const judgeVia = flagValue(rest, "--judge-via");
       return assess({
         dataDir,
         ...(session !== undefined ? { session } : {}),
         ...(judgeModel !== undefined ? { judgeModel } : {}),
+        ...(judgeVia === "cli" || judgeVia === "api" ? { judgeVia } : {}),
       });
     }
     case "list":

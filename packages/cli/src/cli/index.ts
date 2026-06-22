@@ -503,10 +503,16 @@ function evidence(argv: ReadonlyArray<string>): number {
 function assess(argv: ReadonlyArray<string>): Promise<number> {
   const session = flagValue(argv, "--session");
   const judgeModel = flagValue(argv, "--judge-model");
+  // --judge-via forces the judge backend; only the two known values pass
+  // through, an unknown value falls through to the facade's auto-selection.
+  const judgeViaRaw = flagValue(argv, "--judge-via");
+  const judgeVia =
+    judgeViaRaw === "cli" || judgeViaRaw === "api" ? judgeViaRaw : undefined;
   return feedbackAssess({
     dataDir: dataDir(),
     ...(session === undefined ? {} : { session }),
     ...(judgeModel === undefined ? {} : { judgeModel }),
+    ...(judgeVia === undefined ? {} : { judgeVia }),
   });
 }
 

@@ -271,19 +271,23 @@ test("a parseable verdict that grounds no signal is an insufficient-evidence run
   expect(result.narratives.length).toBe(1);
 });
 
-test("omitting config.llm resolves the default Anthropic adapter (no network here)", async () => {
+test("omitting config.llm resolves the default judge adapter (no network here)", async () => {
   // When config.llm is omitted, judgeConversation resolves the production
-  // adapter via resolveDefaultJudgeModel (spec section 3). With no key in env,
-  // that resolution throws the adapter's env error rather than the old
-  // placeholder throw, proving the default seam is wired. No network is made:
-  // the adapter is never invoked because construction fails first.
-  const saved = process.env.ANTHROPIC_API_KEY;
+  // adapter via resolveDefaultJudgeModel (spec section 3). With no key in env AND
+  // no `claude` on PATH (PATH pinned empty so the CLI fallback finds nothing),
+  // that resolution throws the no-backend error naming ANTHROPIC_API_KEY rather
+  // than the old placeholder throw, proving the default seam is wired. No network
+  // is made: the adapter is never invoked because construction fails first.
+  const savedKey = process.env.ANTHROPIC_API_KEY;
+  const savedPath = process.env.PATH;
   delete process.env.ANTHROPIC_API_KEY;
+  process.env.PATH = "";
   try {
     await expect(
       judgeConversation({ sessionId: SESSION, chunks: CHUNKS }),
     ).rejects.toThrow(/ANTHROPIC_API_KEY/);
   } finally {
-    if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+    if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
+    if (savedPath !== undefined) process.env.PATH = savedPath;
   }
 });

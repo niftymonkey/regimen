@@ -42,6 +42,7 @@ const MANAGED_ENV = [
   "REGIMEN_DATA_DIR",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
+  "PATH",
 ];
 
 interface CliResult {
@@ -244,11 +245,12 @@ test("feedback assess --session runs the full pass against a mock judge and prin
   });
 });
 
-test("feedback assess --session with no ANTHROPIC_API_KEY exits 1 with a clear error", async () => {
+test("feedback assess --session with no ANTHROPIC_API_KEY and no claude CLI exits 1 with a clear error", async () => {
   await withTemp(async ({ dataDir, codexHome }) => {
-    // The transcript exists, so the only failure is the missing key: resolving
-    // the judge model now throws inside the try, yielding a clean stderr message
-    // and exit 1 rather than an unhandled rejection.
+    // The transcript exists, so the only failure is the absent judge backend:
+    // with no key AND no `claude` on PATH (PATH pinned empty so the CLI fallback
+    // finds nothing), resolving the judge model throws inside the try, yielding a
+    // clean stderr message and exit 1 rather than an unhandled rejection.
     seedRollout(codexHome);
     const { exit, stderr } = await runCliWith(
       ["assess", "--session", SESSION],
@@ -256,6 +258,7 @@ test("feedback assess --session with no ANTHROPIC_API_KEY exits 1 with a clear e
         REGIMEN_DATA_DIR: dataDir,
         REGIMEN_HARNESS: "codex",
         CODEX_HOME: codexHome,
+        PATH: "",
       },
       ["ANTHROPIC_API_KEY"],
     );
