@@ -28,6 +28,19 @@ import type { InstallContext } from "./linux.ts";
 export const WINDOWS_TASK_NAME = "regimen-feedback";
 const TASK_XML_NAME = "regimen-feedback.task.xml";
 
+/**
+ * Escape XML text-content metacharacters so dynamic command content is safe to
+ * embed in the Task Scheduler XML. `&` is escaped first so the `&amp;`, `&lt;`,
+ * and `&gt;` entities introduced here are not themselves re-escaped. schtasks
+ * unescapes these back to the literal command at run time.
+ */
+function xmlEscape(s: string): string {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 export function windowsServiceContent(ctx: InstallContext): string {
   const inner = `set REGIMEN_DATA_DIR=${ctx.dataDir} && "${ctx.bunPath}" "${ctx.loaderPath}" > NUL 2>&1`;
   return `<?xml version="1.0" encoding="UTF-16"?>
@@ -58,8 +71,8 @@ export function windowsServiceContent(ctx: InstallContext): string {
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>cmd.exe</Command>
-      <Arguments>/c "${inner}"</Arguments>
+      <Command>${xmlEscape("cmd.exe")}</Command>
+      <Arguments>${xmlEscape(`/c "${inner}"`)}</Arguments>
     </Exec>
   </Actions>
 </Task>
