@@ -7,7 +7,7 @@
 Durable across every phase. Sourced from the ADRs and PRD; restated here so each slice can reference them:
 
 - **Single monorepo.** One Bun workspace with a package per instrument: `packages/cli` (the `regimen` orchestrator), `packages/feedback`, `packages/enforcement`, `packages/otlp-bridge`, and `packages/shared`, plus the curated `skills` source for Guidance. Each package stays independently pluggable.
-- **Instruments cut by mechanism.** Guidance instructs, Enforcement compels, Feedback observes. Settled in ADR-0002.
+- **Feedback the center, Guidance and Enforcement the levers.** Feedback observes how the work went; Guidance instructs and Enforcement compels in response to what it surfaces. The two levers are cut by mechanism (advisory versus deterministic), settled in ADR-0002; the center-and-levers structure (not three co-equal pillars) is settled in ADR-0013.
 - **Feedback measures the conversation, not the software.** Soundness enters only through engineer reactions captured as signals. Settled in ADR-0003.
 - **Feedback's data architecture.** Capture hook appends raw envelopes (`{harness, captured_at, payload}`) to a JSONL buffer; the loader translates per-harness events to the canonical v1 schema and writes to a local SQLite store; conversation content stays in the harness's own transcript file, never duplicated. Settled in ADR-0005.
 - **Loader is an opt-in always-on daemon.** Real-time freshness is the substrate. Per-harness translation is the only harness-specific seam. Capture and storage share one enabled-flag gate. First-class on Linux, macOS, native Windows. Idempotency by sha256 `event_hash` and `INSERT OR IGNORE`. Settled in ADR-0006.

@@ -1,10 +1,10 @@
 # Regimen PRD
 
-> Program-level Product Requirements Document for Regimen as a whole, sitting above the per-instrument packages. Companion to [`ARCHITECTURE.md`](ARCHITECTURE.md) (architectural overview) and [`docs/adr/`](docs/adr/) (decisions). This PRD focuses on what Regimen is for, who it is for, what it does and does not do, and the use cases that drive each piece.
+> Program-level Product Requirements Document for Regimen as a whole, sitting above the per-instrument packages. Built on the problem and mental model in [`docs/mental-model.md`](docs/mental-model.md), and a companion to [`ARCHITECTURE.md`](ARCHITECTURE.md) (architectural overview) and [`docs/adr/`](docs/adr/) (decisions). This PRD focuses on who Regimen is for, what it does and does not do, and the use cases that drive each piece.
 
 ## Problem Statement
 
-An engineer using an AI coding agent daily has a problem that has little to do with the model and a lot to do with their own practice. The agent's output depends on how the engineer frames work, supplies context, verifies results, and decides what to delegate. None of that is visible while it is happening, and only some of it leaves a trace afterward. When the work goes badly, the engineer often cannot say why. When it goes well, they cannot reliably repeat what they did. Over weeks of work, missteps and patterns accumulate that the engineer would change if they could see them. Often they cannot.
+An engineer using an AI coding agent daily runs the whole interaction on feel. The agent's output depends as much on how the engineer frames work, supplies context, verifies results, and decides what to delegate as on the model itself, and that practice is the part the engineer actually controls. None of it is visible while it is happening, and only some of it leaves a trace afterward. The engineer carries impressions, not data: when the work goes badly they often cannot say why, and when it goes well they cannot reliably repeat what they did. Over weeks, missteps and patterns accumulate that the engineer would change if they could see them. Often they cannot.
 
 A specific version of this bites when an engineer trials a new agent CLI or model. By the end of the trial, they have a vague impression of whether it served them and no evidence to point at. They learn at the end whether the choice was right, not in the middle when they could still adjust how they were using it.
 
@@ -12,15 +12,14 @@ There is no shortage of observability for the model itself, traces, latencies, t
 
 ## Solution
 
-Regimen is a set of pluggable instruments, adopted one at a time as a felt need arises. Each acts on the interaction with the agent by a different mechanism:
+Regimen instruments the interaction with the agent. Today the engineer runs that interaction on feel; Regimen turns the feel into data. That observability is **Feedback**, the center of Regimen: it observes how the work actually went and shows the engineer, plainly and comparably, where the interaction is strong and where it is weak. In response to what Feedback surfaces, the engineer reaches for a lever, each acting on the interaction by a different mechanism:
 
-- **Guidance** instructs the agent through skills the engineer asks it to follow.
+- **Guidance** instructs the agent through skills the engineer asks it to follow; the model may or may not comply.
 - **Enforcement** compels an outcome through any mechanism that takes the choice away from the model: hooks, permission and tool gating, deterministic automation in place of the model, CI and pre-merge gates, sandboxing, schema-constrained outputs, workflow gates.
-- **Feedback** observes how the work actually went and shows the engineer where the interaction is strong and where it is weak.
 
-Pluggability is the rule, not the exception, and the instruments feed each other. Guidance alone is useful. Enforcement is added when a behavior matters too much to leave to the model. Feedback is added when the engineer wants to know whether either of the others is working, and what else might need to be added or sharpened. Feedback is what makes the other two improvable: it surfaces where Guidance is being ignored or absent, and where the model is doing something Enforcement could decisively prevent.
+Adoption is incremental, never wholesale, but it is the levers that are adopted incrementally: a Guidance skill here, an Enforcement gate there, each added when a felt need calls for it, because engineers do not stop work to internalize a practice first. Feedback is not one more piece an engineer might pick up. It is the center, what turns those levers from a loose pile of skills and gates into something that improves, by showing whether a lever that was pulled is working, where Guidance is being ignored or absent, and where the model is doing something Enforcement could decisively prevent. In practice a lever often comes first, adopted on the engineer's own felt sense; Feedback is what replaces that felt sense with data.
 
-Two loops close over the interaction. The tight loop runs in the flow of work: the engineer (or the agent on their behalf, via a skill) reads recent signals and adjusts the next move. The long arc runs across weeks of work: rolled-up patterns inform durable changes to the kit, a new skill, a sharper guardrail, a routing change.
+The loop is see, act, validate. Feedback surfaces a pattern (see), the engineer pulls a lever in response (act), and Feedback shows whether it changed anything (validate), which is itself a fresh observation, so the loop closes. It runs at two ranges at once: the tight loop, in the flow of a single conversation, where the engineer (or the agent on their behalf, via a skill) adjusts the next move; and the long arc, across weeks of work, where rolled-up patterns drive durable changes to the kit, a new skill, a sharper guardrail, a routing change.
 
 In experience terms, Regimen lives quietly. Feedback runs in the background once installed; the engineer reads it via a CLI when they want to reflect, or pulls signals into the agent during a conversation. A judgment pass produces a written assessment and a structured classification on demand, anchored to specific events so its claims are checkable. Conversations and signals live in a single local file the engineer owns and can inspect, copy, or delete. The only thing that leaves the machine is the LLM call used for judgment, and even that is, by default, the same LLM the engineer is already running their work with. Anyone who wants live dashboards instead of a CLI can install an optional renderer that visualizes the same data in Grafana.
 
@@ -75,8 +74,9 @@ In experience terms, Regimen lives quietly. Feedback runs in the background once
 
 Most program-level structure is settled in ADRs; this section names the decisions that hold across the program, not within any one instrument.
 
-- **Single monorepo**, one Bun workspace with a package per instrument plus the bridge. The workspace root holds program-level artifacts (PRDs, ADRs, roadmap, glossary) and the `regimen` installer; each instrument lives under `packages/`. Instruments stay independently pluggable so an engineer can adopt one without the others.
-- **Instruments cut by mechanism, not by purpose.** What separates Guidance from Enforcement is the reliability boundary between a skill the agent may or may not follow and a deterministic mechanism that takes the choice away. Settled in ADR-0002.
+- **Single monorepo**, one Bun workspace with a package per instrument plus the bridge. The workspace root holds program-level artifacts (PRDs, ADRs, glossary) and the `regimen` installer, with the implementation plan under `docs/`; each instrument lives under `packages/`. Each package is independently installable, so adoption stays incremental rather than wholesale.
+- **Feedback is the center; Guidance and Enforcement are the levers acted with in response to it.** Not three co-equal instruments. Settled in ADR-0013, which supersedes the co-equal framing of ADR-0001 and ADR-0002 while preserving their felt-needs adoption and the Guidance-versus-Enforcement boundary. The set of levers is open, not fixed at two.
+- **Guidance and Enforcement are cut by mechanism, not by purpose.** What separates them is the reliability boundary between a skill the agent may or may not follow and a deterministic mechanism that takes the choice away. Settled in ADR-0002 for the boundary, as reframed by ADR-0013.
 - **Regimen is embodied in pluggable instruments, not a methodology document.** Engineers do not stop work to internalize a practice before using it. Settled in ADR-0001.
 - **Feedback measures the conversation, not the software.** Software quality is subjective and not Regimen's to judge. Settled in ADR-0003.
 - **Feedback's data architecture.** Capture hook appends raw events to a local JSONL buffer; loader translates per-harness events into the canonical schema and writes them to a local SQLite store; SQLite is the source of truth for non-rebuildable state; conversation content stays in the harness's own transcript file, never duplicated. Settled in ADR-0005.
@@ -84,8 +84,8 @@ Most program-level structure is settled in ADRs; this section names the decision
 - **The judge LLM defaults to the engineer's already-configured agent LLM** in the first implementation. The configuration sits behind a seam that allows swapping in a different LLM later without changing callers.
 - **Guidance is skills generally; the curated `skills` repo is one good source, not the canonical container.** Other sources (agent-CLI defaults, organization-curated sets, externally-published collections) are valid sources of Guidance.
 - **The OTLP bridge consumes from SQLite.** Per ADR-0005. It is a separate optional renderer, not bundled with Feedback. Its own streaming-daemon architecture is sketched in the `packages/otlp-bridge` package; the realignment to ADR-0005 is tracked in the Bridge workstream.
-- **The "respond" step of the long arc is in scope as light assistance.** Regimen surfaces patterns in plain language and offers concrete suggestions of what to research, build, or invoke; the engineer does the authoring.
-- **A unified `regimen` installer composes the instruments.** The `@regimen/cli` package shells out to each instrument's own install verb (Feedback, then Enforcement); each instrument can still be installed on its own.
+- **The "respond" step of the long arc is in scope as light assistance, designed but not yet built.** When built, Regimen will surface patterns in plain language and offer concrete suggestions of what to research, build, or invoke; the engineer does the authoring.
+- **A unified `regimen` installer composes the instruments.** The `@regimen/cli` package dispatches to each instrument's install logic in-process (Feedback, then Enforcement); each instrument can still be installed on its own. Settled in ADR-0012.
 
 ## Testing Decisions
 
@@ -136,10 +136,11 @@ These are not commitments for any near-term phase, but the loader's daemon shape
 
 This PRD does not supersede the existing hub docs; it layers above them.
 
+- [`docs/mental-model.md`](docs/mental-model.md) is the conceptual source of truth for the problem and the model (Feedback the center, the levers, the see/act/validate loop); this PRD's problem framing derives from it.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) is the architectural overview.
 - `feedback-surfacing.md` is the design of what Feedback surfaces and the principles its surfaces follow.
 - `DOMAIN-LANGUAGE.md` is the vocabulary.
 - `docs/adr/` is the decision log.
-- `roadmap.md` is the engineering-sequence view of workstreams. The phases-of-value above are the user-value view; the two should align, and where they do not, this PRD wins.
+- [`docs/plan.md`](docs/plan.md) is the engineering-sequence view of the implementation phases. The phases-of-value above are the user-value view; the two should align, and where they do not, this PRD wins.
 
-The PRD is the canonical statement of "what Regimen is for, who it is for, what it does and does not do." The other docs are authoritative for what they cover.
+The PRD is the canonical statement of Regimen's requirements: who it is for, what it does and does not do, and the use cases that drive each piece. The problem and the conceptual model it builds on are owned by [`docs/mental-model.md`](docs/mental-model.md). The other docs are authoritative for what they cover.

@@ -2,7 +2,7 @@
 
 Feedback, the Regimen instrument that adds observability to your work with an AI, describes what actually happened, not whether it was right. It reads the factual record of the interaction: what you asked, what the agent did, what broke, and what you said back. Half of what Feedback surfaces is plain counting and holds no opinion; the other half, where an LLM interprets that record, stays anchored to those counts and shows its work, so every signal traces back to evidence you can see. Whether a result was sound is taken from your own reaction to it, never from Feedback grading your code.
 
-*Feedback is one of Regimen's three instruments; see [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the whole.*
+*Feedback is the center of Regimen, the observability that Guidance and Enforcement (the two levers) act in response to; see [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the whole.*
 
 ## The rule: activity is not feedback
 
