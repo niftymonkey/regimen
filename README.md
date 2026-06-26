@@ -10,7 +10,7 @@ Today that process runs on feel. You carry impressions of whether a session went
 
 **Feedback** is the center: the observability that turns the feel into data. It observes how the work actually went and surfaces, plainly and comparably, where the interaction is strong and where it is weak. The question it answers about each thing you asked for: did the agent do what you wanted, and how much correction did that take? It measures the conversation, never your code, and never renders a verdict on you. What it surfaces is specific and grounded in what actually happened, never vague coaching like "get better at prompting."
 
-> **It all stays on your machine.** This is telemetry on your own conversations, for you, kept in a local store. Regimen collects nothing. The only network activity is the judgment step, an LLM call to the same model provider you already use, never to Regimen.
+> **Your captured conversations stay on your machine.** This is telemetry on your own conversations, for you, kept in a local store. Regimen collects nothing and sends none of it anywhere. This is not a no-network promise: the judgment step calls an LLM at the same model provider you already use, and the optional Guidance skill search hits a public directory. Neither carries your captured data, and neither goes to Regimen.
 
 In response to what Feedback shows, you reach for one of two levers:
 
@@ -41,26 +41,25 @@ flowchart LR
 
 ## Install
 
-A full install is a single clone of this monorepo. Feedback and Enforcement come from `regimen install`; the Guidance skills install separately.
+Installing Regimen is one clone and one command. Regimen brings the observability; the skills and gates are yours to bring or build.
 
 *Where this is today: per-conversation reads (evidence and judgment) and the slice-able history are live; the over-time synthesis and Regimen's own suggestions of what to build next are still being built.*
 
 ### Prerequisites (only if missing)
 
 - Bun: `curl -fsSL https://bun.sh/install | bash`
-- jq, for the em-dash and inline-message gates: `brew install jq`
 - `ANTHROPIC_API_KEY` exported, for the `feedback-judgment` skill
 
 Everything Regimen captures stays in a local store on your machine. The key above is only for the judgment step's LLM call, to your own model provider, never to Regimen.
 
-### Core (Feedback and Enforcement)
+### Clone and install
 
 ```bash
 git clone https://github.com/niftymonkey/regimen.git
 cd regimen && ./install.sh
 ```
 
-`./install.sh` installs workspace dependencies, then runs `regimen install`, the unified orchestrator (the `@regimen/cli` package) that dispatches to each instrument's install logic in-process (capture first, then the gates) and self-links the `regimen` bin (`bun link`) so that `regimen` becomes a permanent bare command. After that first run, every lifecycle verb works from anywhere: `regimen install` (add the current harness), `regimen install --all` or `regimen install --harnesses <list>` (install for several harnesses at once), `regimen update` (re-resolve the install in place after the clone moves or upgrades), `regimen uninstall`, and `regimen status` (version, installed harnesses, and scopes). Useful flags: `--dry-run` previews every step and changes nothing, and `--gate <name>` (repeatable) or `--no-gates` selects which gates wire. The harness is auto-detected per invocation, or set explicitly with the `REGIMEN_HARNESS` environment variable.
+`./install.sh` installs workspace dependencies, runs `regimen install`, and links the `regimen` command (`bun link`) so it becomes a permanent bare command. After that first run, `regimen` works from anywhere: `regimen status` shows what is installed, `regimen update` re-resolves after the clone moves or upgrades, `regimen install` adds another harness, and `regimen uninstall` removes it.
 
 ### Guidance skills
 
@@ -83,20 +82,11 @@ Browse a collection with `npx skills@latest add <owner>/skills --list` and take 
 ### Verify
 
 ```bash
-codex features list                 # the hooks feature is on
-regimen daemon status               # daemon running, recent last event
-regimen evidence                    # read a captured session back
-ls ~/.codex/skills                  # the feedback skills, plus any you installed
+regimen status         # version, installed harnesses, and daemon health
+regimen daemon status  # daemon running, recent last event
+regimen evidence       # read your current session's evidence back
 ```
 
-## This repository
+## Learn more
 
-Regimen is a program. This monorepo holds the program-level artifacts plus every instrument as a workspace package under `packages/`:
-
-- [`packages/feedback`](packages/feedback): the Feedback instrument.
-- [`packages/enforcement`](packages/enforcement): the Enforcement instrument.
-- [`packages/otlp-bridge`](packages/otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
-- [`packages/cli`](packages/cli): the `regimen` orchestrator that installs the instruments.
-- [`skills`](https://github.com/niftymonkey/skills): a collection of Guidance skills the author maintains, one source among many, installed separately.
-
-See [`PRD.md`](PRD.md) for what Regimen does and for whom, [`ARCHITECTURE.md`](ARCHITECTURE.md) for how it is structured, [`docs/plan.md`](docs/plan.md) for the implementation phases, and [`docs/adr/`](docs/adr/) for the decisions behind it. Work in flight is tracked on the [project board](https://github.com/orgs/niftymonkey/projects/9).
+See [`PRD.md`](PRD.md) for what Regimen does and for whom, [`ARCHITECTURE.md`](ARCHITECTURE.md) for how it is structured, [`docs/plan.md`](docs/plan.md) for the implementation phases, and [`docs/adr/`](docs/adr/) for the decisions behind it.

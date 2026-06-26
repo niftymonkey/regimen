@@ -6,6 +6,8 @@ Regimen is a multi-repo program because its instruments are independently plugga
 
 Update: `regimen-enforcement` is now realized, created and deployed alongside `regimen-feedback`, no longer a planned repo.
 
+Update: the multi-repo and independently-pluggable-instruments framing here is superseded. ADR-0010 consolidated the instruments into one Bun-workspace monorepo, and ADR-0013 makes Feedback the center with Guidance and Enforcement as the levers acted with in response, not three co-equal pluggable instruments. The `skills` repo is one source of Guidance examples, not a canonical curated catalog (see `../mental-model.md`).
+
 ## Considered options
 
 - A monorepo. Rejected: fights the independent installability of instruments.

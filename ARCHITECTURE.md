@@ -27,12 +27,12 @@ Feedback's data architecture (capture hook, JSONL buffer, loader, SQLite store) 
 
 ## The loop, across two time ranges
 
-The loop is one cycle: see, act, validate. Feedback surfaces a pattern you would otherwise only feel (see); you pull a lever, building or adjusting a skill or adding a gate (act); Feedback shows whether what you built changed anything (validate). Regimen owns the seeing; you own the acting. The same cycle runs across two time ranges:
+The loop is one cycle: see, act, validate, run in conversation with your agent and on demand. You ask how the work is going and your agent reads Feedback and surfaces a pattern you would otherwise only feel (see); you pull a lever, a quick steer or a durable change like a skill or a gate (act); you ask again and Feedback shows whether what you built changed anything (validate). Regimen owns the seeing, you own the acting, and Regimen never volunteers a pattern unprompted. The same cycle runs across two time ranges:
 
 - **Tight loop.** In the flow of work. The engineer (or the agent on their behalf, via a skill) reads recent signals and adjusts the next move with the existing kit.
 - **Long arc.** Across many conversations. Rolled-up patterns inform durable changes to the kit: a new skill, a sharper guardrail, a routing change.
 
-The tight loop and the long arc are time ranges over the same see/act/validate cycle, not two different loops. Light assistance for the respond step (surfacing the pattern and suggesting what to research, build, or invoke) is designed but not yet built.
+The tight loop and the long arc are time ranges over the same see/act/validate cycle, not two different loops, and the scale you observe is independent of how you respond: a durable lever can come from a pattern spotted in a single conversation, and a light steer can be informed by the trend. Light assistance for the respond step (surfacing the pattern and suggesting what to research, build, or invoke) is designed but not yet built.
 
 What the engineer can do when each phase of Regimen lands is detailed in the PRD's "Phases of value" section.
 
