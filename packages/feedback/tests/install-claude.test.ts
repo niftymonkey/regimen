@@ -7,13 +7,12 @@
  * hooks alongside other settings, unlike Codex's dedicated hooks.json.
  */
 import { expect, test } from "bun:test";
-import { planSkillInstall } from "../src/cli/install/skill.ts";
 import {
   planCaptureHooks,
   type HooksFile,
   type WireContext,
 } from "../src/cli/install/capture-hooks.ts";
-import { harnessContract } from "@regimen/shared";
+import { harnessContract, planSkillInstall } from "@regimen/shared";
 import { harnessDescriptor } from "../src/harness/descriptor.ts";
 
 const CONTRACT = harnessContract("claude");

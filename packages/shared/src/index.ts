@@ -21,3 +21,25 @@ export {
   HARNESS_ENV_MARKERS,
   resolveHarnessFromEnvironment,
 } from "./harness/resolve.ts";
+export { resolveHarnessHome } from "./harness/home.ts";
+export {
+  planHooks,
+  planHooksRemoval,
+  type BuiltLeaves,
+  type GroupDecoration,
+  type HooksFile as ParsedHooksFile,
+  type LeafHook,
+  type MatcherGroup,
+  type RegimenMarker,
+  type UnwirePlan,
+  type VersionedHooksFile,
+  type WirePlan,
+  type WireRole,
+} from "./install/hooks-engine.ts";
+export { assertSafeClonePath } from "./install/clone-path.ts";
+export {
+  BUNDLED_SKILLS,
+  planSkillInstall,
+  type SkillInstallContext,
+  type SkillInstallPlan,
+} from "./install/skill.ts";

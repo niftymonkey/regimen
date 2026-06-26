@@ -10,8 +10,7 @@
  * here.
  */
 import { join } from "node:path";
-import type { Harness } from "@regimen/shared";
-import { assertSafeClonePath } from "./clone-path.ts";
+import { assertSafeClonePath, type Harness } from "@regimen/shared";
 
 /** A gate Enforcement can wire onto PreToolUse. */
 export type GateId = "rm-rf" | "em-dash" | "inline-message";

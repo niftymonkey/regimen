@@ -1,6 +1,8 @@
 /**
  * The install-skill planner: where each bundled SKILL.md comes from and where it
- * lands under the harness config home's skills subdirectory.
+ * lands under the harness config home's skills subdirectory. Shared by both
+ * instruments' install layers (the machinery is harness-agnostic; the bundled
+ * skill list is data).
  *
  * Pure: resolves the paths for every bundled skill from a context the CLI
  * assembles, so the CLI can dry-run (print the targets) or copy without this
@@ -10,7 +12,7 @@
  * adding another is one entry in `BUNDLED_SKILLS`, not a new code path.
  */
 import { join } from "node:path";
-import type { HarnessContract } from "@regimen/shared";
+import type { HarnessContract } from "../harness/contract.ts";
 
 /**
  * The skills this repo bundles, by their `<home>/<skillsSubdir>/<name>/`

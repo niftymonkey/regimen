@@ -22,8 +22,8 @@ import {
   harnessContract,
   type HooksFormat,
   resolveHarnessFromEnvironment,
+  resolveHarnessHome,
 } from "@regimen/shared";
-import { resolveHarnessHome } from "../harness.ts";
 import {
   type GateChange,
   type GateId,

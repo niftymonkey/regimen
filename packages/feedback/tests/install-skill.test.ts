@@ -14,8 +14,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planSkillInstall } from "../src/cli/install/skill.ts";
-import { harnessContract } from "@regimen/shared";
+import { harnessContract, planSkillInstall } from "@regimen/shared";
 import { dispatchFeedback } from "./facade-dispatch.ts";
 
 const CONTRACT = harnessContract("codex");

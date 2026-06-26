@@ -1,9 +1,8 @@
 /**
- * The neutral home for the clone-path safety check. It depends on nothing in the
- * install layer, so both `gate-commands.ts` (the published builders) and
- * `gate-hooks.ts` (the planner) can import it without a circular import:
- * gate-hooks already imports gate-commands, so the helper cannot live in
- * gate-hooks if gate-commands needs it too.
+ * The clone-path safety check, shared by both instruments' install layers. It
+ * depends on nothing else, so any builder or planner that interpolates a clone
+ * path into a double-quoted POSIX-shell command can import it without a circular
+ * import.
  */
 
 /**

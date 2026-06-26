@@ -48,11 +48,13 @@ import {
   HARNESS_DESCRIPTORS,
   type HarnessDescriptor,
 } from "../harness/descriptor.ts";
-import { harnessSupport, resolveHarnessHome } from "../harness/support.ts";
+import { harnessSupport } from "../harness/support.ts";
 import {
   bufferDir,
   type Harness,
+  planSkillInstall,
   resolveHarnessFromEnvironment,
+  resolveHarnessHome,
 } from "@regimen/shared";
 import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
@@ -69,7 +71,6 @@ import {
   serviceFileBytes,
   type InstallPlan,
 } from "./install/index.ts";
-import { planSkillInstall } from "./install/skill.ts";
 import {
   type HooksFile,
   planCaptureHooks,
