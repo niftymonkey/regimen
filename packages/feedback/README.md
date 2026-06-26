@@ -22,15 +22,9 @@ The capture edge is in place: a Claude Code hook appends each session event as a
 - **Registration:** `.claude/settings.json` in this package wires the hook to all five events. Open a Claude Code session in this package, approving the project hooks when prompted, and the buffer fills as you work.
 - **Errors**, if any, go to `~/.regimen/capture-errors.log` and are never surfaced to the session.
 
-## Capturing gate denials
-
-A deterministic discipline gate, a hook that denies a tool call breaking a rule, records each denial as a `gate.denial` event. The capture hook cannot observe another hook's denial, so the denying gate emits the event itself, writing a v1 `gate.denial` line directly to the buffer. This holds for any gate on any harness.
-
-The gates and the denial emitter live in the sibling [`packages/enforcement`](../enforcement) package, which writes across the open-format buffer seam per the [store-write contract](docs/store-write-contract.md). Feedback owns the contract and reads the resulting events; it does not ship the emitter or the reference gates. `gate_id` is free-form: there is no registry of known gates, and a `gate.denial` is simply a JSONL line conforming to the event schema, so a gate in any language can append one. See [`docs/event-schema.md`](docs/event-schema.md) for the `gate.denial` rationale and the per-harness denial-capture table.
-
 ## The buffer
 
-The capture hook and any external producer of `gate.denial` events append to the same buffer: a directory holding `current.jsonl` (the active segment) plus zero or more `sealed-<rfc3339>.jsonl` segments the loader daemon rotated out. The default per-OS data dir is XDG `~/.local/share/regimen` on Linux and WSL, `~/Library/Application Support/regimen` on macOS, and `%APPDATA%\regimen` on Windows, with the buffer under `<dataDir>/buffer`. Override the whole data dir with `REGIMEN_DATA_DIR`.
+The capture hook and any external producer writing across the [store-write contract](docs/store-write-contract.md) append to the same buffer: a directory holding `current.jsonl` (the active segment) plus zero or more `sealed-<rfc3339>.jsonl` segments the loader daemon rotated out. The default per-OS data dir is XDG `~/.local/share/regimen` on Linux and WSL, `~/Library/Application Support/regimen` on macOS, and `%APPDATA%\regimen` on Windows, with the buffer under `<dataDir>/buffer`. Override the whole data dir with `REGIMEN_DATA_DIR`.
 
 - **The buffer is plumbing**, not a layer downstream tools read. The loader daemon drains it into SQLite, and the events table is what every consumer (CLI, OTLP bridge, future skills) reads.
 - **Multiple conversations share one buffer.** Every active harness session on the machine appends its envelopes into the same `current.jsonl` from its own subprocess. Append atomicity comes from the regular file itself: on Linux and macOS, `open(O_APPEND)` plus `write()` of one line is kernel-atomic for writes up to `PIPE_BUF`; on native Windows, opening with `FILE_APPEND_DATA` (Node and Bun's append-mode default) gives the same property through the filesystem driver. Concurrent hooks interleave at line granularity, never within a line, and no cross-process lock is needed.

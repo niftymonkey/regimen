@@ -7,7 +7,7 @@
  * keyed on the sha256 event_hash from src/hash.ts, plus a quarantine table
  * for lines that fail to translate. Migration v2 adds the deterministic
  * signal tables ADR-0006 names (conversations, tool_call_spans,
- * repeated_file_edits, gate_denials) and the conversation_counts SQL view
+ * repeated_file_edits) and the conversation_counts SQL view
  * for single-event aggregations; migration v3 adds the skill_invocations
  * table that retains which skill each Skill tool call ran. insertEvent runs
  * projectSignals inside the same transaction so a row in events is committed
@@ -83,7 +83,6 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
         started_at TEXT NOT NULL,
         ended_at TEXT,
         duration_ms INTEGER,
-        denied_by_gate_id TEXT,
         PRIMARY KEY (session_id, tool_call_id)
       ) WITHOUT ROWID;
       CREATE INDEX tool_call_spans_session_started ON tool_call_spans (session_id, started_at);
@@ -96,23 +95,12 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
         PRIMARY KEY (session_id, file_path)
       ) WITHOUT ROWID;
 
-      CREATE TABLE gate_denials (
-        session_id TEXT NOT NULL,
-        tool_call_id TEXT NOT NULL,
-        gate_id TEXT NOT NULL,
-        tool_name TEXT NOT NULL,
-        reason TEXT,
-        denied_at TEXT NOT NULL,
-        PRIMARY KEY (session_id, tool_call_id, gate_id)
-      ) WITHOUT ROWID;
-
       CREATE VIEW conversation_counts AS
       SELECT
         session_id,
         SUM(CASE WHEN event_type = 'user_prompt'  THEN 1 ELSE 0 END) AS prompt_count,
         SUM(CASE WHEN event_type = 'tool.pre'     THEN 1 ELSE 0 END) AS tool_call_count,
         SUM(CASE WHEN event_type = 'compaction'   THEN 1 ELSE 0 END) AS compaction_count,
-        SUM(CASE WHEN event_type = 'gate.denial'  THEN 1 ELSE 0 END) AS gate_denial_count,
         COUNT(*) AS event_count
       FROM events
       GROUP BY session_id;

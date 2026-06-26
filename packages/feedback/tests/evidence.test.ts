@@ -100,36 +100,6 @@ function toolEvent(
   };
 }
 
-function gateDenialEvent(
-  sessionId: string,
-  timestamp: string,
-  options: {
-    gate_id?: string;
-    tool_call_id?: string;
-    tool_name?: string;
-    reason?: string;
-  } = {},
-): RegimenEvent {
-  const gateId = options.gate_id ?? "rm-rf-guard";
-  const attributes: Record<string, string> = {
-    gate_id: gateId,
-    tool_name: options.tool_name ?? "Bash",
-    tool_call_id: options.tool_call_id ?? "toolu_blocked",
-  };
-  if (options.reason !== undefined) attributes.reason = options.reason;
-  return {
-    schema_version: 1,
-    timestamp,
-    session_id: sessionId,
-    harness: "claude",
-    event_type: "gate.denial",
-    trace_id: traceIdFor(sessionId),
-    span_phase: "point",
-    span_name: `gate:${gateId}`,
-    attributes,
-  };
-}
-
 test("an unknown session id yields a known:false digest with the echoed id and generatedAt", () => {
   withStore((store) => {
     const at = Date.parse("2026-05-21T18:00:00.000Z");
@@ -202,7 +172,7 @@ test("a conversation whose events carried no working directory reports cwd as nu
   });
 });
 
-test("counts reflects the five conversation_counts aggregations over the session's events", () => {
+test("counts reflects the conversation_counts aggregations over the session's events", () => {
   withStore((store) => {
     const s = "conv-counts";
     store.insertEvent(
@@ -214,9 +184,6 @@ test("counts reflects the five conversation_counts aggregations over the session
       toolEvent(s, "pre", "2026-05-21T12:02:00.000Z", { tool_call_id: "t1" }),
     );
     store.insertEvent(compactionEvent(s, "2026-05-21T12:03:00.000Z"));
-    store.insertEvent(
-      gateDenialEvent(s, "2026-05-21T12:04:00.000Z", { tool_call_id: "t2" }),
-    );
 
     const digest = readEvidenceDigest(store.db, s, () =>
       Date.parse("2026-05-21T13:00:00.000Z"),
@@ -228,8 +195,7 @@ test("counts reflects the five conversation_counts aggregations over the session
         promptCount: 2,
         toolCallCount: 1,
         compactionCount: 1,
-        gateDenialCount: 1,
-        eventCount: 6,
+        eventCount: 5,
       });
     }
   });
@@ -440,51 +406,6 @@ test("repeatedFileEdits reflects the edit table, sorted by editCount descending"
   });
 });
 
-test("gateDenials reflects the gate_denials table, with a null reason when none was given", () => {
-  withStore((store) => {
-    const s = "conv-denials";
-    store.insertEvent(
-      gateDenialEvent(s, "2026-05-21T12:00:00.000Z", {
-        gate_id: "rm-rf-guard",
-        tool_call_id: "d1",
-        tool_name: "Bash",
-        reason: "would rm -rf /",
-      }),
-    );
-    store.insertEvent(
-      gateDenialEvent(s, "2026-05-21T12:05:00.000Z", {
-        gate_id: "no-force-push",
-        tool_call_id: "d2",
-        tool_name: "Bash",
-      }),
-    );
-
-    const digest = readEvidenceDigest(store.db, s, () =>
-      Date.parse("2026-05-21T13:00:00.000Z"),
-    );
-
-    expect(digest.known).toBe(true);
-    if (digest.known) {
-      expect(digest.gateDenials).toEqual([
-        {
-          toolName: "Bash",
-          gateId: "rm-rf-guard",
-          toolCallId: "d1",
-          reason: "would rm -rf /",
-          deniedAt: "2026-05-21T12:00:00.000Z",
-        },
-        {
-          toolName: "Bash",
-          gateId: "no-force-push",
-          toolCallId: "d2",
-          reason: null,
-          deniedAt: "2026-05-21T12:05:00.000Z",
-        },
-      ]);
-    }
-  });
-});
-
 test("a near-empty conversation reports real zero counts and empty arrays, not absent fields", () => {
   withStore((store) => {
     const s = "conv-tiny";
@@ -502,13 +423,11 @@ test("a near-empty conversation reports real zero counts and empty arrays, not a
         promptCount: 0,
         toolCallCount: 0,
         compactionCount: 0,
-        gateDenialCount: 0,
         eventCount: 1,
       });
       expect(digest.toolMix).toEqual([]);
       expect(digest.skillUsage).toEqual([]);
       expect(digest.repeatedFileEdits).toEqual([]);
-      expect(digest.gateDenials).toEqual([]);
       expect(digest.staleness.openMs).toBe(30_000);
       expect(digest.staleness.idleMs).toBe(30_000);
     }

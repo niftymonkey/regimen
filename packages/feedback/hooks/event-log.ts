@@ -9,7 +9,7 @@
  */
 import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import { bufferDir, dataDir, traceIdFor, type Harness } from "@regimen/shared";
+import { bufferDir, dataDir, type Harness } from "@regimen/shared";
 import { rollIfOversize } from "../src/rolling-log.ts";
 
 export type SpanPhase = "start" | "end" | "point";
@@ -129,45 +129,4 @@ export function recordError(err: unknown): void {
   } catch {
     // A failure to record the failure must still never surface.
   }
-}
-
-/** The normalized inputs a gate hands over when it denies a tool call. */
-export interface GateDenial {
-  /** Stable identifier of the gate that denied, e.g. "rm-rf-guard". */
-  gate_id: string;
-  session_id: string;
-  harness: Harness;
-  /** The tool whose call was denied, e.g. "Bash". */
-  tool_name: string;
-  /** Harness-native id of the denied call, to correlate it with its tool.pre. */
-  tool_call_id: string;
-  /** Why the gate denied the call. */
-  reason?: string;
-  /** The model active on the denied turn, when the gate knows it. */
-  model?: string;
-}
-
-/**
- * Build a gate.denial event from a gate's normalized denial inputs. The
- * gate, at the harness-specific edge, has already normalized its native hook
- * payload into these fields; this builder is harness-agnostic.
- */
-export function buildGateDenialEvent(denial: GateDenial): RegimenEvent {
-  return {
-    schema_version: 1,
-    timestamp: new Date().toISOString(),
-    session_id: denial.session_id,
-    harness: denial.harness,
-    ...(denial.model !== undefined ? { model: denial.model } : {}),
-    event_type: "gate.denial",
-    trace_id: traceIdFor(denial.session_id),
-    span_phase: "point",
-    span_name: `gate:${denial.gate_id}`,
-    attributes: {
-      gate_id: denial.gate_id,
-      tool_name: denial.tool_name,
-      tool_call_id: denial.tool_call_id,
-      ...(denial.reason !== undefined ? { reason: denial.reason } : {}),
-    },
-  };
 }

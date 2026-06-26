@@ -103,30 +103,6 @@ test("an unknown top-level field is rejected", () => {
   expect(validate.errors ?? []).not.toEqual([]);
 });
 
-test("a gate.denial identifies the gate and correlates with the denied call", () => {
-  const denial = sampleEvent((event) => event.event_type === "gate.denial");
-  expect(denial.span_phase).toBe("point");
-  expect(denial.attributes.gate_id).toBeTruthy();
-  expect(denial.attributes.tool_name).toBeTruthy();
-  const denied = readSample().find(
-    (event) =>
-      event.event_type === "tool.pre" &&
-      event.attributes.tool_call_id === denial.attributes.tool_call_id,
-  );
-  expect(
-    denied,
-    "the denial correlates with its tool.pre, not a bare dangling start",
-  ).toBeDefined();
-});
-
-test("a gate.denial missing gate_id is rejected", () => {
-  const denial = sampleEvent((event) => event.event_type === "gate.denial");
-  const attributes = { ...denial.attributes };
-  delete attributes.gate_id;
-  validate({ ...denial, attributes });
-  expect(validate.errors ?? []).not.toEqual([]);
-});
-
 function sessionEnd(attributes: Record<string, unknown>): object {
   return {
     schema_version: 1,

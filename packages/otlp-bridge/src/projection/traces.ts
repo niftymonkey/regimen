@@ -68,20 +68,13 @@ function toSessionSpan(row: SessionSpanRow): OtlpSpan | null {
   });
 }
 
-/**
- * A tool span for a closed tool call, parented to its session's root span.
- * When the call was denied by a gate, the deciding gate id rides as an
- * attribute.
- */
+/** A tool span for a closed tool call, parented to its session's root span. */
 function toToolSpan(row: ToolSpanRow): OtlpSpan {
   const attributes = [
     stringAttr("harness", row.harness),
     stringAttr("tool_name", row.toolName),
     stringAttr("tool_call_id", row.toolCallId),
   ];
-  if (row.deniedByGateId !== null) {
-    attributes.push(stringAttr("gate_id", row.deniedByGateId));
-  }
   return makeSpan({
     traceId: row.traceId,
     spanId: mintSpanId(`tool:${row.sessionId}:${row.toolCallId}`),
@@ -94,9 +87,9 @@ function toToolSpan(row: ToolSpanRow): OtlpSpan {
 }
 
 /**
- * A zero-duration span for a point event (`user_prompt`, `compaction`,
- * `gate.denial`). It parents to the deterministic session span id whether or
- * not that root span exists yet: an unfinished session renders rootless.
+ * A zero-duration span for a point event (`user_prompt`, `compaction`). It
+ * parents to the deterministic session span id whether or not that root span
+ * exists yet: an unfinished session renders rootless.
  */
 function toPointSpan(event: LogRow): OtlpSpan {
   const at = toUnixNano(event.timestamp);

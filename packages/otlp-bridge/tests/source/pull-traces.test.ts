@@ -111,7 +111,6 @@ test("a closed tool call yields one tool-span source row", () => {
     startedAt: "2026-05-21T12:01:00.000Z",
     endedAt: "2026-05-21T12:01:02.000Z",
     durationMs: 2000,
-    deniedByGateId: null,
   });
 });
 

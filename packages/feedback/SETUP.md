@@ -75,7 +75,7 @@ The install is safe to re-run: it recognizes its own capture-hook entries by a m
 
    In a live session the agent gets the same digest by invoking the `feedback-evidence` skill, and a judged verdict (Intent, Outcome, evidence-anchored assessment) by invoking `feedback-judgment`, which runs `feedback assess` and makes a live model call. Export `ANTHROPIC_API_KEY` for the judge.
 
-Enforcement (gate denials) is verified separately, once the enforcement package is installed; its own setup guide covers that step. When a gate denies a tool call it records a `gate.denial` event, which surfaces in the read-back from step 2 under `gateDenials` exactly as any other captured signal does, because Feedback reads it from the same store.
+Enforcement (the discipline gates) is verified separately, once the enforcement package is installed; its own setup guide covers that step. A gate denies a tool call and stops there; the denial lands in the harness transcript as an `is_error` tool-result, so the judge reads it from the captured conversation at assess time rather than from a self-reported store event (see [ADR-0014](../../docs/adr/0014-enforcement-drops-the-gate-denial-emit-seam.md)).
 
 ## Caveats and known limits
 

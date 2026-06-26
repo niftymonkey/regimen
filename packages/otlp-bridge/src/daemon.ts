@@ -77,7 +77,7 @@ export function createDaemon(deps: DaemonDeps): Daemon {
   function metricsStep(observedAt: string): StreamStep | null {
     const batch = source.pullMetrics(state.read("metrics"));
     // counts cover every active conversation, so empty counts means nothing
-    // is active and the file-edit and gate-denial sub-signals are empty too.
+    // is active and the file-edit sub-signal is empty too.
     if (batch.counts.length === 0) return null;
     return {
       payload: {

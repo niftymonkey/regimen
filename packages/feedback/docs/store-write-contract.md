@@ -8,7 +8,7 @@ This document does not restate the event field contract. The field-level shape i
 
 An event producer that lives in Feedback's own process (the capture hook) appends to the buffer through Feedback's TypeScript modules. A producer in a separate process cannot import those modules and must not. This contract is for that producer: it writes across the open-format seam, not through an in-process import.
 
-The first such producer is the enforcement package's denial emitter. A discipline gate denies a tool call, then records that denial as a `gate.denial` event so the evidence layer sees it. The emitter and the gates live in that separate package and write across this seam, not through an in-process import. Publishing the seam was the prerequisite that the cut-out depended on: ADR-0009 records that the Enforcement-to-store write path must be a documented store-write contract over the ADR-0005 open-format seam before Enforcement is cut out, so that Enforcement writes across the seam rather than through an import.
+This seam is a general production interface, available to any future out-of-process producer; it is not specific to any one event type. Its first and only producer was the enforcement package's gate-denial emitter, which [ADR-0014](../../../docs/adr/0014-enforcement-drops-the-gate-denial-emit-seam.md) removed: a gate denial is already captured in the harness transcript, so a self-reported store event was redundant. The contract therefore currently has no active producer, but the seam itself survives by design, ready for the next producer that has a genuine deterministic signal to record. The reasoning that established the seam still holds: ADR-0009 records that an out-of-process write path must be a documented store-write contract over the ADR-0005 open-format seam, so a producer writes across the seam rather than through an import.
 
 The scope is one direction only: a producer appending events. Reading the store, draining the buffer, sealing and rotating segments, and computing signals are Feedback's concerns and are not part of this contract.
 
@@ -49,24 +49,17 @@ The loader reads each buffer line and routes it by one rule: the presence or abs
 - **With a top-level `payload` key:** the line is an envelope, `{ harness, captured_at, payload }`, wrapping a raw harness hook payload. The loader looks up the per-harness translator and narrows the raw payload to a canonical v1 event. This is the capture hook's path.
 - **Without a top-level `payload` key:** the line is treated as an already-translated v1 event. The loader validates it structurally (`validateV1Event` in [`src/loader/translators/v1.ts`](../src/loader/translators/v1.ts)) and inserts it as-is.
 
-A harness-agnostic producer (a discipline gate) writes the **v1-direct form: a complete v1 event object with no `payload` key.** It does not write an envelope.
+A harness-agnostic out-of-process producer writes the **v1-direct form: a complete v1 event object with no `payload` key.** It does not write an envelope.
 
-The reason is in [`docs/event-schema.md`](./event-schema.md) ("Gate denials"): a denial is a synthetic, cross-harness event, not a harness hook payload. A `tool.pre` or `session.start` originates as a native hook event a translator narrows, so it rides the envelope path. A `gate.denial` has no native hook event behind it; the gate mints it. Routing it through a per-harness translator would be wrong twice over: there is nothing harness-native to translate, and it would couple a harness-agnostic event to a per-harness code path. So a gate produces the canonical v1 event directly and the loader inserts it without translation.
+The reason: a synthetic, cross-harness signal is not a harness hook payload. A `tool.pre` or `session.start` originates as a native hook event a translator narrows, so it rides the envelope path. A signal with no native hook event behind it is minted directly by the producer. Routing it through a per-harness translator would be wrong twice over: there is nothing harness-native to translate, and it would couple a harness-agnostic event to a per-harness code path. So an out-of-process producer mints the canonical v1 event directly and the loader inserts it without translation.
 
-### The gate.denial event
+### The v1-direct event shape
 
-The producer this contract serves writes `gate.denial` events. The field-level shape is in [`schemas/event.schema.json`](../schemas/event.schema.json); the gate.denial specifics are:
-
-- `event_type`: the literal `"gate.denial"`.
-- `span_phase`: the literal `"point"` (a denial is instantaneous, not a span boundary).
-- `span_name`: `"gate:<gate_id>"`, for example `"gate:rm-rf-guard"`.
-- `attributes`: an object carrying `gate_id`, `tool_name`, and `tool_call_id` (all required), plus an optional `reason`. `gate_id` is a free-form identifier the gate chooses for itself; there is no enum of known gates.
-
-Alongside those, every v1 event also carries `schema_version` (the integer `1`), `timestamp` (RFC 3339 in UTC), `session_id` (the harness's own session id), `harness` (one of the normalized harness identifiers in the schema's enum), the derived `trace_id` (see below), and an optional `model`. See [`schemas/event.schema.json`](../schemas/event.schema.json) and [`docs/event-schema.md`](./event-schema.md) for every field's type and intent.
+A producer writes a complete v1 event. The field-level shape is in [`schemas/event.schema.json`](../schemas/event.schema.json); every v1 event carries `schema_version` (the integer `1`), `timestamp` (RFC 3339 in UTC), `session_id` (the harness's own session id), `harness` (one of the normalized harness identifiers in the schema's enum), `event_type` (one of the schema's event types), `span_phase`, `span_name`, an `attributes` object, the derived `trace_id` (see below), and an optional `model`. See [`schemas/event.schema.json`](../schemas/event.schema.json) and [`docs/event-schema.md`](./event-schema.md) for every field's type and intent.
 
 ## The trace_id derivation
 
-`trace_id` groups every event of one session into one trace. A producer's denial must land in the same trace as the session's capture events, so the producer must derive `trace_id` the same way Feedback does. The derivation is **frozen** and must be reproduced exactly:
+`trace_id` groups every event of one session into one trace. A producer's event must land in the same trace as the session's capture events, so the producer must derive `trace_id` the same way Feedback does. The derivation is **frozen** and must be reproduced exactly:
 
 > `trace_id` is the SHA-256 digest of the UTF-8 string `"trace:" + session_id`, taken as a lowercase hex string, truncated to the first 32 characters.
 
@@ -83,7 +76,7 @@ function traceIdFor(sessionId: string): string {
 }
 ```
 
-The 32-character truncation is OTLP-native trace-id width (16 bytes as 32 hex characters). Because the derivation is a pure function of `session_id`, every producer that reproduces it lands its events under the same trace, whichever process emitted them. If the producer derives `trace_id` differently, its denial is silently orphaned into a different trace; nothing rejects it, so reproducing this derivation exactly is the producer's responsibility. The conformance test asserts the externally-derived `trace_id` equals Feedback's `traceIdFor`, so any future change to the derivation fails loudly and signals that this published contract must be revised.
+The 32-character truncation is OTLP-native trace-id width (16 bytes as 32 hex characters). Because the derivation is a pure function of `session_id`, every producer that reproduces it lands its events under the same trace, whichever process emitted them. If the producer derives `trace_id` differently, its event is silently orphaned into a different trace; nothing rejects it, so reproducing this derivation exactly is the producer's responsibility. The conformance test asserts the externally-derived `trace_id` equals Feedback's `traceIdFor`, so any future change to the derivation fails loudly and signals that this published contract must be revised.
 
 ## Append and idempotency
 
@@ -91,9 +84,9 @@ A producer records one event with these semantics:
 
 - **Create the buffer directory first.** `mkdir -p` the buffer directory (`<dataDir>/buffer`) before the first append; it may not exist yet on a fresh install.
 - **Append one line.** Open `current.jsonl` for append and write one newline-terminated JSON line. Appending a single line is the only write a producer performs.
-- **Never block or fail the producing gate on a write error.** A gate's job is to deny the tool call; recording the denial is secondary. If resolving the data directory, creating the directory, or appending the line fails, the producer swallows the error and continues. A recording failure must never surface to the session or change the gate's decision.
+- **Never block or fail the producer's primary job on a write error.** Recording an event is secondary to whatever the producer's primary job is. If resolving the data directory, creating the directory, or appending the line fails, the producer swallows the error and continues. A recording failure must never surface to the session.
 - **Do not compute `event_hash`.** The store computes the primary key itself: a SHA-256 over the event's canonical JSON ([`src/hash.ts`](../src/hash.ts)). The producer writes only the event fields. Idempotency is automatic: the store inserts with `INSERT OR IGNORE` keyed on that hash, so the same event appended twice (a retry, a replayed segment) is inserted once.
-- **Concurrent appends are safe.** The buffer is append-only and line-oriented: each producer appends whole lines and never rewrites existing bytes, so independent producers (the capture hook, one or more gates) can append concurrently without coordinating.
+- **Concurrent appends are safe.** The buffer is append-only and line-oriented: each producer appends whole lines and never rewrites existing bytes, so independent producers (the capture hook and any out-of-process producer) can append concurrently without coordinating.
 
 ## Stability and versioning
 
@@ -107,7 +100,7 @@ The event field shape itself versions through `schema_version` as [`docs/event-s
 
 ## Worked example
 
-One complete `gate.denial` v1 line, as an external producer would append it to `current.jsonl` (shown formatted; on the wire it is one line with no embedded newlines, terminated by `\n`):
+One complete v1-direct line, as an external producer would append it to `current.jsonl` (shown formatted; on the wire it is one line with no embedded newlines, terminated by `\n`). The event type below is `user_prompt` purely as a concrete, currently-valid example; the seam serves any v1 event type a producer has reason to write:
 
 ```json
 {
@@ -115,17 +108,12 @@ One complete `gate.denial` v1 line, as an external producer would append it to `
   "timestamp": "2026-06-15T17:42:09.000Z",
   "session_id": "claude-session-9f3a",
   "harness": "claude",
-  "event_type": "gate.denial",
+  "event_type": "user_prompt",
   "trace_id": "7e2338f03062a008a2f9a90e125d7ec9",
   "span_phase": "point",
-  "span_name": "gate:rm-rf-guard",
-  "attributes": {
-    "gate_id": "rm-rf-guard",
-    "tool_name": "Bash",
-    "tool_call_id": "toolu_rm01",
-    "reason": "recursive forced rm denied"
-  }
+  "span_name": "user_prompt",
+  "attributes": {}
 }
 ```
 
-Here `trace_id` is `traceIdFor("claude-session-9f3a")`: SHA-256 of `"trace:claude-session-9f3a"`, hex, first 32 characters. The producer writes the object above and nothing else; the store computes `event_hash`, inserts the row, and projects it into `gate_denials` (and onto the matching `tool_call_spans` row when one exists).
+Here `trace_id` is `traceIdFor("claude-session-9f3a")`: SHA-256 of `"trace:claude-session-9f3a"`, hex, first 32 characters. The producer writes the object above and nothing else; the store computes `event_hash` and inserts the row.

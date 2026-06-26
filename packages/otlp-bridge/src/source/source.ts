@@ -19,7 +19,6 @@ import { Database } from "bun:sqlite";
 import type {
   ConversationCountsRow,
   FileEditRow,
-  GateDenialRow,
   LogRow,
   LogsBatch,
   MetricsBatch,
@@ -141,7 +140,6 @@ interface CountsRow {
   prompt_count: number;
   tool_call_count: number;
   compaction_count: number;
-  gate_denial_count: number;
   last_event_at: string;
 }
 
@@ -153,15 +151,13 @@ function toCountsRow(row: CountsRow): ConversationCountsRow {
     promptCount: row.prompt_count,
     toolCallCount: row.tool_call_count,
     compactionCount: row.compaction_count,
-    gateDenialCount: row.gate_denial_count,
     lastEventAt: row.last_event_at,
   };
 }
 
 const COUNTS_SELECT = `
   SELECT c.session_id, c.harness, c.model, c.last_event_at,
-         cc.prompt_count, cc.tool_call_count,
-         cc.compaction_count, cc.gate_denial_count
+         cc.prompt_count, cc.tool_call_count, cc.compaction_count
   FROM conversation_counts cc
   JOIN conversations c ON c.session_id = cc.session_id`;
 
@@ -188,30 +184,6 @@ const FILE_EDITS_SELECT = `
   SELECT fe.session_id, c.harness, fe.file_path, fe.edit_count, fe.last_edited_at
   FROM repeated_file_edits fe
   JOIN conversations c ON c.session_id = fe.session_id`;
-
-/** One joined `gate_denials` row as SQLite returns it. */
-interface GateDenialQueryRow {
-  session_id: string;
-  harness: string;
-  gate_id: string;
-  tool_name: string;
-  denied_at: string;
-}
-
-function toGateDenialRow(row: GateDenialQueryRow): GateDenialRow {
-  return {
-    sessionId: row.session_id,
-    harness: row.harness,
-    gateId: row.gate_id,
-    toolName: row.tool_name,
-    deniedAt: row.denied_at,
-  };
-}
-
-const GATE_DENIALS_SELECT = `
-  SELECT gd.session_id, c.harness, gd.gate_id, gd.tool_name, gd.denied_at
-  FROM gate_denials gd
-  JOIN conversations c ON c.session_id = gd.session_id`;
 
 /** One closed `conversations` row joined to its trace id, as SQLite returns it. */
 interface SessionSpanQueryRow {
@@ -262,7 +234,6 @@ interface ToolSpanQueryRow {
   started_at: string;
   ended_at: string;
   duration_ms: number | null;
-  denied_by_gate_id: string | null;
 }
 
 function toToolSpanRow(row: ToolSpanQueryRow): ToolSpanRow {
@@ -275,7 +246,6 @@ function toToolSpanRow(row: ToolSpanQueryRow): ToolSpanRow {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     durationMs: row.duration_ms,
-    deniedByGateId: row.denied_by_gate_id,
   };
 }
 
@@ -285,7 +255,7 @@ function toToolSpanRow(row: ToolSpanQueryRow): ToolSpanRow {
  */
 const TOOL_SPANS_SELECT = `
   SELECT t.session_id, c.harness, t.tool_name, t.tool_call_id,
-         t.started_at, t.ended_at, t.duration_ms, t.denied_by_gate_id,
+         t.started_at, t.ended_at, t.duration_ms,
          (SELECT e.trace_id FROM events e
             WHERE e.session_id = t.session_id LIMIT 1) AS trace_id
   FROM tool_call_spans t
@@ -296,7 +266,7 @@ const TOOL_SPANS_SELECT = `
 /** The instantaneous events that become point spans, emitted once each. */
 const POINT_EVENTS_SELECT = `
   SELECT ${LOG_COLUMNS} FROM events
-  WHERE event_type IN ('user_prompt', 'compaction', 'gate.denial')`;
+  WHERE event_type IN ('user_prompt', 'compaction')`;
 
 /** Open the Source against the Feedback store at `dbPath`. */
 export function openSource(dbPath: string): Source {
@@ -325,14 +295,6 @@ export function openSource(dbPath: string): Source {
   const fileEditsFrom = db.query<FileEditQueryRow, { $ts: string }>(
     `${FILE_EDITS_SELECT} WHERE c.last_event_at >= $ts
      ORDER BY fe.session_id, fe.file_path`,
-  );
-
-  const allGateDenials = db.query<GateDenialQueryRow, []>(
-    `${GATE_DENIALS_SELECT} ORDER BY gd.session_id, gd.denied_at`,
-  );
-  const gateDenialsFrom = db.query<GateDenialQueryRow, { $ts: string }>(
-    `${GATE_DENIALS_SELECT} WHERE c.last_event_at >= $ts
-     ORDER BY gd.session_id, gd.denied_at`,
   );
 
   // The three trace sub-streams each advance their own boundary cursor: point
@@ -401,7 +363,6 @@ export function openSource(dbPath: string): Source {
         return {
           counts: [],
           fileEdits: [],
-          gateDenials: [],
           nextWatermark: watermark,
         };
       }
@@ -409,14 +370,9 @@ export function openSource(dbPath: string): Source {
         watermark === null
           ? allFileEdits.all()
           : fileEditsFrom.all({ $ts: watermark });
-      const gateDenialRows =
-        watermark === null
-          ? allGateDenials.all()
-          : gateDenialsFrom.all({ $ts: watermark });
       return {
         counts: countsRows.map(toCountsRow),
         fileEdits: fileEditRows.map(toFileEditRow),
-        gateDenials: gateDenialRows.map(toGateDenialRow),
         nextWatermark: countsRows[countsRows.length - 1]!.last_event_at,
       };
     },

@@ -33,7 +33,6 @@ One event is one JSON object, one line of the append-only JSONL buffer. Fields, 
 | `tool.pre`      | `start`      | Opens a tool-call span. Carries `tool_name`, `tool_call_id`.                                                                                                                        |
 | `tool.post`     | `end`        | Closes a tool-call span. Carries `tool_name`, `tool_call_id`.                                                                                                                       |
 | `compaction`    | `point`      | Marks a context compaction. See "Compaction is one normalized event".                                                                                                               |
-| `gate.denial`   | `point`      | Marks a discipline gate denying a tool call. See "Gate denials".                                                                                                                    |
 
 Each event name is normalized and harness-agnostic: a producer maps a harness's native signal to one of these names at capture time, rather than later in the pipeline, which keeps the JSONL buffer harness-agnostic and makes the schema a cross-harness semantic convention.
 
@@ -131,42 +130,9 @@ A compaction count of 0 is ambiguous on its own: it can mean the session had no 
 
 Every harness covered by the portability studies (verified 2026-05-14) observes compaction. The `unobserved` state still exists in the vocabulary: it is the correct reading for any harness outside these studies and the default a downstream reader assumes when the matrix has no entry for a harness. The matrix is keyed by harness only; a harness adding or removing a compaction hook in a later release is a per-harness-version concern.
 
-## Gate denials
+## Gate denials are read from the transcript, not emitted
 
-A deterministic discipline gate is a hook that denies a tool call violating a rule: blocking a destructive command, an edit to a protected path, a banned character. A gate firing is the deliberate-practice loop made visible. The schema records each firing as a `gate.denial` event.
-
-### Why the denying gate emits the event
-
-A gate denial cannot be captured by observing it after the fact. On Claude, a discipline gate is a `PreToolUse` hook returning `permissionDecision: "deny"`; when it does, no later hook event fires, and the capture hook, itself a `PreToolUse` hook, cannot see another hook's decision. `PermissionDenied` exists but fires only for the auto-mode permission classifier, not for a discipline gate. Every other studied harness has the same shape: the gate is the only component that knows it denied.
-
-So the gate that denies emits the `gate.denial` event itself. This is harness-agnostic (every studied harness's gate is a hook that runs code and can therefore append to the buffer) and robust to hook ordering (the event does not depend on whether the capture hook ran). It is the one mechanism that works.
-
-### The contract is the event, not a tool
-
-The contract is the schema: a `gate.denial` is a JSONL line conforming to it, carrying `gate_id` (a free-form identifier the gate chooses for itself, with no enum of known gates), the denied `tool_name` and `tool_call_id`, and an optional `reason`. Any gate, on any harness, in any language, that appends such a line has its denial recorded. There is no registry of approved gates and nothing gate-specific in the schema.
-
-This section is the event-content contract. Where to append the line and how an out-of-process producer targets the seam (the buffer location, the no-`payload` dispatch rule, the frozen `trace_id` derivation, and append and idempotency semantics) is the [store-write contract](./store-write-contract.md).
-
-The gates and the denial emitter are external producers: they live in the separate enforcement package and write `gate.denial` events across that store-write contract. Feedback owns the event-content contract here and the seam there, and reads the resulting events from the store; it does not ship the emitter or the reference gates. A gate in any language that appends a conforming line has its denial recorded, with no registry of approved gates and nothing gate-specific in the schema.
-
-### Per-harness denial capture
-
-The mechanism is uniform, because every studied harness exposes a pre-tool gate that runs custom code:
-
-| Harness    | Gate that can deny a tool call                      |
-| ---------- | --------------------------------------------------- |
-| `claude`   | `PreToolUse` hook (`permissionDecision: deny`)      |
-| `codex`    | `PreToolUse` hook (`permissionDecision: deny`)      |
-| `gemini`   | `BeforeTool` hook (`decision: deny`)                |
-| `cursor`   | `preToolUse` hook (`permission: deny`)              |
-| `copilot`  | `preToolUse` hook (`permissionDecision: deny`)      |
-| `opencode` | `tool.execute.before` plugin hook (throws to block) |
-
-No studied harness has a usable separate "a denial happened" event the capture hook could subscribe to, so none is relied on. The denying gate emitting its own event is the single mechanism on all six.
-
-### Correlation with the denied call
-
-A `gate.denial` carries the denied call's `tool_call_id`, so downstream readers correlate it with that call's `tool.pre`. This sharpens what an unpaired `tool.pre` means: one with a matching `gate.denial` is a call a gate denied, attributable to which gate and why; one with no match was interrupted or denied by hand. A `gate.denial` is self-sufficient even with no `tool.pre` at all (when the gate ran before the capture hook observed the call), because it already names the tool, the call, and the gate.
+A deterministic discipline gate is a hook that denies a tool call violating a rule: blocking a destructive command, an edit to a protected path, a banned character. A gate firing is the deliberate-practice loop made visible. The schema once carried a dedicated gate-denial event the denying gate emitted itself; [ADR-0014](../../../docs/adr/0014-enforcement-drops-the-gate-denial-emit-seam.md) removed it. A gate denial lands in the harness's own transcript as an `is_error` tool-result carrying the deny reason, which Feedback's per-harness transcript readers already project to a judge-visible content chunk. The denial is therefore on the read path the LLM judge already uses; nothing needs to be emitted for the loop to close. The gate writes the deny decision back to the harness and stops there.
 
 ## Ids: the hook assigns one, the rest are minted later
 
@@ -184,12 +150,11 @@ The JSONL buffer is flat: a stream of point-in-time events. A trace is a span tr
 - **A tool span** is a `tool.pre` paired with the `tool.post` carrying the same `attributes.tool_call_id`.
 - **A `user_prompt`** is a zero-duration span (a point).
 - **A `compaction`** is a zero-duration span (a point), a marker on the session timeline. It nests directly under the session span, like a `user_prompt`. It is never paired into a duration.
-- **A `gate.denial`** is a zero-duration span (a point) nested under the session span. It carries the denied call's `tool_call_id`, correlating it with that call's `tool.pre`.
-- **An unpaired `tool.pre`** (no `tool.post`) is a tool call that did not complete. A matching `gate.denial` identifies it as a gate denial, which a reader renders as such; with no match it was interrupted or denied by hand.
+- **An unpaired `tool.pre`** (no `tool.post`) is a tool call that did not complete: it was interrupted, denied by a gate, or denied by hand.
 
 ## The sample
 
-[`samples/event.jsonl`](../samples/event.jsonl) is an eleven-event Cursor session: `session.start` (no model resolved yet), a turn on `gpt-5.2`, a `compaction`, then a second turn the `Auto` router resolved to `sonnet-4.5-thinking`, in which a `Bash` call is denied by a discipline gate. It exercises every part of the schema: the harness enum, `model` recorded per event with a mid-session change, `model` absent where no model is resolved, the `compaction` point event, and a `gate.denial` correlated by `tool_call_id` with the `tool.pre` of the denied call. It is an illustrative hand-written fixture, not capture output; it validates against the schema.
+[`samples/event.jsonl`](../samples/event.jsonl) is a ten-event Cursor session: `session.start` (no model resolved yet), a turn on `gpt-5.2`, a `compaction`, then a second turn the `Auto` router resolved to `sonnet-4.5-thinking`, in which a `Bash` call runs and completes. It exercises every part of the schema: the harness enum, `model` recorded per event with a mid-session change, `model` absent where no model is resolved, the `compaction` point event, and `tool.pre`/`tool.post` pairing by `tool_call_id`. It is an illustrative hand-written fixture, not capture output; it validates against the schema.
 
 ## Versioning
 
@@ -204,5 +169,5 @@ The schema is versioned by a single integer in the `schema_version` field, curre
 
 These were tried and superseded by the current design. Recorded so a later reader does not re-propose them.
 
-- **A versioned line of schemas (v0 then v1).** An earlier tracer-bullet phase introduced a minimal v0 schema, then folded in `compaction`, `gate.denial`, a widened harness enum, and per-event `model` to reach v1. With the design settled in ADR-0005, the version distinction added nothing for a fresh reader. The schema is now the schema; `schema_version` is retained as a single constant for future migration if the schema ever bumps, but the schema is no longer framed as "version N of an evolving line." Do not reintroduce parallel versioned schemas.
+- **A versioned line of schemas (v0 then v1).** An earlier tracer-bullet phase introduced a minimal v0 schema, then folded in `compaction`, a widened harness enum, and per-event `model` to reach v1. With the design settled in ADR-0005, the version distinction added nothing for a fresh reader. The schema is now the schema; `schema_version` is retained as a single constant for future migration if the schema ever bumps, but the schema is no longer framed as "version N of an evolving line." Do not reintroduce parallel versioned schemas.
 - **Read-time projection from JSONL into the three OTel signal shapes.** An earlier framing projected the JSONL log on read into OTel logs, metrics, and traces, computed by a surfacing layer that lived in this repo. ADR-0005 supersedes this: the loader writes normalized events to SQLite, deterministic signals are computed at write time into signal tables, and OTLP output (for downstream tools like Grafana) is the OTLP bridge's concern, reading from SQLite. The schema describes events; what readers do with them is downstream. Do not reintroduce a surfacing layer that projects the JSONL buffer.

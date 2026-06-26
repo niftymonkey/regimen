@@ -1,10 +1,8 @@
 /**
  * The reference rm-rf discipline gate, spawned as a PreToolUse hook would invoke
  * it, against a temp REGIMEN_DATA_DIR. The gate must BLOCK a recursive forced rm
- * unconditionally (always emit the deny decision to the harness), and stamp the
- * recorded denial with the harness from REGIMEN_HARNESS. When REGIMEN_HARNESS is
- * unset it must still block, but skip the telemetry rather than stamp a wrong
- * harness like claude: no hardcoded harness in the gate.
+ * unconditionally (always emit the deny decision to the harness) and write
+ * nothing to the buffer: a gate denies, it does not self-report the denial.
  */
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -71,7 +69,7 @@ async function runGate(
   }
 }
 
-test("with REGIMEN_HARNESS set, the gate blocks and stamps that harness", async () => {
+test("with REGIMEN_HARNESS set, the gate blocks and writes nothing to the buffer", async () => {
   const { exit, stdout, events } = await runGate({ REGIMEN_HARNESS: "codex" });
   expect(exit).toBe(0);
 
@@ -80,13 +78,10 @@ test("with REGIMEN_HARNESS set, the gate blocks and stamps that harness", async 
   };
   expect(decision.hookSpecificOutput?.permissionDecision).toBe("deny");
 
-  expect(events.length).toBe(1);
-  expect(events[0]?.harness).toBe("codex");
+  expect(events).toHaveLength(0);
 });
 
-test("with REGIMEN_HARNESS unset, the gate still blocks but records no denial", async () => {
-  // Scrub every per-CLI marker too: the gate reads the baked REGIMEN_HARNESS
-  // only and must never fall back to a hardcoded harness.
+test("with REGIMEN_HARNESS unset, the gate still blocks and writes nothing", async () => {
   const { exit, stdout, events } = await runGate({
     REGIMEN_HARNESS: undefined,
     CLAUDECODE: undefined,
@@ -101,6 +96,5 @@ test("with REGIMEN_HARNESS unset, the gate still blocks but records no denial", 
   };
   expect(decision.hookSpecificOutput?.permissionDecision).toBe("deny");
 
-  // No harness present: block, but skip telemetry rather than stamp claude.
   expect(events).toHaveLength(0);
 });

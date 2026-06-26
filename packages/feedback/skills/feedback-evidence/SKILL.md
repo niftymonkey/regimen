@@ -35,11 +35,10 @@ The digest is one JSON object. Its fields:
 
 - `conversation`: harness, model, `cwd`, and the start, first-event, last-event, and end timestamps. `cwd` is the working directory this conversation ran in, the anchor for which body of work it belongs to; it is `null` when no event reported one. `endedAt: null` means the conversation is still open (it always is when you invoke this). Some fields come from the transcript tailer rather than from hooks, and may be null when only hook capture has run.
 - `staleness.openMs` and `staleness.idleMs`: how long the conversation has been open, and how long since the last recorded event.
-- `counts`: prompts, tool calls, compactions, gate denials, and total events.
+- `counts`: prompts, tool calls, compactions, and total events.
 - `toolMix`: calls per tool, most-used first.
 - `skillUsage`: skills invoked this conversation with their invocation counts, most-used first. Empty when no skill has been invoked.
 - `repeatedFileEdits`: files edited more than once, most-edited first. Per-file churn comes from the transcript tailer, so it may be empty when only hook capture has run.
-- `gateDenials`: tool calls an Enforcement gate blocked.
 
 ### 4. Interpret in context, then act
 
@@ -50,7 +49,6 @@ Each signal is a fact, not a judgment. Weigh it against the work you were doing:
 - `skillUsage` shows which guidance you actually pulled in. A skill you were asked to use but that is absent here is guidance you skipped; a skill invoked many times may be load-bearing for this conversation.
 - A large `idleMs` can mean the conversation stalled.
 - `compactionCount` above zero is a sign of context strain.
-- A `gateDenial` you have not since worked around is worth revisiting.
 
 If the engineer asked, report the relevant signals concisely. Otherwise, fold any observation that should change your approach into your next move, and carry on.
 

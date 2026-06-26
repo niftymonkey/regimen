@@ -1,14 +1,13 @@
 /**
  * Conformance guard for the store-write contract (docs/store-write-contract.md).
  *
- * This test stands in for an EXTERNAL producer: the future regimen-enforcement
- * denial emitter, a process that cannot import Feedback's TypeScript modules and
- * must write across the open-format buffer seam (ADR-0005). So it deliberately
- * does NOT import buildGateDenialEvent or appendEvent from hooks/event-log.ts.
- * It builds the gate.denial v1 line from raw primitives, derives trace_id inline
- * per the documented algorithm, resolves the buffer the documented way, appends
- * one line, then drains it through the REAL loader and asserts the event landed
- * in events, gate_denials, and the conversation_counts view.
+ * This test stands in for an EXTERNAL producer: a process that cannot import
+ * Feedback's TypeScript modules and must write across the open-format buffer
+ * seam (ADR-0005). So it deliberately does NOT import appendEvent from
+ * hooks/event-log.ts. It builds a v1 line from raw primitives, derives trace_id
+ * inline per the documented algorithm, resolves the buffer the documented way,
+ * appends one line, then drains it through the REAL loader and asserts the event
+ * landed in events.
  *
  * The one Feedback symbol it imports is traceIdFor, used only as the drift guard:
  * the externally-derived trace_id must equal Feedback's own derivation. If
@@ -45,10 +44,6 @@ addFormats(ajv);
 const validate = ajv.compile(SCHEMA);
 
 const SESSION = "claude-external-producer-9f3a";
-const GATE_ID = "rm-rf-guard";
-const TOOL_NAME = "Bash";
-const TOOL_CALL_ID = "toolu_extprod01";
-const REASON = "recursive forced rm denied";
 
 /**
  * Derive trace_id exactly as docs/store-write-contract.md documents it:
@@ -63,7 +58,7 @@ function externalTraceId(sessionId: string): string {
     .slice(0, 32);
 }
 
-test("an external producer's gate.denial line drains into the store across the buffer seam", () => {
+test("an external producer's v1 line drains into the store across the buffer seam", () => {
   // Resolve the buffer the documented way: REGIMEN_DATA_DIR overrides the
   // per-OS default, then <dataDir>/buffer/current.jsonl.
   const dataDir = mkdtempSync(join(tmpdir(), "regimen-store-write-"));
@@ -79,16 +74,11 @@ test("an external producer's gate.denial line drains into the store across the b
       timestamp: "2026-06-15T17:42:09.000Z",
       session_id: SESSION,
       harness: "claude",
-      event_type: "gate.denial",
+      event_type: "user_prompt",
       trace_id: externalTraceId(SESSION),
       span_phase: "point",
-      span_name: `gate:${GATE_ID}`,
-      attributes: {
-        gate_id: GATE_ID,
-        tool_name: TOOL_NAME,
-        tool_call_id: TOOL_CALL_ID,
-        reason: REASON,
-      },
+      span_name: "user_prompt",
+      attributes: {},
     };
 
     // The externally-built line is schema-valid before it ever reaches the store.
@@ -119,37 +109,9 @@ test("an external producer's gate.denial line drains into the store across the b
       trace_id: string;
     };
     expect(event.session_id).toBe(SESSION);
-    expect(event.event_type).toBe("gate.denial");
+    expect(event.event_type).toBe("user_prompt");
     expect(event.span_phase).toBe("point");
-    expect(event.span_name).toBe(`gate:${GATE_ID}`);
-
-    // It projected into gate_denials.
-    const denial = store.db
-      .prepare(
-        "SELECT session_id, gate_id, tool_name, tool_call_id, reason FROM gate_denials",
-      )
-      .get() as {
-      session_id: string;
-      gate_id: string;
-      tool_name: string;
-      tool_call_id: string;
-      reason: string;
-    };
-    expect(denial).toEqual({
-      session_id: SESSION,
-      gate_id: GATE_ID,
-      tool_name: TOOL_NAME,
-      tool_call_id: TOOL_CALL_ID,
-      reason: REASON,
-    });
-
-    // The conversation_counts view counts it as one gate denial.
-    const counts = store.db
-      .prepare(
-        "SELECT gate_denial_count FROM conversation_counts WHERE session_id = ?",
-      )
-      .get(SESSION) as { gate_denial_count: number };
-    expect(counts.gate_denial_count).toBe(1);
+    expect(event.span_name).toBe("user_prompt");
 
     // Drift guard: the externally-derived trace_id matches Feedback's own.
     // If Feedback ever changes traceIdFor, this fails and the published

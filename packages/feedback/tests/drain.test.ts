@@ -15,7 +15,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildGateDenialEvent } from "../hooks/event-log.ts";
+import { traceIdFor } from "@regimen/shared";
+import type { RegimenEvent } from "../hooks/event-log.ts";
 import { drainBuffer } from "../src/loader/drain.ts";
 import { openStore, type Store } from "../src/store.ts";
 
@@ -127,15 +128,19 @@ test("T2: draining the same buffer twice still yields one events row", () => {
 
 test("T3: mixed envelope and v1-direct lines both land in events", () => {
   withHarness(({ bufferDir, store }) => {
-    const denial = buildGateDenialEvent({
-      gate_id: "rm-rf-guard",
-      session_id: "drain-t3-session",
+    const sessionId = "drain-t3-session";
+    const directV1: RegimenEvent = {
+      schema_version: 1,
+      timestamp: "2026-05-21T17:22:01.000Z",
+      session_id: sessionId,
       harness: "claude",
-      tool_name: "Bash",
-      tool_call_id: "toolu_t3",
-      reason: "destructive command blocked",
-    });
-    writeCurrent(bufferDir, [SESSION_START_ENVELOPE, JSON.stringify(denial)]);
+      event_type: "user_prompt",
+      trace_id: traceIdFor(sessionId),
+      span_phase: "point",
+      span_name: "user_prompt",
+      attributes: {},
+    };
+    writeCurrent(bufferDir, [SESSION_START_ENVELOPE, JSON.stringify(directV1)]);
 
     const result = drainBuffer(bufferDir, store);
 
@@ -149,7 +154,7 @@ test("T3: mixed envelope and v1-direct lines both land in events", () => {
         .prepare("SELECT event_type FROM events ORDER BY event_type")
         .all() as ReadonlyArray<{ event_type: string }>
     ).map((row) => row.event_type);
-    expect(types).toEqual(["gate.denial", "session.start"]);
+    expect(types).toEqual(["session.start", "user_prompt"]);
   });
 });
 

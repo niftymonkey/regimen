@@ -85,13 +85,12 @@ test("signal tables reflect the Claude fixture: one conversation, paired tool sp
 
     const counts = store.db
       .prepare(
-        "SELECT prompt_count, tool_call_count, compaction_count, gate_denial_count FROM conversation_counts WHERE session_id = ?",
+        "SELECT prompt_count, tool_call_count, compaction_count FROM conversation_counts WHERE session_id = ?",
       )
       .get("claude-sample-session") as Record<string, unknown>;
     expect(counts.prompt_count).toBe(1);
     expect(counts.tool_call_count).toBe(15);
     expect(counts.compaction_count).toBe(1);
-    expect(counts.gate_denial_count).toBe(0);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

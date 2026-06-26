@@ -8,7 +8,6 @@ import {
   insertConversation,
   insertEvent,
   insertFileEdit,
-  insertGateDenial,
 } from "../fixtures/feedback-db.ts";
 
 function tempDbPath(): string {
@@ -18,7 +17,7 @@ function tempDbPath(): string {
   );
 }
 
-test("a conversation yields one counts row with its four measured counters", () => {
+test("a conversation yields one counts row with its measured counters", () => {
   const path = tempDbPath();
   const db = createFeedbackDb(path);
   insertConversation(db, {
@@ -61,7 +60,6 @@ test("a conversation yields one counts row with its four measured counters", () 
     promptCount: 2,
     toolCallCount: 1,
     compactionCount: 1,
-    gateDenialCount: 0,
     lastEventAt: "2026-05-21T12:00:03.000Z",
   });
 });
@@ -97,39 +95,7 @@ test("a repeated-file-edit row surfaces with its conversation's harness", () => 
   });
 });
 
-test("a gate-denial row surfaces with its conversation's harness", () => {
-  const path = tempDbPath();
-  const db = createFeedbackDb(path);
-  insertConversation(db, {
-    session_id: "sess-a",
-    harness: "claude",
-    last_event_at: "2026-05-21T12:00:05.000Z",
-  });
-  insertEvent(db, { session_id: "sess-a", event_type: "gate.denial" });
-  insertGateDenial(db, {
-    session_id: "sess-a",
-    tool_call_id: "tc-9",
-    gate_id: "rm-rf-guard",
-    tool_name: "Bash",
-    denied_at: "2026-05-21T12:00:05.000Z",
-  });
-
-  const source = openSource(path);
-  const batch = source.pullMetrics(null);
-  source.close();
-  db.close();
-
-  expect(batch.gateDenials).toHaveLength(1);
-  expect(batch.gateDenials[0]).toEqual({
-    sessionId: "sess-a",
-    harness: "claude",
-    gateId: "rm-rf-guard",
-    toolName: "Bash",
-    deniedAt: "2026-05-21T12:00:05.000Z",
-  });
-});
-
-test("a session with no file edits or denials surfaces no zero rows", () => {
+test("a session with no file edits surfaces no zero rows", () => {
   const path = tempDbPath();
   const db = createFeedbackDb(path);
   insertConversation(db, {
@@ -145,7 +111,6 @@ test("a session with no file edits or denials surfaces no zero rows", () => {
 
   expect(batch.counts).toHaveLength(1);
   expect(batch.fileEdits).toHaveLength(0);
-  expect(batch.gateDenials).toHaveLength(0);
 });
 
 test("a second pull drops conversations below the watermark and picks up newer ones", () => {

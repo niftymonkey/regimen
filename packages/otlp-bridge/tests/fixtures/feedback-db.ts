@@ -55,7 +55,6 @@ const SCHEMA_SQL = `
     started_at TEXT NOT NULL,
     ended_at TEXT,
     duration_ms INTEGER,
-    denied_by_gate_id TEXT,
     PRIMARY KEY (session_id, tool_call_id)
   ) WITHOUT ROWID;
   CREATE INDEX tool_call_spans_session_started ON tool_call_spans (session_id, started_at);
@@ -68,23 +67,12 @@ const SCHEMA_SQL = `
     PRIMARY KEY (session_id, file_path)
   ) WITHOUT ROWID;
 
-  CREATE TABLE gate_denials (
-    session_id TEXT NOT NULL,
-    tool_call_id TEXT NOT NULL,
-    gate_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    reason TEXT,
-    denied_at TEXT NOT NULL,
-    PRIMARY KEY (session_id, tool_call_id, gate_id)
-  ) WITHOUT ROWID;
-
   CREATE VIEW conversation_counts AS
   SELECT
     session_id,
     SUM(CASE WHEN event_type = 'user_prompt'  THEN 1 ELSE 0 END) AS prompt_count,
     SUM(CASE WHEN event_type = 'tool.pre'     THEN 1 ELSE 0 END) AS tool_call_count,
     SUM(CASE WHEN event_type = 'compaction'   THEN 1 ELSE 0 END) AS compaction_count,
-    SUM(CASE WHEN event_type = 'gate.denial'  THEN 1 ELSE 0 END) AS gate_denial_count,
     COUNT(*) AS event_count
   FROM events
   GROUP BY session_id;
@@ -203,7 +191,6 @@ export interface ToolCallSpanSeed {
   started_at?: string;
   ended_at?: string | null;
   duration_ms?: number | null;
-  denied_by_gate_id?: string | null;
 }
 
 /** Insert one tool-call-span row. */
@@ -218,14 +205,12 @@ export function insertToolCallSpan(
     started_at: "2026-05-21T12:00:00.000Z",
     ended_at: null as string | null,
     duration_ms: null as number | null,
-    denied_by_gate_id: null as string | null,
     ...seed,
   };
   db.prepare(
     `INSERT INTO tool_call_spans
-       (session_id, tool_call_id, tool_name, started_at, ended_at,
-        duration_ms, denied_by_gate_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (session_id, tool_call_id, tool_name, started_at, ended_at, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     row.session_id,
     row.tool_call_id,
@@ -233,7 +218,6 @@ export function insertToolCallSpan(
     row.started_at,
     row.ended_at,
     row.duration_ms,
-    row.denied_by_gate_id,
   );
 }
 
@@ -259,42 +243,4 @@ export function insertFileEdit(db: Database, seed: FileEditSeed = {}): void {
        (session_id, file_path, edit_count, last_edited_at)
      VALUES (?, ?, ?, ?)`,
   ).run(row.session_id, row.file_path, row.edit_count, row.last_edited_at);
-}
-
-/** A row to seed into `gate_denials`. */
-export interface GateDenialSeed {
-  session_id?: string;
-  tool_call_id?: string;
-  gate_id?: string;
-  tool_name?: string;
-  reason?: string | null;
-  denied_at?: string;
-}
-
-/** Insert one gate-denial row. */
-export function insertGateDenial(
-  db: Database,
-  seed: GateDenialSeed = {},
-): void {
-  const row = {
-    session_id: "sess-1",
-    tool_call_id: "tc-1",
-    gate_id: "rm-rf-guard",
-    tool_name: "Bash",
-    reason: null as string | null,
-    denied_at: "2026-05-21T12:00:00.000Z",
-    ...seed,
-  };
-  db.prepare(
-    `INSERT INTO gate_denials
-       (session_id, tool_call_id, gate_id, tool_name, reason, denied_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    row.session_id,
-    row.tool_call_id,
-    row.gate_id,
-    row.tool_name,
-    row.reason,
-    row.denied_at,
-  );
 }

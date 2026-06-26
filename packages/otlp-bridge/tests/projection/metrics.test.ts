@@ -31,7 +31,6 @@ function counts(
     promptCount: 0,
     toolCallCount: 0,
     compactionCount: 0,
-    gateDenialCount: 0,
     lastEventAt: "2026-05-21T12:00:00.000Z",
     ...partial,
   };
@@ -41,7 +40,6 @@ function emptyBatch(partial: Partial<MetricsBatch> = {}): MetricsBatch {
   return {
     counts: [],
     fileEdits: [],
-    gateDenials: [],
     nextWatermark: null,
     ...partial,
   };
@@ -110,50 +108,10 @@ test("a repeated-file-edit row becomes a gauge data point keyed by session and f
   });
 });
 
-test("gate-denial rows become a sum counted per session and gate", () => {
-  const data = projectMetrics(
-    emptyBatch({
-      gateDenials: [
-        {
-          sessionId: "sess-a",
-          harness: "claude",
-          gateId: "rm-rf-guard",
-          toolName: "Bash",
-          deniedAt: "2026-05-21T12:00:01.000Z",
-        },
-        {
-          sessionId: "sess-a",
-          harness: "claude",
-          gateId: "rm-rf-guard",
-          toolName: "Bash",
-          deniedAt: "2026-05-21T12:00:09.000Z",
-        },
-      ],
-    }),
-    OPTIONS,
-    OBSERVED_AT,
-  );
-
-  const denials = metricsOf(data).find(
-    (m) => m.name === "regimen.gate.denials",
-  );
-  expect(denials).toBeDefined();
-  expect(denials!.sum!.aggregationTemporality).toBe(
-    AGGREGATION_TEMPORALITY_CUMULATIVE,
-  );
-  expect(denials!.sum!.dataPoints).toHaveLength(1);
-  expect(denials!.sum!.dataPoints[0]!.asInt).toBe("2");
-  expect(attrMap(denials!.sum!.dataPoints[0]!.attributes)).toEqual({
-    session_id: "sess-a",
-    harness: "claude",
-    gate_id: "rm-rf-guard",
-  });
-});
-
 test("a metric with no data points is omitted entirely, not emitted empty", () => {
   // Grafana's OTLP parser rejects an empty-data-point metric and drops the
-  // whole request, so a session with no file edits or denials must yield no
-  // file-edit or gate-denial metric at all.
+  // whole request, so a session with no file edits must yield no file-edit
+  // metric at all.
   const data = projectMetrics(
     emptyBatch({ counts: [counts({ promptCount: 1 })] }),
     OPTIONS,
@@ -162,7 +120,6 @@ test("a metric with no data points is omitted entirely, not emitted empty", () =
 
   const names = metricsOf(data).map((m) => m.name);
   expect(names).not.toContain("regimen.file.edits");
-  expect(names).not.toContain("regimen.gate.denials");
   for (const metric of metricsOf(data)) {
     const points = metric.sum?.dataPoints ?? metric.gauge?.dataPoints ?? [];
     expect(points.length).toBeGreaterThan(0);

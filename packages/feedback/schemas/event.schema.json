@@ -54,8 +54,7 @@
         "agent.message",
         "tool.pre",
         "tool.post",
-        "compaction",
-        "gate.denial"
+        "compaction"
       ],
       "description": "Normalized, harness-agnostic event name."
     },
@@ -75,12 +74,12 @@
     },
     "attributes": {
       "type": "object",
-      "description": "Event-specific key/value detail. tool.pre and tool.post carry tool_name and tool_call_id; a skill invocation also carries skill_name; gate.denial carries gate_id, tool_name, tool_call_id, and an optional reason; session.end carries end_reason_normalized (always) and end_reason_native (when the harness exposes one).",
+      "description": "Event-specific key/value detail. tool.pre and tool.post carry tool_name and tool_call_id; a skill invocation also carries skill_name; session.end carries end_reason_normalized (always) and end_reason_native (when the harness exposes one).",
       "properties": {
         "tool_name": {
           "type": "string",
           "minLength": 1,
-          "description": "The tool invoked, present on tool.pre and tool.post events and on gate.denial, e.g. 'Edit', 'Bash', 'Skill'."
+          "description": "The tool invoked, present on tool.pre and tool.post events, e.g. 'Edit', 'Bash', 'Skill'."
         },
         "skill_name": {
           "type": "string",
@@ -90,16 +89,7 @@
         "tool_call_id": {
           "type": "string",
           "minLength": 1,
-          "description": "Harness-native tool-call id. Identical on a tool's tool.pre and tool.post, so downstream readers pair them into one span; on a gate.denial it is the id of the denied call, correlating the denial with its tool.pre."
-        },
-        "gate_id": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Stable identifier of the discipline gate that denied a tool call, present on gate.denial events, e.g. 'rm-rf-guard'. Free-form: any gate names itself, with no enum of known gates."
-        },
-        "reason": {
-          "type": "string",
-          "description": "Why a discipline gate denied a tool call. Optional detail on gate.denial events."
+          "description": "Harness-native tool-call id. Identical on a tool's tool.pre and tool.post, so downstream readers pair them into one span."
         },
         "end_reason_native": {
           "type": "string",
@@ -148,21 +138,6 @@
         "properties": { "event_type": { "const": "compaction" } }
       },
       "then": { "properties": { "span_phase": { "const": "point" } } }
-    },
-    {
-      "if": {
-        "required": ["event_type"],
-        "properties": { "event_type": { "const": "gate.denial" } }
-      },
-      "then": {
-        "properties": {
-          "span_phase": { "const": "point" },
-          "attributes": {
-            "type": "object",
-            "required": ["gate_id", "tool_name", "tool_call_id"]
-          }
-        }
-      }
     },
     {
       "if": {

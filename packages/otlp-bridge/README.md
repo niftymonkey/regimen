@@ -10,11 +10,11 @@ This is a TypeScript project; it runs on [Bun](https://bun.sh).
 
 The Feedback loader writes `feedback.db`, a WAL-mode SQLite store, and keeps it fresh in near-real-time. The bridge opens that store read-only, alongside the loader's writes, and on a poll cadence projects new rows into OTLP and delivers them to Grafana Cloud directly. No OpenTelemetry Collector is involved.
 
-| OTLP signal | Source table                                                 | Shape                                                                                 |
-| ----------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Logs        | `events`                                                     | One log record per event, carrying its trace id                                       |
-| Metrics     | `conversation_counts`, `repeated_file_edits`, `gate_denials` | Cumulative per-session counters and a file-churn gauge                                |
-| Traces      | `conversations`, `tool_call_spans`, `events`                 | Session spans, tool spans, and point spans for prompts, compactions, and gate denials |
+| OTLP signal | Source table                                 | Shape                                                                  |
+| ----------- | -------------------------------------------- | ---------------------------------------------------------------------- |
+| Logs        | `events`                                     | One log record per event, carrying its trace id                        |
+| Metrics     | `conversation_counts`, `repeated_file_edits` | Cumulative per-session counters and a file-churn gauge                 |
+| Traces      | `conversations`, `tool_call_spans`, `events` | Session spans, tool spans, and point spans for prompts and compactions |
 
 **Honest over tidy.** An open conversation emits no session span; an open tool call emits no tool span; a point event whose session has not closed still emits and renders as a rootless trace. The bridge never force-closes a span, never default-zeros an absent signal, and never invents a timestamp. An unfinished session looks unfinished.
 

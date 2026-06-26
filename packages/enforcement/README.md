@@ -1,20 +1,14 @@
 # @regimen/enforcement
 
-The Regimen Enforcement instrument: discipline gates and the denial emitter. This is the `packages/enforcement` workspace package of the Regimen monorepo.
+The Regimen Enforcement instrument: discipline gates. This is the `packages/enforcement` workspace package of the Regimen monorepo.
 
-A discipline gate is a harness PreToolUse hook that denies a tool call which violates a discipline (a recursive forced `rm`, an em dash in written content, an inline shell message body on a git/gh command). When a gate denies a call, it also records a `gate.denial` event so the evidence layer sees it.
-
-## How denials are recorded
-
-Enforcement is its own instrument and does not import any code from Feedback. Its denial emitter writes one JSON line across the published store-write seam: it resolves Feedback's data directory the documented way, builds a v1 `gate.denial` event with the frozen `trace_id` derivation, and appends the line to `<dataDir>/buffer/current.jsonl`. Feedback's loader drains that line into its store. The contract that governs this seam is the feedback package's [`docs/store-write-contract.md`](../feedback/docs/store-write-contract.md); the emitter (`hooks/emit-denial.ts`) and the line builder (`src/denial-store.ts`) reproduce it exactly so Enforcement's denials land in the same trace as the session's capture events.
-
-bun is needed only to record a denial. If bun is absent, a shell gate still denies the call; only the telemetry is skipped.
+A discipline gate is a harness PreToolUse hook that denies a tool call which violates a discipline (a recursive forced `rm`, an em dash in written content, an inline shell message body on a git/gh command). The gate writes the deny decision back to the harness and stops there; a denial leaves an `is_error` tool-result in the harness transcript that Feedback already captures, so the LLM judge reads it from the conversation. The gate does not self-report the denial (see [ADR-0014](../../docs/adr/0014-enforcement-drops-the-gate-denial-emit-seam.md)).
 
 ## Gates
 
-- `examples/rm-rf-gate.ts`: deny a recursive forced `rm`. Harness-agnostic; it stamps the recorded harness from `REGIMEN_HARNESS` (defaulting to `claude`).
-- `examples/em-dash-gate.sh`: deny a Write/Edit whose content contains an em dash (U+2014). Needs `jq` to record.
-- `examples/inline-message-guard.sh`: deny an inline shell message body on a git/gh message command. Needs `jq` to record.
+- `examples/rm-rf-gate.ts`: deny a recursive forced `rm`. Harness-agnostic.
+- `examples/em-dash-gate.sh`: deny a Write/Edit whose content contains an em dash (U+2014). Needs `jq`.
+- `examples/inline-message-guard.sh`: deny an inline shell message body on a git/gh message command. Needs `jq`.
 
 ## Install
 

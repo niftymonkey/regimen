@@ -228,15 +228,11 @@ test("dispatchLine accepts a v1 event line with no payload key (cutover compatib
     timestamp: CAPTURED_AT,
     session_id: SESSION,
     harness: "claude",
-    event_type: "gate.denial",
+    event_type: "compaction",
     trace_id: "0123456789abcdef0123456789abcdef",
     span_phase: "point",
-    span_name: "gate:rm-rf-guard",
-    attributes: {
-      gate_id: "rm-rf-guard",
-      tool_name: "Bash",
-      tool_call_id: "toolu_x",
-    },
+    span_name: "compaction",
+    attributes: { trigger: "manual" },
   };
   const result = dispatchLine(JSON.stringify(event));
   if (result.kind !== "event") {
@@ -244,8 +240,8 @@ test("dispatchLine accepts a v1 event line with no payload key (cutover compatib
       `expected event, got ${result.kind === "quarantine" ? result.reason : result.kind}`,
     );
   }
-  expect(result.event.event_type).toBe("gate.denial");
-  expect(result.event.attributes.gate_id).toBe("rm-rf-guard");
+  expect(result.event.event_type).toBe("compaction");
+  expect(result.event.attributes.trigger).toBe("manual");
 });
 
 test("dispatchLine preserves cwd on an already-translated v1 event line", () => {

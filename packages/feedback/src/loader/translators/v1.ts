@@ -24,7 +24,6 @@ const EVENT_TYPES: ReadonlySet<string> = new Set([
   "tool.pre",
   "tool.post",
   "compaction",
-  "gate.denial",
 ]);
 
 export function validateV1Event(obj: Record<string, unknown>): TranslateResult {

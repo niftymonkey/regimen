@@ -9,9 +9,9 @@
  *
  * The signals materialized here cross multiple events (per-conversation
  * rollups, paired tool spans) or anchor a hot sort key. Single-event
- * aggregations (prompt count, tool count, compaction count, denial count)
- * are exposed as the `conversation_counts` SQL view created in migration
- * v2; they are not materialized.
+ * aggregations (prompt count, tool count, compaction count) are exposed as
+ * the `conversation_counts` SQL view created in migration v2; they are not
+ * materialized.
  */
 import type { Database } from "bun:sqlite";
 import type { RegimenEvent } from "../../hooks/event-log.ts";
@@ -23,7 +23,6 @@ export function projectSignals(db: Database, event: RegimenEvent): void {
     recordSkillInvocation(db, event);
   }
   if (event.event_type === "tool.post") closeToolSpan(db, event);
-  if (event.event_type === "gate.denial") markDeniedToolSpan(db, event);
 }
 
 /**
@@ -42,35 +41,6 @@ function recordSkillInvocation(db: Database, event: RegimenEvent): void {
        invocation_count = invocation_count + 1,
        last_invoked_at = excluded.last_invoked_at`,
   ).run(event.session_id, skillName, event.timestamp);
-}
-
-function markDeniedToolSpan(db: Database, event: RegimenEvent): void {
-  const toolCallId = event.attributes.tool_call_id;
-  const gateId = event.attributes.gate_id;
-  const toolName = event.attributes.tool_name;
-  if (
-    toolCallId === undefined ||
-    gateId === undefined ||
-    toolName === undefined
-  )
-    return;
-  db.prepare(
-    `UPDATE tool_call_spans
-       SET denied_by_gate_id = ?
-     WHERE session_id = ? AND tool_call_id = ?`,
-  ).run(gateId, event.session_id, toolCallId);
-  db.prepare(
-    `INSERT OR IGNORE INTO gate_denials
-       (session_id, tool_call_id, gate_id, tool_name, reason, denied_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    event.session_id,
-    toolCallId,
-    gateId,
-    toolName,
-    event.attributes.reason ?? null,
-    event.timestamp,
-  );
 }
 
 function closeToolSpan(db: Database, event: RegimenEvent): void {
@@ -120,8 +90,8 @@ function openToolSpan(db: Database, event: RegimenEvent): void {
   if (toolCallId === undefined || toolName === undefined) return;
   db.prepare(
     `INSERT OR IGNORE INTO tool_call_spans
-       (session_id, tool_call_id, tool_name, started_at, ended_at, duration_ms, denied_by_gate_id)
-     VALUES (?, ?, ?, ?, NULL, NULL, NULL)`,
+       (session_id, tool_call_id, tool_name, started_at, ended_at, duration_ms)
+     VALUES (?, ?, ?, ?, NULL, NULL)`,
   ).run(event.session_id, toolCallId, toolName, event.timestamp);
 }
 

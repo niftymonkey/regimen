@@ -105,13 +105,12 @@ test("the real comprehensive rollout yields an ended two-prompt conversation wit
 
     const counts = store.db
       .prepare(
-        "SELECT prompt_count, tool_call_count, compaction_count, gate_denial_count FROM conversation_counts WHERE session_id = ?",
+        "SELECT prompt_count, tool_call_count, compaction_count FROM conversation_counts WHERE session_id = ?",
       )
       .get(REAL_SESSION) as Record<string, unknown>;
     expect(counts.prompt_count).toBe(2);
     expect(counts.tool_call_count).toBe(7);
     expect(counts.compaction_count).toBe(0);
-    expect(counts.gate_denial_count).toBe(0);
   });
 });
 

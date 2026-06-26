@@ -44,7 +44,6 @@ export interface ConversationCountsRow {
   promptCount: number;
   toolCallCount: number;
   compactionCount: number;
-  gateDenialCount: number;
   /** The conversation's most recent event time; the metric data point's time. */
   lastEventAt: string;
 }
@@ -58,24 +57,14 @@ export interface FileEditRow {
   lastEditedAt: string;
 }
 
-/** One `gate_denials` row: a discipline gate that denied a tool call. */
-export interface GateDenialRow {
-  sessionId: string;
-  harness: string;
-  gateId: string;
-  toolName: string;
-  deniedAt: string;
-}
-
 /**
  * A batch for the metrics stream. Counts re-emit for every conversation active
- * since the watermark; file edits and gate denials surface only as rows that
- * exist, never as fabricated zeros.
+ * since the watermark; file edits surface only as rows that exist, never as
+ * fabricated zeros.
  */
 export interface MetricsBatch {
   counts: ConversationCountsRow[];
   fileEdits: FileEditRow[];
-  gateDenials: GateDenialRow[];
   /** Highest conversation `last_event_at` observed; unchanged when none. */
   nextWatermark: string | null;
 }
@@ -108,14 +97,13 @@ export interface ToolSpanRow {
   startedAt: string;
   endedAt: string;
   durationMs: number | null;
-  deniedByGateId: string | null;
 }
 
 /**
  * A batch for the traces stream. Session spans cover only closed
  * conversations; tool spans cover only closed tool calls; point events
- * (`user_prompt`, `compaction`, `gate.denial`) are emitted as they arrive,
- * whether or not their session has closed.
+ * (`user_prompt`, `compaction`) are emitted as they arrive, whether or not
+ * their session has closed.
  */
 export interface TracesBatch {
   sessionSpans: SessionSpanRow[];

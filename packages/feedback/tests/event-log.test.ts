@@ -106,15 +106,11 @@ test("appendEvent writes a v1 event JSON line to <dir>/current.jsonl", () => {
       timestamp: "2026-05-21T12:00:00.000Z",
       session_id: "session-x",
       harness: "claude",
-      event_type: "gate.denial",
+      event_type: "compaction",
       trace_id: "0123456789abcdef0123456789abcdef",
       span_phase: "point",
-      span_name: "gate:rm-rf-guard",
-      attributes: {
-        gate_id: "rm-rf-guard",
-        tool_name: "Bash",
-        tool_call_id: "toolu_x",
-      },
+      span_name: "compaction",
+      attributes: { trigger: "manual" },
     };
     appendEvent(event, dir);
     const lines = readFileSync(join(dir, "current.jsonl"), "utf8")

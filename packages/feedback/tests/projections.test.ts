@@ -32,35 +32,6 @@ function sessionEvent(
   };
 }
 
-function gateDenialEvent(
-  timestamp: string,
-  options: {
-    gate_id?: string;
-    tool_call_id?: string;
-    tool_name?: string;
-    reason?: string;
-  } = {},
-): RegimenEvent {
-  const gateId = options.gate_id ?? "rm-rf-guard";
-  const attributes: Record<string, string> = {
-    gate_id: gateId,
-    tool_name: options.tool_name ?? "Bash",
-    tool_call_id: options.tool_call_id ?? "toolu_blocked",
-  };
-  if (options.reason !== undefined) attributes.reason = options.reason;
-  return {
-    schema_version: 1,
-    timestamp,
-    session_id: SESSION,
-    harness: "claude",
-    event_type: "gate.denial",
-    trace_id: traceIdFor(SESSION),
-    span_phase: "point",
-    span_name: `gate:${gateId}`,
-    attributes,
-  };
-}
-
 function toolEvent(
   phase: "pre" | "post",
   timestamp: string,
@@ -324,80 +295,17 @@ test("conversation_counts view exposes per-session single-event aggregations ove
       span_name: "compaction",
       attributes: { trigger: "manual" },
     });
-    store.insertEvent(
-      gateDenialEvent("2026-05-21T12:04:00.000Z", {
-        tool_call_id: "toolu_blocked",
-      }),
-    );
 
     const row = store.db
       .prepare(
-        "SELECT prompt_count, tool_call_count, compaction_count, gate_denial_count, event_count FROM conversation_counts WHERE session_id = ?",
+        "SELECT prompt_count, tool_call_count, compaction_count, event_count FROM conversation_counts WHERE session_id = ?",
       )
       .get(SESSION) as Record<string, unknown>;
 
     expect(row.prompt_count).toBe(2);
     expect(row.tool_call_count).toBe(1);
     expect(row.compaction_count).toBe(1);
-    expect(row.gate_denial_count).toBe(1);
-    expect(row.event_count).toBe(6);
-  });
-});
-
-test("gate.denial inserts a gate_denials row capturing gate_id, tool_call_id, tool_name, reason, and timestamp", () => {
-  withStore((store) => {
-    const deniedAt = "2026-05-21T12:30:00.000Z";
-    store.insertEvent(
-      gateDenialEvent(deniedAt, {
-        gate_id: "rm-rf-guard",
-        tool_call_id: "toolu_blocked_42",
-        tool_name: "Bash",
-        reason: "would rm -rf /",
-      }),
-    );
-
-    const row = store.db
-      .prepare(
-        "SELECT session_id, tool_call_id, gate_id, tool_name, reason, denied_at FROM gate_denials WHERE gate_id = ? AND tool_call_id = ?",
-      )
-      .get("rm-rf-guard", "toolu_blocked_42") as
-      | Record<string, unknown>
-      | undefined;
-
-    expect(row?.session_id).toBe(SESSION);
-    expect(row?.gate_id).toBe("rm-rf-guard");
-    expect(row?.tool_call_id).toBe("toolu_blocked_42");
-    expect(row?.tool_name).toBe("Bash");
-    expect(row?.reason).toBe("would rm -rf /");
-    expect(row?.denied_at).toBe(deniedAt);
-  });
-});
-
-test("a gate.denial on a tool_call_id fills denied_by_gate_id on the matching tool_call_spans row", () => {
-  withStore((store) => {
-    store.insertEvent(
-      toolEvent("pre", "2026-05-21T12:05:00.000Z", {
-        tool_name: "Bash",
-        tool_call_id: "toolu_blocked_1",
-      }),
-    );
-    store.insertEvent(
-      gateDenialEvent("2026-05-21T12:05:00.100Z", {
-        gate_id: "rm-rf-guard",
-        tool_call_id: "toolu_blocked_1",
-        tool_name: "Bash",
-        reason: "would rm -rf /",
-      }),
-    );
-
-    const row = store.db
-      .prepare(
-        "SELECT denied_by_gate_id, ended_at FROM tool_call_spans WHERE tool_call_id = ?",
-      )
-      .get("toolu_blocked_1") as Record<string, unknown> | undefined;
-
-    expect(row?.denied_by_gate_id).toBe("rm-rf-guard");
-    expect(row?.ended_at).toBeNull();
+    expect(row.event_count).toBe(5);
   });
 });
 
@@ -436,7 +344,7 @@ test("tool.pre inserts a tool_call_spans row with started_at and unpaired ended_
 
     const row = store.db
       .prepare(
-        "SELECT session_id, tool_call_id, tool_name, started_at, ended_at, duration_ms, denied_by_gate_id FROM tool_call_spans WHERE tool_call_id = ?",
+        "SELECT session_id, tool_call_id, tool_name, started_at, ended_at, duration_ms FROM tool_call_spans WHERE tool_call_id = ?",
       )
       .get("toolu_pair_1") as Record<string, unknown> | undefined;
 
@@ -445,7 +353,6 @@ test("tool.pre inserts a tool_call_spans row with started_at and unpaired ended_
     expect(row?.started_at).toBe(startedAt);
     expect(row?.ended_at).toBeNull();
     expect(row?.duration_ms).toBeNull();
-    expect(row?.denied_by_gate_id).toBeNull();
   });
 });
 

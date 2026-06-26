@@ -935,8 +935,8 @@ export function unwireHooks(options: { dryRun: boolean }): number {
  * Every step honors `--dry-run`; a failing step stops the run and exits nonzero
  * so a partial install never reports success. The harness is resolved from the
  * environment and flows through to the hooks and skill steps. The Enforcement
- * pillar (gates and the denial emitter) is installed separately from
- * the enforcement package.
+ * pillar (the discipline gates) is installed separately from the enforcement
+ * package.
  *
  * `daemon: false` (the unified CLI's `--no-daemon`) skips the daemon step
  * entirely: no service file is written and no supervisor command runs, for an

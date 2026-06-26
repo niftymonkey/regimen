@@ -51,7 +51,6 @@ function toolSpan(partial: Partial<ToolSpanRow> = {}): ToolSpanRow {
     startedAt: "2026-05-21T12:01:00.000Z",
     endedAt: "2026-05-21T12:01:02.000Z",
     durationMs: 2000,
-    deniedByGateId: null,
     ...partial,
   };
 }
@@ -158,28 +157,14 @@ test("a tool span carries its tool name and call id", () => {
   expect(attrs["tool_call_id"]).toBe("tc-3");
 });
 
-test("a tool call denied by a gate carries the deciding gate id", () => {
-  const data = projectTraces(
-    emptyBatch({ toolSpans: [toolSpan({ deniedByGateId: "rm-rf-guard" })] }),
-    OPTIONS,
-  );
-
-  expect(attrMap(spansOf(data)[0]!.attributes)["gate_id"]).toBe("rm-rf-guard");
-});
-
-test("a gate.denial point event carries the gate detail from its attributes", () => {
+test("a point event carries its attributes onto the span", () => {
   const data = projectTraces(
     emptyBatch({
       pointEvents: [
         pointEvent({
-          eventType: "gate.denial",
-          spanName: "gate:rm-rf-guard",
-          attributes: {
-            gate_id: "rm-rf-guard",
-            tool_name: "Bash",
-            tool_call_id: "tc-9",
-            reason: "recursive forced rm denied",
-          },
+          eventType: "compaction",
+          spanName: "compaction",
+          attributes: { trigger: "manual" },
         }),
       ],
     }),
@@ -187,9 +172,7 @@ test("a gate.denial point event carries the gate detail from its attributes", ()
   );
 
   const attrs = attrMap(spansOf(data)[0]!.attributes);
-  expect(attrs["gate_id"]).toBe("rm-rf-guard");
-  expect(attrs["tool_name"]).toBe("Bash");
-  expect(attrs["reason"]).toBe("recursive forced rm denied");
+  expect(attrs["trigger"]).toBe("manual");
 });
 
 test("a compaction point event becomes a zero-duration span", () => {

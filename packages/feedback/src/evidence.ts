@@ -49,7 +49,6 @@ export interface KnownConversationDigest {
   toolMix: ReadonlyArray<ToolMixEntry>;
   skillUsage: ReadonlyArray<SkillUsageEntry>;
   repeatedFileEdits: ReadonlyArray<RepeatedFileEdit>;
-  gateDenials: ReadonlyArray<GateDenial>;
 }
 
 /** The conversation's identity and lifecycle timestamps. */
@@ -84,7 +83,6 @@ export interface ConversationCounts {
   promptCount: number;
   toolCallCount: number;
   compactionCount: number;
-  gateDenialCount: number;
   eventCount: number;
 }
 
@@ -106,15 +104,6 @@ export interface RepeatedFileEdit {
   filePath: string;
   editCount: number;
   lastEditedAt: string;
-}
-
-/** One gate denial against this conversation. */
-export interface GateDenial {
-  toolName: string;
-  gateId: string;
-  toolCallId: string;
-  reason: string | null;
-  deniedAt: string;
 }
 
 /**
@@ -152,7 +141,6 @@ interface CountsRow {
   prompt_count: number;
   tool_call_count: number;
   compaction_count: number;
-  gate_denial_count: number;
   event_count: number;
 }
 
@@ -165,8 +153,7 @@ interface CountsRow {
 function readCounts(db: Database, sessionId: string): ConversationCounts {
   const row = db
     .prepare(
-      `SELECT prompt_count, tool_call_count, compaction_count,
-              gate_denial_count, event_count
+      `SELECT prompt_count, tool_call_count, compaction_count, event_count
          FROM conversation_counts WHERE session_id = ?`,
     )
     .get(sessionId) as CountsRow | null;
@@ -175,7 +162,6 @@ function readCounts(db: Database, sessionId: string): ConversationCounts {
       promptCount: 0,
       toolCallCount: 0,
       compactionCount: 0,
-      gateDenialCount: 0,
       eventCount: 0,
     };
   }
@@ -183,7 +169,6 @@ function readCounts(db: Database, sessionId: string): ConversationCounts {
     promptCount: row.prompt_count,
     toolCallCount: row.tool_call_count,
     compactionCount: row.compaction_count,
-    gateDenialCount: row.gate_denial_count,
     eventCount: row.event_count,
   };
 }
@@ -264,35 +249,6 @@ function readRepeatedFileEdits(
   }));
 }
 
-interface GateDenialRow {
-  tool_name: string;
-  gate_id: string;
-  tool_call_id: string;
-  reason: string | null;
-  denied_at: string;
-}
-
-/**
- * The gate denials against a session, ordered chronologically so the agent
- * reads its denial history in the order it happened.
- */
-function readGateDenials(db: Database, sessionId: string): GateDenial[] {
-  const rows = db
-    .prepare(
-      `SELECT tool_name, gate_id, tool_call_id, reason, denied_at
-         FROM gate_denials WHERE session_id = ?
-         ORDER BY denied_at ASC, gate_id ASC`,
-    )
-    .all(sessionId) as GateDenialRow[];
-  return rows.map((r) => ({
-    toolName: r.tool_name,
-    gateId: r.gate_id,
-    toolCallId: r.tool_call_id,
-    reason: r.reason,
-    deniedAt: r.denied_at,
-  }));
-}
-
 /**
  * Read the evidence layer for one conversation and shape it into a digest.
  *
@@ -341,6 +297,5 @@ export function readEvidenceDigest(
     toolMix: readToolMix(db, sessionId),
     skillUsage: readSkillUsage(db, sessionId),
     repeatedFileEdits: readRepeatedFileEdits(db, sessionId),
-    gateDenials: readGateDenials(db, sessionId),
   };
 }
