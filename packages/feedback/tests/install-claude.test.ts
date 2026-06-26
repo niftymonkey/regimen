@@ -61,7 +61,9 @@ test("wiring Claude capture into settings.json preserves the file's other keys",
     allow: ["Read", "Bash(git status *)"],
   });
   expect(plan.hooks.env).toEqual({ FOO: "bar" });
-  // The capture leaf runs the existing claude-stamping producer script.
-  const leaf = plan.hooks.hooks?.SessionStart?.[0]?.hooks?.[0];
+  // The capture leaf runs the existing claude-stamping producer script. Claude is
+  // a nested-matcher-groups harness, so the plan's union widens to that shape here.
+  const hooks = plan.hooks as HooksFile;
+  const leaf = hooks.hooks?.SessionStart?.[0]?.hooks?.[0];
   expect(leaf?.command).toBe(`bun ${CLONE}/hooks/capture.ts`);
 });

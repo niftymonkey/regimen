@@ -131,6 +131,26 @@ function gateLeaf(
 }
 
 /**
+ * Refuse a `ctx.gates` array that names the same `id` twice in one call. Now that
+ * `GateId` is an open string, a duplicate id within one input is a caller error
+ * (two distinct gate bodies fighting over one name), not the cross-call re-home the
+ * existing-leaf path handles: silently keeping the first would hide a real authoring
+ * bug, so it fails loud with the offending id. Distinct ids, including two that
+ * share a script basename in different directories, are untouched.
+ */
+function assertUniqueGateIds(gates: ReadonlyArray<AuthoredGate>): void {
+  const seen = new Set<GateId>();
+  for (const gate of gates) {
+    if (seen.has(gate.id)) {
+      throw new Error(
+        `duplicate gate id in one install: ${JSON.stringify(gate.id)}`,
+      );
+    }
+    seen.add(gate.id);
+  }
+}
+
+/**
  * The deduped gate leaves to wire and the added/unchanged report, given the
  * role's own gate leaves already present on the event. The already-wired gates
  * are re-emitted first, in their on-disk order, so a plain re-run is a no-op and
@@ -217,6 +237,7 @@ export function planGateHooks(
     throw new Error(`clonePath must be absolute, got: ${ctx.clonePath}`);
   }
   assertSafeClonePath(ctx.clonePath);
+  assertUniqueGateIds(ctx.gates);
   const contract = harnessContract(ctx.harness);
   if (contract === undefined) {
     throw new Error(`no contract registered for harness: ${ctx.harness}`);

@@ -117,6 +117,14 @@ export function installSkill(options: { dryRun: boolean }): number {
   return 0;
 }
 
+/** Remove one skill directory. The default recursively force-removes it. */
+export type SkillRemover = (skillDir: string) => void;
+
+/** The production remover: a recursive, idempotent directory removal. */
+function defaultRemover(skillDir: string): void {
+  rmSync(skillDir, { recursive: true, force: true });
+}
+
 /**
  * Remove Guidance's bundled skill directory from the harness's skills subdirectory
  * (the inverse of install-skill). Reuses the bundler to locate each target. A
@@ -124,8 +132,15 @@ export function installSkill(options: { dryRun: boolean }): number {
  * skill: a removal that fails (e.g. a permission error) is reported and recorded,
  * but the loop continues to the remaining skills so a half-installed system can
  * always be cleaned up; the exit code is nonzero when any removal failed.
+ *
+ * The per-skill removal is injected (`remove`, defaulting to a recursive force
+ * `rmSync`) so the best-effort survival of a failing removal can be exercised
+ * deterministically, independent of OS permissions or the test running as root.
  */
-export function uninstallSkill(options: { dryRun: boolean }): number {
+export function uninstallSkill(
+  options: { dryRun: boolean },
+  remove: SkillRemover = defaultRemover,
+): number {
   const target = resolveSkillTarget();
   if (target === null) return 1;
   let failed = 0;
@@ -141,7 +156,7 @@ export function uninstallSkill(options: { dryRun: boolean }): number {
       continue;
     }
     try {
-      rmSync(skillDir, { recursive: true, force: true });
+      remove(skillDir);
       process.stdout.write(`removed ${skillDir}\n`);
     } catch (err) {
       failed = 1;

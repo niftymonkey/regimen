@@ -16,7 +16,7 @@
  * legitimate backslashes (turned to forward slashes) do not trip the shell-unsafe
  * check, while a genuinely dangerous `"`, `$`, or backtick still does.
  */
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { assertSafeClonePath, type Harness } from "@regimen/shared";
 
 /**
@@ -69,8 +69,8 @@ function assertScriptPathInsideClone(
       `scriptPath must not contain a ".." segment that could escape the clone: ${JSON.stringify(scriptPath)}`,
     );
   }
-  const root = clonePath.replaceAll("\\", "/").replace(/\/+$/, "");
-  const resolved = join(clonePath, scriptPath).replaceAll("\\", "/");
+  const root = resolve(clonePath).replaceAll("\\", "/").replace(/\/+$/, "");
+  const resolved = resolve(clonePath, scriptPath).replaceAll("\\", "/");
   if (resolved !== root && !resolved.startsWith(`${root}/`)) {
     throw new Error(
       `scriptPath resolves outside the clone root: ${JSON.stringify(scriptPath)}`,

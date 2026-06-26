@@ -8,15 +8,10 @@
  * markers before calling.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BUNDLED_SKILLS } from "../src/bundled-skills.ts";
 import {
   install,
   installSkill,
@@ -68,6 +63,22 @@ function captureStdout(fn: () => void): string {
     fn();
   } finally {
     process.stdout.write = original;
+  }
+  return out;
+}
+
+/** Run `fn`, returning everything it wrote to stderr. */
+function captureStderr(fn: () => void): string {
+  const original = process.stderr.write.bind(process.stderr);
+  let out = "";
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    out += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    fn();
+  } finally {
+    process.stderr.write = original;
   }
   return out;
 }
@@ -129,18 +140,24 @@ test("uninstallSkill on a missing skill is a clean no-op", () => {
 });
 
 test("uninstallSkill is best-effort: a removal failure is recorded, not thrown", () => {
-  withCodexHome((codexHome) => {
+  withCodexHome(() => {
     installSkill({ dryRun: false });
-    const skillsDir = join(codexHome, "skills");
-    // Make the skills directory non-writable so removing the skill subdirectory
-    // under it fails (EACCES), the realistic IO failure the loop must survive.
-    chmodSync(skillsDir, 0o500);
-    try {
-      const exit = uninstallSkill({ dryRun: false });
-      // Best-effort: the failure is reported through the exit code, never thrown.
-      expect(exit).not.toBe(0);
-    } finally {
-      chmodSync(skillsDir, 0o700);
-    }
+    // Inject a removal that always throws, so the simulated IO failure the loop
+    // must survive is deterministic, independent of OS permissions and root
+    // (a chmod-based EACCES does not fail as root and varies across platforms).
+    const attempted: string[] = [];
+    const failing = (skillDir: string): void => {
+      attempted.push(skillDir);
+      throw new Error("simulated removal failure");
+    };
+    let exit = 0;
+    const err = captureStderr(() => {
+      exit = uninstallSkill({ dryRun: false }, failing);
+    });
+    // Every skill's removal was attempted (no early abort), and the failure is
+    // reported through the nonzero exit code, never thrown out of the call.
+    expect(attempted).toHaveLength(BUNDLED_SKILLS.length);
+    expect(exit).not.toBe(0);
+    expect(err).toContain("failed to remove");
   });
 });

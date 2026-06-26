@@ -246,6 +246,20 @@ test("two authored gates with the same basename but distinct ids both wire", () 
   });
 });
 
+test("two gates with the same id in one call throw: a duplicate id is a caller error", () => {
+  // A duplicate id within one ctx.gates array is a caller mistake, not a re-home.
+  // The first-wins silent drop hides a real authoring bug, so it must fail loud.
+  const first: AuthoredGate = { id: "no-secrets", scriptPath: "gates/a.ts" };
+  const second: AuthoredGate = { id: "no-secrets", scriptPath: "gates/b.ts" };
+  expect(() =>
+    planGateHooks(undefined, {
+      clonePath: CLONE,
+      harness: "codex",
+      gates: [first, second],
+    }),
+  ).toThrow(/duplicate gate id/i);
+});
+
 test("apply is additive: a later run with a different gate keeps the earlier one", () => {
   const first = planGateHooks(undefined, {
     clonePath: CLONE,
@@ -311,7 +325,10 @@ test("removal strips exactly the gate entries, keeps capture and user, prunes em
   const plan = planGateHooksRemoval(wired);
 
   // The gate is gone; capture and the user gate remain, in place.
-  const pre = (plan.hooks.hooks?.PreToolUse ?? []).flatMap((g) => g.hooks);
+  const preGroups = (plan.hooks.hooks?.PreToolUse ?? []) as Array<{
+    hooks: LeafHook[];
+  }>;
+  const pre = preGroups.flatMap((g) => g.hooks);
   expect(pre.filter(isGateLeaf)).toHaveLength(0);
   expect(pre).toContainEqual(captureLeaf);
   expect(pre).toContainEqual(userGate);

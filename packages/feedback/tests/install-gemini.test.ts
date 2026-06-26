@@ -72,7 +72,10 @@ test("wiring Gemini capture preserves the hooks file's other keys and runs the g
   const plan = planCaptureHooks(existing, ctx);
   expect(plan.hooks.permissions).toEqual({ allow: ["Read"] });
   expect(plan.hooks.env).toEqual({ FOO: "bar" });
-  const leaf = plan.hooks.hooks?.SessionStart?.[0]?.hooks?.[0];
+  // Gemini is a nested-matcher-groups harness, so the plan's union widens to that
+  // shape here.
+  const hooks = plan.hooks as HooksFile;
+  const leaf = hooks.hooks?.SessionStart?.[0]?.hooks?.[0];
   expect(leaf?.command).toBe(`bun ${CLONE}/hooks/capture-gemini.ts`);
   expect(leaf?._regimen).toEqual({ v: 1, role: "capture" });
 });

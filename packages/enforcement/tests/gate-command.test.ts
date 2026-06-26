@@ -62,6 +62,17 @@ test("an absolute scriptPath is rejected so it cannot point outside the clone", 
   expect(() => buildGateCommand(CLONE, "/etc/passwd", "codex")).toThrow();
 });
 
+test("a clone path with a redundant `.` segment still accepts a body under it", () => {
+  // The containment check must canonicalize both sides. A clonePath carrying a `.`
+  // segment (or a redundant separator) is the same directory as its normalized
+  // form, so a normal relative body under it is inside the clone and must not be
+  // falsely rejected. The emitted command uses the canonicalized clone root.
+  const dotted = "/home/me/./regimen";
+  expect(buildGateCommand(dotted, SCRIPT, "codex")).toBe(
+    `REGIMEN_HARNESS=codex bun "${CLONE}/${SCRIPT}"`,
+  );
+});
+
 test("a normal relative scriptPath under the clone is accepted", () => {
   expect(buildGateCommand(CLONE, SCRIPT, "codex")).toBe(
     `REGIMEN_HARNESS=codex bun "${CLONE}/${SCRIPT}"`,

@@ -128,13 +128,13 @@ export interface WireRole<Change> {
 }
 
 export interface WirePlan<Change> {
-  readonly hooks: HooksFile;
+  readonly hooks: HooksFile | VersionedHooksFile;
   readonly added: ReadonlyArray<Change>;
   readonly unchanged: ReadonlyArray<Change>;
 }
 
 export interface UnwirePlan<Change> {
-  readonly hooks: HooksFile;
+  readonly hooks: HooksFile | VersionedHooksFile;
   readonly removed: ReadonlyArray<Change>;
 }
 
@@ -272,7 +272,7 @@ function planVersionedHooks<Change>(
     hooksMap[event] = [...preserved, ...built.leaves];
     if (hooksMap[event].length === 0) delete hooksMap[event];
   }
-  return { hooks: base as HooksFile, added, unchanged };
+  return { hooks: base, added, unchanged };
 }
 
 export function planHooks<Change>(
@@ -317,7 +317,7 @@ function planVersionedHooksRemoval<Change>(
   const base: VersionedHooksFile = existing ? structuredClone(existing) : {};
   const removed: Change[] = [];
   const hooksMap = base.hooks;
-  if (hooksMap === undefined) return { hooks: base as HooksFile, removed };
+  if (hooksMap === undefined) return { hooks: base, removed };
 
   for (const [event, leaves] of Object.entries(hooksMap)) {
     for (const leaf of leaves) {
@@ -329,7 +329,7 @@ function planVersionedHooksRemoval<Change>(
     if (kept.length > 0) hooksMap[event] = kept;
     else delete hooksMap[event];
   }
-  return { hooks: base as HooksFile, removed };
+  return { hooks: base, removed };
 }
 
 export function planHooksRemoval<Change>(

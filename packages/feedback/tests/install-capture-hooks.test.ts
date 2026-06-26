@@ -45,7 +45,11 @@ test("a fresh file wires the capture hook onto all five events, each marked", ()
   const plan = planCaptureHooks(undefined, CTX);
 
   for (const event of CAPTURE_EVENTS) {
-    const groups = plan.hooks.hooks?.[event];
+    // Codex is a nested-matcher-groups harness, so the plan's union widens to the
+    // nested group shape here.
+    const groups = plan.hooks.hooks?.[event] as
+      | Array<{ hooks: LeafHook[] }>
+      | undefined;
     expect(groups).toBeDefined();
     const captureLeaves = (groups ?? [])
       .flatMap((g) => g.hooks)
