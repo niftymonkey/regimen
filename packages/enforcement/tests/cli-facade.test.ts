@@ -1,11 +1,12 @@
 /**
- * The wire-gates / unwire-gates / install / uninstall commands called
- * IN-PROCESS as library functions taking already-parsed options, the shape the
- * unified `regimen` CLI dispatches to (ADR-0012). The subprocess argv path is
- * covered by cli.test.ts; here we confirm each command is directly callable with
- * a typed options object and produces the same exit-code / stdout contract. The
- * harness and config home still travel in the environment (REGIMEN_HARNESS and
- * the contract's config-home env var), so each test sets a temp config home and
+ * The Enforcement facade called IN-PROCESS as library functions taking
+ * already-parsed options, the shape the unified `regimen` CLI dispatches to
+ * (ADR-0012). With no shipped gate catalog (author-on-demand), `install`/
+ * `uninstall` lay down and remove the lever's operator skill; the authored-gate
+ * wiring path survives as the library functions `wireAuthoredGate`/
+ * `unwireAuthoredGates` the `enforcement-respond` skill calls at authoring time.
+ * The harness and config home travel in the environment (REGIMEN_HARNESS and the
+ * contract's config-home env var), so each test sets a temp config home and
  * scrubs ambient markers before calling.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
@@ -13,13 +14,21 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type AuthoredGate,
   install,
+  installSkill,
   uninstall,
-  unwireGates,
-  wireGates,
+  uninstallSkill,
+  unwireAuthoredGates,
+  wireAuthoredGate,
 } from "../src/cli/index.ts";
 
 const MARKERS = ["CLAUDECODE", "CODEX_THREAD_ID", "GEMINI_CLI", "COPILOT_CLI"];
+
+const RM_RF: AuthoredGate = {
+  id: "rm-rf",
+  scriptPath: "tests/fixtures/rm-rf-gate.ts",
+};
 
 let saved: Record<string, string | undefined>;
 
@@ -82,99 +91,87 @@ function gateIds(codexHome: string): Array<string | undefined> {
     .map((l) => l._regimen?.id);
 }
 
-test("wireGates writes the default three gates and returns 0", () => {
+const SKILL = join("skills", "enforcement-respond", "SKILL.md");
+
+test("install lays down the operator skill and wires NO gates", () => {
   withCodexHome((codexHome) => {
-    const exit = wireGates({
-      gates: ["rm-rf", "em-dash", "inline-message"],
-      dryRun: false,
-    });
+    const exit = install({ dryRun: false });
     expect(exit).toBe(0);
-    expect(gateIds(codexHome)).toEqual(["rm-rf", "em-dash", "inline-message"]);
+    // The skill landed where the harness discovers it.
+    expect(existsSync(join(codexHome, SKILL))).toBe(true);
+    // Install never writes a hooks file: it ships no catalog of gates.
+    expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
   });
 });
 
-test("unwireGates removes the gates it wired and returns 0", () => {
+test("install installs the enforcement-respond skill, not a feedback skill", () => {
   withCodexHome((codexHome) => {
-    wireGates({
-      gates: ["rm-rf", "em-dash", "inline-message"],
-      dryRun: false,
-    });
-    const exit = unwireGates({ dryRun: false });
-    expect(exit).toBe(0);
-    expect(gateIds(codexHome)).toEqual([]);
+    install({ dryRun: false });
+    const content = readFileSync(join(codexHome, SKILL), "utf8");
+    expect(content).toContain("name: enforcement-respond");
+    expect(existsSync(join(codexHome, "skills", "feedback-evidence"))).toBe(
+      false,
+    );
   });
 });
 
-test("install wires the gates and returns 0", () => {
+test("install --dry-run previews the skill target and writes nothing", () => {
   withCodexHome((codexHome) => {
-    const exit = install({
-      gates: ["rm-rf", "em-dash", "inline-message"],
-      dryRun: false,
+    let exit = 1;
+    const out = captureStdout(() => {
+      exit = install({ dryRun: true });
     });
     expect(exit).toBe(0);
-    expect(gateIds(codexHome)).toEqual(["rm-rf", "em-dash", "inline-message"]);
+    expect(out).toContain("enforcement-respond");
+    expect(out).toContain("nothing was changed");
+    expect(existsSync(join(codexHome, SKILL))).toBe(false);
   });
 });
 
-test("uninstall removes the gates and returns 0", () => {
+test("uninstall removes the operator skill", () => {
   withCodexHome((codexHome) => {
-    install({
-      gates: ["rm-rf", "em-dash", "inline-message"],
-      dryRun: false,
-    });
+    installSkill({ dryRun: false });
+    expect(existsSync(join(codexHome, SKILL))).toBe(true);
     const exit = uninstall({ dryRun: false });
     expect(exit).toBe(0);
+    expect(existsSync(join(codexHome, "skills", "enforcement-respond"))).toBe(
+      false,
+    );
+  });
+});
+
+test("uninstallSkill on a missing skill is a clean no-op", () => {
+  withCodexHome(() => {
+    const exit = uninstallSkill({ dryRun: false });
+    expect(exit).toBe(0);
+  });
+});
+
+test("wireAuthoredGate merges an authored gate onto the harness pre-tool event", () => {
+  withCodexHome((codexHome) => {
+    const exit = wireAuthoredGate({ gate: RM_RF, dryRun: false });
+    expect(exit).toBe(0);
+    expect(gateIds(codexHome)).toEqual(["rm-rf"]);
+  });
+});
+
+test("unwireAuthoredGates removes the gate it wired", () => {
+  withCodexHome((codexHome) => {
+    wireAuthoredGate({ gate: RM_RF, dryRun: false });
+    const exit = unwireAuthoredGates({ dryRun: false });
+    expect(exit).toBe(0);
     expect(gateIds(codexHome)).toEqual([]);
   });
 });
 
-test("install on win32 skips gates, prints a notice, returns 0, writes nothing", () => {
+test("wireAuthoredGate --dry-run previews and writes nothing", () => {
   withCodexHome((codexHome) => {
     let exit = 1;
     const out = captureStdout(() => {
-      exit = install({
-        gates: ["rm-rf", "em-dash", "inline-message"],
-        dryRun: false,
-        platform: "win32",
-      });
+      exit = wireAuthoredGate({ gate: RM_RF, dryRun: true });
     });
     expect(exit).toBe(0);
-    expect(out).toContain("not yet supported on native Windows");
+    expect(out).toContain("would wire gate rm-rf on PreToolUse");
     expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
-  });
-});
-
-test("install on win32 skips even with dryRun set", () => {
-  withCodexHome((codexHome) => {
-    let exit = 1;
-    const out = captureStdout(() => {
-      exit = install({
-        gates: ["rm-rf", "em-dash", "inline-message"],
-        dryRun: true,
-        platform: "win32",
-      });
-    });
-    expect(exit).toBe(0);
-    expect(out).toContain("not yet supported on native Windows");
-    expect(out).not.toContain("would wire");
-    expect(existsSync(join(codexHome, "hooks.json"))).toBe(false);
-  });
-});
-
-test("uninstall on win32 skips teardown, prints a notice, returns 0, touches nothing", () => {
-  withCodexHome((codexHome) => {
-    install({
-      gates: ["rm-rf", "em-dash", "inline-message"],
-      dryRun: false,
-    });
-    const before = readFileSync(join(codexHome, "hooks.json"), "utf8");
-    let exit = 1;
-    const out = captureStdout(() => {
-      exit = uninstall({ dryRun: false, platform: "win32" });
-    });
-    expect(exit).toBe(0);
-    expect(out).toContain("not yet supported on native Windows");
-    expect(readFileSync(join(codexHome, "hooks.json"), "utf8")).toBe(before);
-    expect(gateIds(codexHome)).toEqual(["rm-rf", "em-dash", "inline-message"]);
   });
 });

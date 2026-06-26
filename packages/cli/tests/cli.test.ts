@@ -103,7 +103,6 @@ interface Call {
   readonly step: string;
   readonly selfLink?: boolean;
   readonly daemon?: boolean;
-  readonly gates?: ReadonlyArray<string>;
   readonly verb?: string;
 }
 
@@ -123,8 +122,7 @@ function recordingSteps(
   return {
     feedbackInstall: (o) =>
       run({ step: "feedbackInstall", selfLink: o.selfLink, daemon: o.daemon }),
-    enforcementInstall: (o) =>
-      run({ step: "enforcementInstall", gates: o.gates }),
+    enforcementInstall: () => run({ step: "enforcementInstall" }),
     feedbackUninstall: (o) =>
       run({ step: "feedbackUninstall", selfLink: o.selfLink }),
     enforcementUninstall: () => run({ step: "enforcementUninstall" }),
@@ -153,7 +151,7 @@ test("install tells each instrument selfLink:false and links the single regimen 
   expect(linkCalls[0]!.verb).toBe("link");
 });
 
-test("install is fail-fast: a failing capture step stops the run and the gate never wires", () => {
+test("install is fail-fast: a failing capture step stops the run and enforcement never runs", () => {
   const calls: Call[] = [];
   const exit = install(
     ["install"],
@@ -161,20 +159,6 @@ test("install is fail-fast: a failing capture step stops the run and the gate ne
   );
   expect(exit).not.toBe(0);
   expect(calls.map((c) => c.step)).toEqual(["feedbackInstall"]);
-});
-
-test("install wires all three gates by default", () => {
-  const calls: Call[] = [];
-  install(["install"], recordingSteps(calls));
-  const gate = calls.find((c) => c.step === "enforcementInstall")!;
-  expect(gate.gates).toEqual(["rm-rf", "em-dash", "inline-message"]);
-});
-
-test("install --no-gates passes an empty gate set to enforcement", () => {
-  const calls: Call[] = [];
-  install(["install", "--no-gates"], recordingSteps(calls));
-  const gate = calls.find((c) => c.step === "enforcementInstall")!;
-  expect(gate.gates).toEqual([]);
 });
 
 test("install --no-daemon threads daemon:false to the feedback install", () => {

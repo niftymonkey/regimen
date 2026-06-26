@@ -1,43 +1,60 @@
 /**
  * The Enforcement command facade: each command is an exported library function
  * taking a typed, already-parsed options object, the surface the unified
- * `regimen` CLI dispatches to in-process (ADR-0012). The commands are
- * `install`/`uninstall` (the lifecycle) and `wireGates`/`unwireGates` (the
- * gate-wiring and gate-removal steps on their own).
+ * `regimen` CLI dispatches to in-process (ADR-0012). With no shipped gate
+ * catalog (author-on-demand, ADR-0012 plus the enforcement re-eval), the
+ * lifecycle commands are `install`/`uninstall`, and their job is to lay down the
+ * Enforcement lever's own operator skill, the `enforcement-respond` respond-step
+ * helper, exactly as Feedback's install lays down its two skills. They wire NO
+ * gates: a gate is the engineer's own rule, authored on demand by the skill, not
+ * a Regimen product.
+ *
+ * The authored-gate wiring path survives as a LIBRARY function, `wireAuthoredGate`,
+ * the `enforcement-respond` skill calls at AUTHORING time (when the engineer
+ * confirms a gate), never at install time. It resolves the harness and its hooks
+ * file, merges the authored gate onto the right per-harness pre-tool event through
+ * the shared engine (`planGateHooks`), and writes, idempotently and without
+ * clobbering the capture leaf or the user's own hooks.
  *
  * The harness and its config home travel in the environment, not in options:
  * Enforcement resolves the harness from REGIMEN_HARNESS (failing closed when it
  * is unset or unknown) and the config home from the env var the shared contract
  * names (e.g. CODEX_HOME), else the contract's default subdir under the user's
- * home. The options object carries the parsed gate set and the dry-run flag; the
- * dispatcher owns argv parsing. The pure planner owns the merge; these commands
- * own the file read/write, the dry-run preview, and the jq preflight. Enforcement
- * owns gates only: it never wires the capture hook (Feedback's installer does
- * that) and never touches a capture leaf or a user hook.
+ * home. Enforcement owns gates and its own skill only: it never wires the capture
+ * hook (Feedback's installer does that) and never touches a capture leaf or a
+ * user hook.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
   type Harness,
   harnessContract,
+  type HarnessContract,
   type HooksFormat,
+  planSkillInstall,
   resolveHarnessFromEnvironment,
   resolveHarnessHome,
 } from "@regimen/shared";
+import { BUNDLED_SKILLS } from "../bundled-skills.ts";
 import {
+  type AuthoredGate,
   type GateChange,
-  type GateId,
   type HooksFile,
   planGateHooks,
   planGateHooksRemoval,
 } from "../install/gate-hooks.ts";
 
 export type { GateId } from "../install/gate-hooks.ts";
+export type { AuthoredGate } from "../install/gate-hooks.ts";
 
-/** Gates that run as shell scripts and therefore need `jq` on PATH. */
-const SHELL_GATES: ReadonlySet<string> = new Set(["em-dash", "inline-message"]);
-
-/** The harness and the resolved hooks file a command targets, or null when it cannot be resolved. */
+/** The harness and the resolved hooks file a gate-wiring command targets, or null when it cannot be resolved. */
 interface Target {
   readonly harness: Harness;
   /** Absolute path to the harness's hooks file. */
@@ -46,21 +63,15 @@ interface Target {
   readonly format: HooksFormat;
 }
 
-/**
- * Resolve the harness with the shared per-invocation policy (explicit
- * REGIMEN_HARNESS, else the CLI-set marker the running harness stamped, else
- * undefined) and the hooks file it writes. The file path is the contract's
- * per-harness relativePath, normally joined under the resolved config home (the
- * env var the shared contract names, e.g. CODEX_HOME, else the contract's default
- * subdir under the user's home). Gemini is the one scope divergence (ADR-0011,
- * docs/harness-divergences.md): only a PROJECT-level `.gemini/settings.json` fires
- * headless, so its gates install under the current workspace (`process.cwd()`),
- * not the config home. Fails closed: a null return means the harness could not be
- * determined, the REGIMEN_HARNESS value is unknown, the harness has no registered
- * contract, or the home directory is undefined. Every failure writes a diagnostic
- * to stderr first.
- */
-function resolveTarget(): Target | null {
+/** The harness, its contract, and its config home a skill-install command targets, or null. */
+interface SkillTarget {
+  readonly contract: HarnessContract;
+  /** The harness config home whose skills subdirectory receives the skills. */
+  readonly home: string;
+}
+
+/** Resolve the harness with the shared per-invocation policy, or null with a diagnostic. */
+function resolveHarness(): Harness | null {
   let harness;
   try {
     harness = resolveHarnessFromEnvironment(process.env);
@@ -74,16 +85,32 @@ function resolveTarget(): Target | null {
     );
     return null;
   }
+  return harness;
+}
+
+/**
+ * Resolve the harness and the hooks file a gate is wired into. The file path is
+ * the contract's per-harness relativePath joined under the resolved config home
+ * (the env var the shared contract names, e.g. CODEX_HOME, else the contract's
+ * default subdir under the user's home). Gemini is the one scope divergence
+ * (ADR-0011, docs/harness-divergences.md): only a PROJECT-level
+ * `.gemini/settings.json` fires headless, so its gates install under the current
+ * workspace (`process.cwd()`), not the config home. Fails closed with a stderr
+ * diagnostic and a null return.
+ */
+function resolveTarget(): Target | null {
+  const harness = resolveHarness();
+  if (harness === null) return null;
   const contract = harnessContract(harness);
   if (contract === undefined) {
     process.stderr.write(`no contract registered for harness: ${harness}\n`);
     return null;
   }
   const { relativePath, format } = contract.hooksFile;
-  // ponytail: the workspace is the current dir; Gemini's project-level scope is
-  // the only divergence, and no flag is exposed for it (laziest that works). The
-  // project-level file is `<cwd>/.gemini/settings.json`, so the config home's
-  // default subdir (`.gemini`) prefixes the contract's relative hooks path.
+  // The workspace is the current dir; Gemini's project-level scope is the only
+  // divergence, and no flag is exposed for it. The project-level file is
+  // `<cwd>/.gemini/settings.json`, so the config home's default subdir
+  // (`.gemini`) prefixes the contract's relative hooks path.
   if (harness === "gemini") {
     return {
       harness,
@@ -96,11 +123,14 @@ function resolveTarget(): Target | null {
     };
   }
   const home = process.env.HOME ?? process.env.USERPROFILE;
-  if (home === undefined) {
+  if (
+    home === undefined &&
+    process.env[contract.configHome.envVar] === undefined
+  ) {
     process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
     return null;
   }
-  const configHome = resolveHarnessHome(contract, process.env, home);
+  const configHome = resolveHarnessHome(contract, process.env, home ?? "");
   return {
     harness,
     hooksPath: join(configHome, relativePath),
@@ -108,9 +138,43 @@ function resolveTarget(): Target | null {
   };
 }
 
-/** The clone's absolute path: the repo root, two levels up from this file. */
+/**
+ * Resolve the harness, its contract, and its config home for skill install. Unlike
+ * the gate-wiring target, skills install to the config home for EVERY harness
+ * (the harness discovers `<configHome>/<skillsSubdir>/<name>/SKILL.md`); Gemini's
+ * project-level divergence applies to its hooks, not its skills. Fails closed with
+ * a stderr diagnostic and a null return.
+ */
+function resolveSkillTarget(): SkillTarget | null {
+  const harness = resolveHarness();
+  if (harness === null) return null;
+  const contract = harnessContract(harness);
+  if (contract === undefined) {
+    process.stderr.write(`no contract registered for harness: ${harness}\n`);
+    return null;
+  }
+  const home = process.env.HOME ?? process.env.USERPROFILE;
+  if (
+    home === undefined &&
+    process.env[contract.configHome.envVar] === undefined
+  ) {
+    process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
+    return null;
+  }
+  return {
+    contract,
+    home: resolveHarnessHome(contract, process.env, home ?? ""),
+  };
+}
+
+/** The clone's absolute path: the package root, two levels up from this file. */
 function clonePath(): string {
-  return join(import.meta.dir, "..", "..");
+  return resolve(import.meta.dir, "..", "..");
+}
+
+/** The repo root that holds Enforcement's bundled `skills/` directory, two levels up. */
+function bundleDir(): string {
+  return resolve(import.meta.dir, "..", "..");
 }
 
 /** Read and parse the harness's hooks.json, or undefined when no file exists. */
@@ -119,44 +183,31 @@ function readHooksFile(path: string): HooksFile | undefined {
   return JSON.parse(readFileSync(path, "utf8")) as HooksFile;
 }
 
-/** A one-line description of a gate change for the CLI to print. */
+/** A one-line description of a gate change for the caller to print. */
 function describeChange(c: GateChange): string {
   return `gate ${c.id} on ${c.event}`;
 }
 
-/**
- * Warn (without failing) when shell gates are selected but `jq` is not on PATH:
- * the em-dash and inline-message gates parse the tool payload with `jq`, so they
- * cannot record a denial without it. The rm-rf gate runs under bun and is
- * unaffected. The deny still fires either way; only recording needs jq.
- */
-function warnIfShellGateMissingJq(gates: ReadonlyArray<GateId>): void {
-  const hasShellGate = gates.some((g) => SHELL_GATES.has(g));
-  if (hasShellGate && Bun.which("jq") === null) {
-    process.stderr.write(
-      "warning: the em-dash and inline-message gates need `jq` on PATH to record denials, but jq was not found; install jq (brew install jq) or wire only --gate rm-rf\n",
-    );
-  }
-}
-
-/** The already-parsed options `wireGates` acts on. */
-export interface WireGatesOptions {
-  /** Which gates to wire onto the pre-tool boundary. */
-  readonly gates: ReadonlyArray<GateId>;
+/** The already-parsed options `wireAuthoredGate` acts on. */
+export interface WireAuthoredGateOptions {
+  /** The authored gate (the engineer's named rule plus its body path). */
+  readonly gate: AuthoredGate;
   /** Preview every step and write nothing. */
   readonly dryRun: boolean;
 }
 
 /**
- * `enforcement wire-gates`. Merge the selected gates onto PreToolUse in the
- * harness's hooks.json idempotently, without clobbering the user's own hooks or
- * Feedback's capture leaf. The pure planner owns the merge; this owns the file
- * read/write and the dry-run preview.
+ * Wire one AUTHORED gate onto the harness's pre-tool boundary. This is the
+ * library function the `enforcement-respond` skill calls at authoring time, when
+ * the engineer confirms a gate it drafted; it is NOT an install step. It resolves
+ * the harness and hooks file, merges the gate idempotently through the shared
+ * engine (without clobbering the user's own hooks or Feedback's capture leaf), and
+ * writes. The pure planner owns the merge; this owns the file read/write and the
+ * dry-run preview.
  */
-export function wireGates(options: WireGatesOptions): number {
+export function wireAuthoredGate(options: WireAuthoredGateOptions): number {
   const target = resolveTarget();
   if (target === null) return 1;
-  const { gates } = options;
   const path = target.hooksPath;
 
   let plan;
@@ -164,17 +215,16 @@ export function wireGates(options: WireGatesOptions): number {
     plan = planGateHooks(readHooksFile(path), {
       clonePath: clonePath(),
       harness: target.harness,
-      gates,
+      gates: [options.gate],
     });
   } catch (err) {
     process.stderr.write(`${(err as Error).message}\n`);
     return 1;
   }
-  warnIfShellGateMissingJq(gates);
 
   if (options.dryRun) {
     if (plan.added.length === 0) {
-      process.stdout.write(`gates already wired in ${path}\n`);
+      process.stdout.write(`gate already wired in ${path}\n`);
     }
     for (const c of plan.added) {
       process.stdout.write(`would wire ${describeChange(c)}\n`);
@@ -185,7 +235,7 @@ export function wireGates(options: WireGatesOptions): number {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(plan.hooks, null, 2)}\n`);
   if (plan.added.length === 0) {
-    process.stdout.write(`gates already wired in ${path}\n`);
+    process.stdout.write(`gate already wired in ${path}\n`);
   }
   for (const c of plan.added) {
     process.stdout.write(`wired ${describeChange(c)}\n`);
@@ -193,19 +243,21 @@ export function wireGates(options: WireGatesOptions): number {
   return 0;
 }
 
-/** The already-parsed options `unwireGates` acts on. */
-export interface UnwireGatesOptions {
+/** The already-parsed options `unwireAuthoredGates` acts on. */
+export interface UnwireAuthoredGatesOptions {
   /** Preview every step and write nothing. */
   readonly dryRun: boolean;
 }
 
 /**
- * `enforcement unwire-gates`. Remove exactly Enforcement's gate entries from
- * the harness's hooks.json, leaving the user's hooks and Feedback's capture leaf
- * intact. Writes the pruned object back; the file is left in place even when
- * empty (the user may re-add their own hooks to it).
+ * Remove exactly Enforcement's gate entries from the harness's hooks.json, leaving
+ * the user's hooks and Feedback's capture leaf intact. The library counterpart of
+ * `wireAuthoredGate`, called when an authored gate is retired. Writes the pruned
+ * object back; the file is left in place even when empty.
  */
-export function unwireGates(options: UnwireGatesOptions): number {
+export function unwireAuthoredGates(
+  options: UnwireAuthoredGatesOptions,
+): number {
   const target = resolveTarget();
   if (target === null) return 1;
   const path = target.hooksPath;
@@ -242,43 +294,86 @@ export function unwireGates(options: UnwireGatesOptions): number {
   return 0;
 }
 
-/** The already-parsed options `install` acts on. */
-export interface InstallOptions {
-  /** Which gates to wire onto the pre-tool boundary. */
-  readonly gates: ReadonlyArray<GateId>;
-  /** Preview every step and write nothing. */
-  readonly dryRun: boolean;
-  /**
-   * The platform to install for, injectable for testing. Defaults to
-   * `process.platform`. On `win32` the gate step is skipped (the POSIX gate
-   * commands do not run on native Windows yet); every other platform installs
-   * gates as usual.
-   */
-  readonly platform?: string;
+/**
+ * Copy Enforcement's bundled operator skill into the harness's skills
+ * subdirectory, where the harness discovers it. The shared bundler resolves each
+ * skill's source (from Enforcement's OWN `bundleDir`) and harness-home target;
+ * Enforcement passes its own skill list so it bundles only `enforcement-respond`,
+ * not Feedback's. `--dry-run` reports the targets without writing.
+ */
+export function installSkill(options: { dryRun: boolean }): number {
+  const target = resolveSkillTarget();
+  if (target === null) return 1;
+  const plans = planSkillInstall({
+    home: target.home,
+    bundleDir: bundleDir(),
+    contract: target.contract,
+    skills: BUNDLED_SKILLS,
+  });
+
+  if (options.dryRun) {
+    for (const plan of plans) {
+      process.stdout.write(`would write ${plan.targetPath}\n`);
+    }
+    return 0;
+  }
+  for (const plan of plans) {
+    mkdirSync(dirname(plan.targetPath), { recursive: true });
+    copyFileSync(plan.sourcePath, plan.targetPath);
+    process.stdout.write(`installed ${plan.targetPath}\n`);
+  }
+  return 0;
 }
 
 /**
- * `enforcement install`: wire the discipline gates. A thin orchestrator; today
- * the gate wiring is the only step, so this delegates to wire-gates and reports
- * the run boundary. Honors `--dry-run`, `--gate`, `--no-gates`.
+ * Remove Enforcement's bundled skill directory from the harness's skills
+ * subdirectory (the inverse of install-skill). Reuses the bundler to locate each
+ * target. A missing directory is not an error: uninstall must be idempotent.
+ */
+export function uninstallSkill(options: { dryRun: boolean }): number {
+  const target = resolveSkillTarget();
+  if (target === null) return 1;
+  for (const plan of planSkillInstall({
+    home: target.home,
+    bundleDir: bundleDir(),
+    contract: target.contract,
+    skills: BUNDLED_SKILLS,
+  })) {
+    const skillDir = dirname(plan.targetPath);
+    if (options.dryRun) {
+      process.stdout.write(`would remove ${skillDir}\n`);
+    } else {
+      rmSync(skillDir, { recursive: true, force: true });
+      process.stdout.write(`removed ${skillDir}\n`);
+    }
+  }
+  return 0;
+}
+
+/** The already-parsed options `install` acts on. */
+export interface InstallOptions {
+  /** Preview every step and write nothing. */
+  readonly dryRun: boolean;
+}
+
+/**
+ * `enforcement install`: lay down the Enforcement lever's operator skill. With no
+ * shipped gate catalog, this is install's whole job: a gate is the engineer's own
+ * rule, authored on demand by the `enforcement-respond` skill this step installs,
+ * not a Regimen product wired at install time. Honors `--dry-run`. Runs on every
+ * OS (the bundled skill is a plain file; there is no shell gate to skip on
+ * Windows).
  */
 export function install(options: InstallOptions): number {
-  process.stdout.write("Enforcement install (discipline gates)\n");
+  process.stdout.write("Enforcement install (respond-helper skill)\n");
 
-  if ((options.platform ?? process.platform) === "win32") {
-    process.stdout.write(
-      "enforcement gates are not yet supported on native Windows; skipping (capture is unaffected)\n",
-    );
-    return 0;
-  }
-
-  const gates = wireGates({ gates: options.gates, dryRun: options.dryRun });
-  if (gates !== 0) return gates;
+  const skill = installSkill({ dryRun: options.dryRun });
+  if (skill !== 0) return skill;
 
   process.stdout.write(
     options.dryRun
       ? "dry run complete; nothing was changed\n"
-      : "Enforcement gates installed\n",
+      : "Enforcement skill installed\n",
   );
   return 0;
 }
@@ -287,33 +382,19 @@ export function install(options: InstallOptions): number {
 export interface UninstallOptions {
   /** Preview every step and write nothing. */
   readonly dryRun: boolean;
-  /**
-   * The platform to uninstall for, injectable for testing. Defaults to
-   * `process.platform`. On `win32` the gate teardown is skipped (gates are
-   * never installed there); every other platform unwires as usual.
-   */
-  readonly platform?: string;
 }
 
 /**
- * `enforcement uninstall`: remove Enforcement's gate entries. Best effort: a
- * failing step is recorded but the rest still run, so a half-installed system
- * can always be cleaned up. `||=` would short-circuit once `failed` is non-zero
- * and skip later teardown, so set the flag explicitly. Honors `--dry-run`.
+ * `enforcement uninstall`: remove the Enforcement operator skill. Best effort: a
+ * failing step is recorded but the rest still run, so a half-installed system can
+ * always be cleaned up. Honors `--dry-run`. Authored gates are the engineer's own
+ * and are retired through `unwireAuthoredGates`, not torn down here.
  */
 export function uninstall(options: UninstallOptions): number {
   process.stdout.write("Enforcement uninstall\n");
 
-  if ((options.platform ?? process.platform) === "win32") {
-    process.stdout.write(
-      "enforcement gates are not yet supported on native Windows; nothing to uninstall (capture is unaffected)\n",
-    );
-    return 0;
-  }
-
   let failed = 0;
-
-  if (unwireGates({ dryRun: options.dryRun }) !== 0) failed = 1;
+  if (uninstallSkill({ dryRun: options.dryRun }) !== 0) failed = 1;
 
   process.stdout.write(
     options.dryRun

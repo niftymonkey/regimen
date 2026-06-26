@@ -7,6 +7,14 @@
  * same one Feedback's capture install wires through, so the two instruments share
  * one proven merge.
  *
+ * This is a LIBRARY function, not an install step: with no shipped gate catalog,
+ * `enforcement install` lays down only the operator skill (see the facade). The
+ * `enforcement-respond` skill calls this planner at AUTHORING time, when the
+ * engineer confirms an authored gate, to merge that gate onto the right
+ * per-harness pre-tool event. The gate is the engineer's own (`id` plus the body
+ * `scriptPath`); the wiring, idempotency, and marker stamping are Regimen's
+ * reusable seam.
+ *
  * Enforcement owns discipline gates, not the capture hook, so the gate role's
  * recognizer touches only `role:"gate"` leaves: it preserves a `role:"capture"`
  * leaf (wired by Feedback's own installer) and the user's own hooks verbatim.
@@ -29,9 +37,10 @@ import {
   type WirePlan as EngineWirePlan,
   type WireRole,
 } from "@regimen/shared";
-import { GATE_COMMANDS, type GateId } from "./gate-commands.ts";
+import { buildGateCommand, type GateId } from "./gate-command.ts";
 
-export type { GateId } from "./gate-commands.ts";
+export type { GateId } from "./gate-command.ts";
+export { buildGateCommand } from "./gate-command.ts";
 export { assertSafeClonePath } from "@regimen/shared";
 
 export type {
@@ -47,6 +56,18 @@ export interface RegimenMarker {
   readonly v: 1;
   readonly role: "capture" | "gate";
   readonly id?: GateId;
+}
+
+/**
+ * An authored gate: the engineer's own gate body, named and located. `id` is the
+ * name the engineer gives it (the marker the wiring stamps and dedups on);
+ * `scriptPath` is the gate body's path under the clone, the `bun` body the
+ * respond-helper authored Windows-safe in TypeScript. Enforcement ships no fixed
+ * catalog of these; the helper supplies them on demand.
+ */
+export interface AuthoredGate {
+  readonly id: GateId;
+  readonly scriptPath: string;
 }
 
 /**
@@ -76,13 +97,13 @@ const GATE_PROFILES: Partial<Record<Harness, GateProfile>> = {
 export interface GateContext {
   /** The clone's absolute path. Every command string is rooted here. */
   readonly clonePath: string;
-  /** The harness the gates are wired for; shell gates carry it as REGIMEN_HARNESS. */
+  /** The harness the gates are wired for; carried as REGIMEN_HARNESS. */
   readonly harness: Harness;
-  /** Which gates to wire onto PreToolUse. */
-  readonly gates: ReadonlyArray<GateId>;
+  /** The authored gates to wire onto the pre-tool boundary. */
+  readonly gates: ReadonlyArray<AuthoredGate>;
 }
 
-/** One gate-entry change, for the CLI to report. */
+/** One gate-entry change, for the caller to report. */
 export interface GateChange {
   readonly event: string;
   readonly id: GateId;
@@ -97,8 +118,8 @@ export function isGateLeaf(leaf: LeafHook): boolean {
 }
 
 /**
- * The script path a gate command points at, for dedup by basename. Command
- * strings quote the interpolated path (so a space in the clone path stays one
+ * The script path a gate command points at, for dedup by basename. The command
+ * string quotes the interpolated path (so a space in the clone path stays one
  * shell argument), so the path is the contents of the last double-quoted segment
  * when present; otherwise it is the last whitespace-separated token. Either way
  * any surrounding double quotes are stripped before basename so a quoted path
@@ -111,36 +132,33 @@ function commandBasename(command: string): string {
   return basename(token);
 }
 
-/** A fresh gate leaf for the given gate id, clone, and harness. */
-function gateLeaf(id: GateId, clonePath: string, harness: Harness): LeafHook {
-  const spec = GATE_COMMANDS.find((g) => g.id === id);
-  if (spec === undefined) throw new Error(`unknown gate id: ${id}`);
+/** A fresh gate leaf for the given authored gate, clone, and harness. */
+function gateLeaf(
+  gate: AuthoredGate,
+  clonePath: string,
+  harness: Harness,
+): LeafHook {
   return {
     type: "command",
-    command: spec.command(clonePath, harness),
-    _regimen: { v: 1, role: "gate", id },
+    command: buildGateCommand(clonePath, gate.scriptPath, harness),
+    _regimen: { v: 1, role: "gate", id: gate.id },
   };
 }
 
-/** The union of the already-wired gate ids and the caller's, in catalog order. */
-function desiredGateIds(
-  existingGateIds: ReadonlyArray<GateId>,
-  requested: ReadonlyArray<GateId>,
-): GateId[] {
-  return GATE_COMMANDS.map((g) => g.id).filter(
-    (id) => existingGateIds.includes(id) || requested.includes(id),
-  );
-}
-
 /**
- * The deduped gate leaves to wire and the added/unchanged report, given the gate
- * ids already present on the event. Deduped by gate id (union, catalog order) and
- * by script basename (two ids resolving to the same script file would double-wire
- * one gate). Format-independent: the engine wraps the same leaves differently by
- * the nested and versioned writers.
+ * The deduped gate leaves to wire and the added/unchanged report, given the
+ * role's own gate leaves already present on the event. The already-wired gates
+ * are re-emitted first, in their on-disk order, so a plain re-run is a no-op and
+ * nothing reorders; a gate the caller re-supplies by id re-homes onto the
+ * caller's current clone and scriptPath (a moved clone or a re-authored body),
+ * while one the caller does not re-supply is preserved verbatim. The caller's new
+ * gates are appended last. Deduped by gate id (an id already wired is not
+ * re-added) and by script basename (two ids resolving to the same script file
+ * would double-wire one gate). Format-independent: the engine wraps the same
+ * leaves differently by the nested and versioned writers.
  */
 function buildGateLeaves(
-  existingGateIds: ReadonlyArray<GateId>,
+  existingOwn: ReadonlyArray<LeafHook>,
   ctx: GateContext,
   event: string,
 ): { leaves: LeafHook[]; added: GateChange[]; unchanged: GateChange[] } {
@@ -148,14 +166,40 @@ function buildGateLeaves(
   const unchanged: GateChange[] = [];
   const seenBasenames = new Set<string>();
   const leaves: LeafHook[] = [];
-  for (const id of desiredGateIds(existingGateIds, ctx.gates)) {
-    const leaf = gateLeaf(id, ctx.clonePath, ctx.harness);
+  const requestedById = new Map(ctx.gates.map((g) => [g.id, g]));
+  const existingIds = new Set(
+    existingOwn
+      .map((l) => l._regimen?.id)
+      .filter((id): id is GateId => id !== undefined),
+  );
+
+  for (const existing of existingOwn) {
+    const id = existing._regimen?.id;
+    if (id === undefined) continue;
+    // A re-supplied gate re-homes (its command is rebuilt from the current clone);
+    // one not re-supplied is preserved exactly as it is on disk.
+    const reSupplied = requestedById.get(id);
+    const leaf =
+      reSupplied === undefined
+        ? existing
+        : gateLeaf(reSupplied, ctx.clonePath, ctx.harness);
     const name = commandBasename(leaf.command);
     if (seenBasenames.has(name)) continue;
     seenBasenames.add(name);
     leaves.push(leaf);
-    (existingGateIds.includes(id) ? unchanged : added).push({ event, id });
+    unchanged.push({ event, id });
   }
+
+  for (const gate of ctx.gates) {
+    if (existingIds.has(gate.id)) continue;
+    const leaf = gateLeaf(gate, ctx.clonePath, ctx.harness);
+    const name = commandBasename(leaf.command);
+    if (seenBasenames.has(name)) continue;
+    seenBasenames.add(name);
+    leaves.push(leaf);
+    added.push({ event, id: gate.id });
+  }
+
   return { leaves, added, unchanged };
 }
 
@@ -168,10 +212,7 @@ function gateRole(
     isOwnLeaf: isGateLeaf,
     events: [profile.preToolEvent],
     buildLeaves(event, existingOwn) {
-      const existingGateIds = existingOwn
-        .map((l) => l._regimen?.id)
-        .filter((id): id is GateId => id !== undefined);
-      return buildGateLeaves(existingGateIds, ctx, event);
+      return buildGateLeaves(existingOwn, ctx, event);
     },
     decorationFor: (event) =>
       profile.needsNameMatcher
@@ -185,14 +226,13 @@ function gateRole(
 }
 
 /**
- * Merge Enforcement's selected gates into a fresh-or-existing file on the
- * harness's pre-tool event, selecting the on-disk shape from the harness's gate
- * profile and the shared contract's hooks format. Surgical and additive: it
- * touches only gate leaves, appends its gates AFTER any existing capture leaf or
- * user hook, dedups by gate id and by script basename, and a plain re-run never
- * drops a gate opted into earlier. Throws on a relative clonePath, a shell-unsafe
- * clonePath, a malformed existing file, an unknown gate id, or an unregistered
- * harness.
+ * Merge the authored gates into a fresh-or-existing file on the harness's
+ * pre-tool event, selecting the on-disk shape from the harness's gate profile and
+ * the shared contract's hooks format. Surgical and additive: it touches only gate
+ * leaves, appends its gates AFTER any existing capture leaf or user hook, dedups
+ * by gate id and by script basename, and a plain re-run never drops a gate wired
+ * earlier. Throws on a relative clonePath, a shell-unsafe clonePath, a malformed
+ * existing file, or an unregistered harness.
  */
 export function planGateHooks(
   existing: HooksFile | VersionedHooksFile | undefined,
@@ -202,10 +242,6 @@ export function planGateHooks(
     throw new Error(`clonePath must be absolute, got: ${ctx.clonePath}`);
   }
   assertSafeClonePath(ctx.clonePath);
-  const known = new Set<string>(GATE_COMMANDS.map((g) => g.id));
-  for (const id of ctx.gates) {
-    if (!known.has(id)) throw new Error(`unknown gate id: ${id}`);
-  }
   const contract = harnessContract(ctx.harness);
   if (contract === undefined) {
     throw new Error(`no contract registered for harness: ${ctx.harness}`);

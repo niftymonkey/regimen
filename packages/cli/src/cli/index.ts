@@ -17,14 +17,15 @@
  * wire-gates, install-daemon, install-skill) are internal steps of
  * `regimen install`, no longer user verbs.
  *
- * `regimen install` composes the per-instrument installs in order so the capture
- * hook lands ahead of the gate on the pre-tool boundary (feedback then
- * enforcement); `uninstall` is the reverse (gates down before capture). The
- * single `regimen` self-link is owned here: each instrument install runs with
- * `selfLink: false` so only one `regimen` bin is linked, not a per-instrument
- * one. The harness-invoked scripts (capture hooks, gate scripts, the loader
- * daemon) stay standalone and absolute-path-invoked; this collapse touches only
- * the user-facing command layer.
+ * `regimen install` composes the per-instrument installs in order: the capture
+ * pillar wires the capture hook and Feedback's skills, then the enforcement pillar
+ * lays down the Enforcement operator skill (it ships no gate catalog, so it wires
+ * no gates: a gate is authored on demand by that skill). `uninstall` is the
+ * reverse. The single `regimen` self-link is owned here: each instrument install
+ * runs with `selfLink: false` so only one `regimen` bin is linked, not a
+ * per-instrument one. The harness-invoked scripts (capture hooks, authored gate
+ * bodies, the loader daemon) stay standalone and absolute-path-invoked; this
+ * collapse touches only the user-facing command layer.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -44,7 +45,6 @@ import {
   uninstall as feedbackUninstall,
 } from "@regimen/feedback";
 import {
-  type GateId,
   install as enforcementInstall,
   uninstall as enforcementUninstall,
 } from "@regimen/enforcement";
@@ -74,10 +74,7 @@ export interface InstrumentSteps {
     selfLink?: boolean;
     daemon?: boolean;
   }) => number;
-  readonly enforcementInstall: (options: {
-    gates: ReadonlyArray<GateId>;
-    dryRun: boolean;
-  }) => number;
+  readonly enforcementInstall: (options: { dryRun: boolean }) => number;
   readonly feedbackUninstall: (options: {
     dataDir: string;
     dryRun: boolean;
@@ -96,13 +93,6 @@ const REAL_STEPS: InstrumentSteps = {
   enforcementUninstall,
   selfLink: realSelfLink,
 };
-
-/** The default gate set wired by `regimen install` (all three). */
-const DEFAULT_GATES: ReadonlyArray<GateId> = [
-  "rm-rf",
-  "em-dash",
-  "inline-message",
-];
 
 /**
  * The lifecycle seam the install manifest and `regimen update` need (ADR-0012),
@@ -164,13 +154,6 @@ function collectFlagValues(
   return out;
 }
 
-/** The gate set `regimen install` wires: `--no-gates` for none, `--gate <id>` to override, else all three. */
-function parseGates(argv: ReadonlyArray<string>): GateId[] {
-  if (argv.includes("--no-gates")) return [];
-  const explicit = collectFlagValues(argv, "--gate");
-  return explicit.length > 0 ? (explicit as GateId[]) : [...DEFAULT_GATES];
-}
-
 /** Project one `--flag value` pair onto a single-key partial of SessionFilter. */
 function optionalFilter(
   argv: ReadonlyArray<string>,
@@ -214,16 +197,17 @@ function installMeta(life: LifecycleDeps): InstallMeta {
  * Run the two install pillars for one harness, capture first then the gate (so
  * the capture hook lands ahead of the gate on the pre-tool boundary), with
  * `REGIMEN_HARNESS` set to this harness so the facades resolve exactly it and
- * restored after. The gate pillar always runs (an empty gate set wires no gates
- * but still reconciles the harness hooks file). Fail-fast: a failing capture
- * returns its nonzero code and the gate never runs. This is the one place the
- * per-harness install mechanics live; both `install` and `update` call it, so the
- * env-set dance and the pillar ordering are never duplicated.
+ * restored after. The enforcement pillar always runs: with no shipped gate
+ * catalog it lays down the Enforcement operator skill (a gate is the engineer's
+ * own rule, authored on demand by that skill, not wired at install). Fail-fast: a
+ * failing capture returns its nonzero code and the enforcement step never runs.
+ * This is the one place the per-harness install mechanics live; both `install`
+ * and `update` call it, so the env-set dance and the pillar ordering are never
+ * duplicated.
  */
 function runPillars(
   harness: string,
   dir: string,
-  gates: ReadonlyArray<GateId>,
   dryRun: boolean,
   steps: InstrumentSteps,
   daemon: boolean,
@@ -238,7 +222,7 @@ function runPillars(
       daemon,
     });
     if (capture !== 0) return capture;
-    return steps.enforcementInstall({ gates, dryRun });
+    return steps.enforcementInstall({ dryRun });
   } finally {
     if (saved === undefined) delete process.env.REGIMEN_HARNESS;
     else process.env.REGIMEN_HARNESS = saved;
@@ -259,18 +243,20 @@ function installHarness(
   harness: string,
   scope: string,
   dir: string,
-  gates: ReadonlyArray<GateId>,
   dryRun: boolean,
   steps: InstrumentSteps,
   life: LifecycleDeps,
   manifest: Manifest | undefined,
   daemon: boolean,
 ): { code: number; manifest: Manifest | undefined } {
-  const code = runPillars(harness, dir, gates, dryRun, steps, daemon);
+  const code = runPillars(harness, dir, dryRun, steps, daemon);
   if (code !== 0 || dryRun) return { code, manifest };
 
-  const pillars = gates.length > 0 ? ["feedback", "enforcement"] : ["feedback"];
-  const entry: ManifestEntry = { harness, pillars, scope };
+  const entry: ManifestEntry = {
+    harness,
+    pillars: ["feedback", "enforcement"],
+    scope,
+  };
   return {
     code: 0,
     manifest: recordInstall(manifest, entry, installMeta(life)),
@@ -278,17 +264,19 @@ function installHarness(
 }
 
 /**
- * `regimen install`: install each target harness (capture pillar then gate
+ * `regimen install`: install each target harness (capture pillar then enforcement
  * pillar), recording every successful install in the manifest with its pillars
- * and scope, then the one `regimen` self-link last. The default targets the
- * single env-resolved harness; `--all` and `--harnesses` loop the set, with
- * Gemini installing per-workspace (a one-line notice says so). Fail-fast: a
- * failing harness stops the run and returns its nonzero code so a partial install
- * never reports success. Each instrument install runs with `selfLink: false` so
- * only the unified bin is linked. `--no-daemon` threads `daemon: false` to the
- * capture pillar so it wires hooks, skills, and the manifest without registering
- * the loader supervisor, for accounts that cannot create a scheduled task; every
- * other flag still applies.
+ * and scope, then the one `regimen` self-link last. The capture pillar wires the
+ * capture hook and Feedback's skills; the enforcement pillar lays down the
+ * Enforcement operator skill (it wires no gates, ADR-0012: a gate is authored on
+ * demand by that skill). The default targets the single env-resolved harness;
+ * `--all` and `--harnesses` loop the set, with Gemini installing per-workspace (a
+ * one-line notice says so). Fail-fast: a failing harness stops the run and returns
+ * its nonzero code so a partial install never reports success. Each instrument
+ * install runs with `selfLink: false` so only the unified bin is linked.
+ * `--no-daemon` threads `daemon: false` to the capture pillar so it wires hooks,
+ * skills, and the manifest without registering the loader supervisor, for accounts
+ * that cannot create a scheduled task; every other flag still applies.
  */
 export function install(
   argv: ReadonlyArray<string>,
@@ -298,10 +286,9 @@ export function install(
   const dryRun = argv.includes("--dry-run");
   const daemon = !argv.includes("--no-daemon");
   const dir = dataDir();
-  const gates = parseGates(argv);
   const targets = parseHarnessTargets(argv, life);
 
-  process.stdout.write("Regimen install (capture then gates)\n");
+  process.stdout.write("Regimen install (capture then enforcement)\n");
 
   let manifest = readManifest(manifestPath(dir));
   for (const harness of targets) {
@@ -315,7 +302,6 @@ export function install(
       harness,
       scope,
       dir,
-      gates,
       dryRun,
       steps,
       life,
@@ -345,12 +331,13 @@ export function install(
 }
 
 /**
- * `regimen uninstall`: tear down in reverse (gates before capture). Best effort:
- * every step runs even if an earlier one failed, so a half-installed system can
- * always be cleaned up; the aggregate exit is nonzero if any step failed. The one
- * `regimen` self-unlink runs last; each instrument teardown runs with
- * `selfLink: false`. Outside a dry-run it removes the env-resolved harness from
- * the install manifest so `regimen status` no longer reports it installed.
+ * `regimen uninstall`: tear down in reverse (enforcement before capture). Best
+ * effort: every step runs even if an earlier one failed, so a half-installed
+ * system can always be cleaned up; the aggregate exit is nonzero if any step
+ * failed. The enforcement teardown removes the operator skill; the one `regimen`
+ * self-unlink runs last; each instrument teardown runs with `selfLink: false`.
+ * Outside a dry-run it removes the env-resolved harness from the install manifest
+ * so `regimen status` no longer reports it installed.
  */
 export function uninstall(
   argv: ReadonlyArray<string>,
@@ -360,7 +347,7 @@ export function uninstall(
   const dir = dataDir();
   let failed = 0;
 
-  process.stdout.write("Regimen uninstall (gates then capture)\n");
+  process.stdout.write("Regimen uninstall (enforcement then capture)\n");
 
   if (steps.enforcementUninstall({ dryRun }) !== 0) failed = 1;
   if (
@@ -428,10 +415,7 @@ export function update(
   };
 
   for (const entry of existing.entries) {
-    const gates = entry.pillars.includes("enforcement")
-      ? [...DEFAULT_GATES]
-      : [];
-    const code = runPillars(entry.harness, dir, gates, dryRun, steps, true);
+    const code = runPillars(entry.harness, dir, dryRun, steps, true);
     if (code !== 0) return code;
   }
 
@@ -563,7 +547,7 @@ export function usage(): string {
   return `regimen <command> [flags]
 
 Lifecycle:
-  install [--all | --harnesses <h...>]   install Regimen (capture, gates, skills) for the harness(es)
+  install [--all | --harnesses <h...>]   install Regimen (capture, skills) for the harness(es)
   update                                 re-resolve paths, re-run recorded installs, cycle the daemon, restamp
   uninstall                              remove Regimen for the current harness
   status                                 installed version, harnesses + scopes, and daemon health
@@ -578,7 +562,6 @@ Read & judge:
 
 Flags:
   --dry-run                       preview without changing anything
-  --gate <name> | --no-gates      select enforcement gates (install)
   --no-daemon                     install capture without the loader daemon (install)
 
 The harness is auto-detected per invocation, or set REGIMEN_HARNESS.

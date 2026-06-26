@@ -4,16 +4,33 @@
  * undefined for a fresh file) and asserts on the returned object. No filesystem.
  * Mirrors Feedback's capture-hooks planner test, scoped to gates only: this
  * planner must never touch a capture leaf or a user hook.
+ *
+ * Enforcement ships no gate catalog, so the planner wires AUTHORED gates (an `id`
+ * the engineer names plus the body's `scriptPath`); these tests author gates
+ * against the rm-rf fixture body to prove the wiring shape.
  */
 import { expect, test } from "bun:test";
 import {
+  type AuthoredGate,
   isGateLeaf,
   type LeafHook,
   planGateHooks,
   planGateHooksRemoval,
 } from "../src/install/gate-hooks.ts";
 
-const CLONE = "/home/me/regimen-enforcement";
+const CLONE = "/home/me/regimen";
+const RM_RF: AuthoredGate = {
+  id: "rm-rf",
+  scriptPath: "tests/fixtures/rm-rf-gate.ts",
+};
+const EM_DASH: AuthoredGate = {
+  id: "em-dash",
+  scriptPath: "gates/em-dash-gate.ts",
+};
+const INLINE: AuthoredGate = {
+  id: "inline-message",
+  scriptPath: "gates/inline-message-gate.ts",
+};
 
 /** All leaf hooks across every group on one event, in order. */
 function leavesOn(
@@ -26,11 +43,11 @@ function leavesOn(
   return groups.flatMap((g) => g.hooks);
 }
 
-test("a fresh file wires the selected gates onto PreToolUse only, each marked", () => {
+test("a fresh file wires the authored gates onto PreToolUse only, each marked", () => {
   const plan = planGateHooks(undefined, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["rm-rf", "em-dash", "inline-message"],
+    gates: [RM_RF, EM_DASH, INLINE],
   });
 
   const pre = leavesOn(plan, "PreToolUse");
@@ -40,13 +57,10 @@ test("a fresh file wires the selected gates onto PreToolUse only, each marked", 
     { v: 1, role: "gate", id: "inline-message" },
   ]);
   expect(pre[0]?.command).toBe(
-    `REGIMEN_HARNESS=codex bun "${CLONE}/examples/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=codex bun "${CLONE}/tests/fixtures/rm-rf-gate.ts"`,
   );
   expect(pre[1]?.command).toBe(
-    `REGIMEN_HARNESS=codex bash "${CLONE}/examples/em-dash-gate.sh"`,
-  );
-  expect(pre[2]?.command).toBe(
-    `REGIMEN_HARNESS=codex bash "${CLONE}/examples/inline-message-guard.sh"`,
+    `REGIMEN_HARNESS=codex bun "${CLONE}/gates/em-dash-gate.ts"`,
   );
 
   // No capture is ever wired by this planner, and no other event is touched.
@@ -59,24 +73,23 @@ test("the planner stamps the gate commands with the harness it is given", () => 
   const plan = planGateHooks(undefined, {
     clonePath: CLONE,
     harness: "claude",
-    gates: ["rm-rf", "em-dash"],
+    gates: [RM_RF, EM_DASH],
   });
   const pre = leavesOn(plan, "PreToolUse");
-  // Every gate command, the bun-run TS gate and the bash-run shell gate alike,
-  // carries the wired harness explicitly so the running gate reads the harness
-  // the installer detected rather than guessing.
+  // Every gate command carries the wired harness explicitly so the running gate
+  // reads the harness the installer detected rather than guessing.
   expect(pre[0]?.command).toBe(
-    `REGIMEN_HARNESS=claude bun "${CLONE}/examples/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=claude bun "${CLONE}/tests/fixtures/rm-rf-gate.ts"`,
   );
   expect(pre[1]?.command).toBe(
-    `REGIMEN_HARNESS=claude bash "${CLONE}/examples/em-dash-gate.sh"`,
+    `REGIMEN_HARNESS=claude bun "${CLONE}/gates/em-dash-gate.ts"`,
   );
 });
 
 test("isGateLeaf recognizes by marker, not by command string", () => {
   const gate: LeafHook = {
     type: "command",
-    command: "bun /anywhere/examples/rm-rf-gate.ts",
+    command: "bun /anywhere/gates/rm-rf-gate.ts",
     _regimen: { v: 1, role: "gate", id: "rm-rf" },
   };
   const capture: LeafHook = {
@@ -86,7 +99,7 @@ test("isGateLeaf recognizes by marker, not by command string", () => {
   };
   const userLookalike: LeafHook = {
     type: "command",
-    command: "bun /home/me/regimen-enforcement/examples/rm-rf-gate.ts",
+    command: "bun /home/me/regimen/gates/rm-rf-gate.ts",
   };
   expect(isGateLeaf(gate)).toBe(true);
   expect(isGateLeaf(capture)).toBe(false);
@@ -113,7 +126,7 @@ test("a capture leaf is preserved verbatim and gates land AFTER it", () => {
   const plan = planGateHooks(existing, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
 
   const pre = leavesOn(plan, "PreToolUse");
@@ -145,7 +158,7 @@ test("user hooks and unknown keys are preserved in place; gates appended after",
   const plan = planGateHooks(existing, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
 
   // The user's PreToolUse group stays first and byte-identical, unknown keys too.
@@ -168,7 +181,7 @@ test("re-applying the same wiring is idempotent: nothing added, identical output
   const ctx = {
     clonePath: CLONE,
     harness: "codex" as const,
-    gates: ["rm-rf" as const],
+    gates: [RM_RF],
   };
   const first = planGateHooks(undefined, ctx);
   const second = planGateHooks(first.hooks, ctx);
@@ -180,16 +193,37 @@ test("re-applying the same wiring is idempotent: nothing added, identical output
   expect(leavesOn(second, "PreToolUse").filter(isGateLeaf)).toHaveLength(1);
 });
 
+test("a re-run that re-supplies no gates preserves the wired gate verbatim", () => {
+  const first = planGateHooks(undefined, {
+    clonePath: CLONE,
+    harness: "codex",
+    gates: [RM_RF],
+  });
+  // A later run that authors nothing new must keep the already-wired gate exactly
+  // as it is on disk (its command preserved), not drop it or blank its path.
+  const second = planGateHooks(first.hooks, {
+    clonePath: CLONE,
+    harness: "codex",
+    gates: [],
+  });
+  const pre = leavesOn(second, "PreToolUse").filter(isGateLeaf);
+  expect(pre).toHaveLength(1);
+  expect(pre[0]?.command).toBe(
+    `REGIMEN_HARNESS=codex bun "${CLONE}/tests/fixtures/rm-rf-gate.ts"`,
+  );
+  expect(second.added).toEqual([]);
+});
+
 test("apply is additive: a later run with a different gate keeps the earlier one", () => {
   const first = planGateHooks(undefined, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
   const second = planGateHooks(first.hooks, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["em-dash"],
+    gates: [EM_DASH],
   });
 
   const gateIds = leavesOn(second, "PreToolUse")
@@ -204,19 +238,19 @@ test("a moved clone re-homes the gate command in place without duplicating", () 
   const first = planGateHooks(undefined, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
-  const moved = "/opt/regimen-enforcement";
+  const moved = "/opt/regimen";
   const second = planGateHooks(first.hooks, {
     clonePath: moved,
     harness: "codex",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
 
   const pre = leavesOn(second, "PreToolUse").filter(isGateLeaf);
   expect(pre).toHaveLength(1);
   expect(pre[0]?.command).toBe(
-    `REGIMEN_HARNESS=codex bun "${moved}/examples/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=codex bun "${moved}/tests/fixtures/rm-rf-gate.ts"`,
   );
 });
 
@@ -239,7 +273,7 @@ test("removal strips exactly the gate entries, keeps capture and user, prunes em
   const wired = planGateHooks(existing, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   }).hooks;
 
   const plan = planGateHooksRemoval(wired);
@@ -280,37 +314,37 @@ test("wire then unwire restores the original file exactly (round-trip)", () => {
   const wired = planGateHooks(original, {
     clonePath: CLONE,
     harness: "codex",
-    gates: ["rm-rf", "em-dash"],
+    gates: [RM_RF, EM_DASH],
   }).hooks;
   const restored = planGateHooksRemoval(wired).hooks;
   expect(restored).toEqual(original);
 });
 
 test("a clonePath with a space is quoted as one argument and stays idempotent", () => {
-  const spaced = "/tmp/clone path/regimen-enforcement";
+  const spaced = "/tmp/clone path/regimen";
   const first = planGateHooks(undefined, {
     clonePath: spaced,
     harness: "codex",
-    gates: ["rm-rf", "em-dash", "inline-message"],
+    gates: [RM_RF, EM_DASH, INLINE],
   });
 
   // (a) Each command string quotes the path so it is a single shell argument:
-  // the whole "<clonePath>/examples/<script>" is wrapped in double quotes, so a
-  // space in the path does not split the command into two arguments.
+  // the whole "<clonePath>/<script>" is wrapped in double quotes, so a space in
+  // the path does not split the command into two arguments.
   const commands = leavesOn(first, "PreToolUse")
     .filter(isGateLeaf)
     .map((l) => l.command);
   expect(commands).toEqual([
-    `REGIMEN_HARNESS=codex bun "${spaced}/examples/rm-rf-gate.ts"`,
-    `REGIMEN_HARNESS=codex bash "${spaced}/examples/em-dash-gate.sh"`,
-    `REGIMEN_HARNESS=codex bash "${spaced}/examples/inline-message-guard.sh"`,
+    `REGIMEN_HARNESS=codex bun "${spaced}/tests/fixtures/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=codex bun "${spaced}/gates/em-dash-gate.ts"`,
+    `REGIMEN_HARNESS=codex bun "${spaced}/gates/inline-message-gate.ts"`,
   ]);
 
   // (b) A re-run still recognizes each gate by basename, so nothing double-wires.
   const second = planGateHooks(first.hooks, {
     clonePath: spaced,
     harness: "codex",
-    gates: ["rm-rf", "em-dash", "inline-message"],
+    gates: [RM_RF, EM_DASH, INLINE],
   });
   expect(second.added).toEqual([]);
   const ids = leavesOn(second, "PreToolUse")
@@ -322,7 +356,7 @@ test("a clonePath with a space is quoted as one argument and stays idempotent", 
 test("a relative clonePath is rejected (it would produce a broken hook command)", () => {
   expect(() =>
     planGateHooks(undefined, {
-      clonePath: "regimen-enforcement",
+      clonePath: "regimen",
       harness: "codex",
       gates: [],
     }),
@@ -345,7 +379,7 @@ test("a clonePath with characters special inside double quotes is rejected (inje
       planGateHooks(undefined, {
         clonePath: unsafe,
         harness: "codex",
-        gates: ["rm-rf"],
+        gates: [RM_RF],
       }),
     ).toThrow();
   }
@@ -355,15 +389,15 @@ test("a clonePath with characters literal inside double quotes is accepted and s
   // Space, single quote, and parentheses are all literal inside double quotes
   // and appear in real directory names, so they must NOT be rejected, and the
   // produced command keeps the path wrapped in one pair of double quotes.
-  const safe = "/tmp/john's Backup (old)/regimen-enforcement";
+  const safe = "/tmp/john's Backup (old)/regimen";
   const plan = planGateHooks(undefined, {
     clonePath: safe,
     harness: "codex",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
   const command = leavesOn(plan, "PreToolUse").filter(isGateLeaf)[0]?.command;
   expect(command).toBe(
-    `REGIMEN_HARNESS=codex bun "${safe}/examples/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=codex bun "${safe}/tests/fixtures/rm-rf-gate.ts"`,
   );
 });
 
@@ -381,14 +415,4 @@ test("a structurally malformed existing file is refused, not silently rewritten"
       { clonePath: CLONE, harness: "codex", gates: [] },
     ),
   ).toThrow(/PreToolUse/);
-});
-
-test("an unknown gate id is rejected", () => {
-  expect(() =>
-    planGateHooks(undefined, {
-      clonePath: CLONE,
-      harness: "codex",
-      gates: ["bogus" as never],
-    }),
-  ).toThrow(/bogus/);
 });

@@ -47,7 +47,6 @@ function captureStdout(body: () => void): string {
 interface Call {
   readonly step: string;
   readonly harness?: string;
-  readonly gates?: ReadonlyArray<string>;
   readonly dataDir?: string;
 }
 
@@ -58,11 +57,10 @@ function recordingSteps(calls: Call[]): InstrumentSteps {
       calls.push({ step: "feedbackInstall", harness: harnessEnv() });
       return 0;
     },
-    enforcementInstall: (o) => {
+    enforcementInstall: () => {
       calls.push({
         step: "enforcementInstall",
         harness: harnessEnv(),
-        gates: o.gates,
       });
       return 0;
     },
@@ -163,20 +161,6 @@ test("install writes a manifest entry for the resolved harness with config-home 
       pillars: ["feedback", "enforcement"],
       scope: "config-home",
     },
-  ]);
-});
-
-test("install with --no-gates records the feedback pillar only", () => {
-  const dir = tempDataDir();
-  process.env.REGIMEN_HARNESS = "codex";
-  const calls: Call[] = [];
-  install(
-    ["install", "--no-gates"],
-    recordingSteps(calls),
-    lifecycleDeps(calls),
-  );
-  expect(readManifest(manifestPath(dir))?.entries[0]?.pillars).toEqual([
-    "feedback",
   ]);
 });
 

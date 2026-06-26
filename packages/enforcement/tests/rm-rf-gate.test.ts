@@ -1,15 +1,18 @@
 /**
- * The reference rm-rf discipline gate, spawned as a PreToolUse hook would invoke
- * it, against a temp REGIMEN_DATA_DIR. The gate must BLOCK a recursive forced rm
- * unconditionally (always emit the deny decision to the harness) and write
- * nothing to the buffer: a gate denies, it does not self-report the denial.
+ * The rm-rf gate WIRING FIXTURE, spawned as a PreToolUse hook would invoke it,
+ * against a temp REGIMEN_DATA_DIR. It exemplifies the shape an authored gate
+ * takes (Enforcement ships no gate catalog): the gate must BLOCK a recursive
+ * forced rm unconditionally (always emit the deny decision to the harness) and
+ * write nothing to the buffer (a gate denies, it does not self-report the
+ * denial). This is the body the gate-wiring tests merge onto a harness's pre-tool
+ * event, kept under tests/fixtures so it reads as a fixture, not a product gate.
  */
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const GATE = join(import.meta.dir, "..", "examples", "rm-rf-gate.ts");
+const GATE = join(import.meta.dir, "fixtures", "rm-rf-gate.ts");
 
 const RM_RF_PAYLOAD = {
   hook_event_name: "PreToolUse",

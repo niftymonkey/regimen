@@ -1,12 +1,15 @@
 #!/usr/bin/env bun
 /**
- * A reference discipline gate for the Enforcement instrument, harness-agnostic
- * by construction.
+ * A WIRING TEST FIXTURE and documentation exemplar: the shape an authored
+ * discipline gate takes, harness-agnostic by construction. Enforcement ships NO
+ * gate catalog; the engineer's own gate is authored on demand by the
+ * `enforcement-respond` skill. This file exists ONLY so the gate-wiring tests
+ * have a real body to merge onto a harness's pre-tool event, and so a reader can
+ * see what an authored `bun` gate looks like. It is not installed as product.
  *
  * A minimal, illustrative PreToolUse hook. It denies a Bash tool call that runs
- * a recursive, forced `rm`. It exists to show the pattern any discipline gate
- * follows. It is deliberately NOT registered as a live hook; the trial config
- * wires it as a user-level PreToolUse hook.
+ * a recursive, forced `rm`. It exists to show the pattern any authored gate
+ * follows.
  *
  * The deny shape Claude and Codex share is `hookSpecificOutput.permissionDecision:
  * "deny"`, so one gate body serves both: the rule and the deny live in this

@@ -10,6 +10,7 @@
  */
 import { expect, test } from "bun:test";
 import {
+  type AuthoredGate,
   isGateLeaf,
   type LeafHook,
   type MatcherGroup,
@@ -18,13 +19,25 @@ import {
   type VersionedHooksFile,
 } from "../src/install/gate-hooks.ts";
 
-const CLONE = "/home/me/regimen-enforcement";
+const CLONE = "/home/me/regimen";
+const RM_RF: AuthoredGate = {
+  id: "rm-rf",
+  scriptPath: "tests/fixtures/rm-rf-gate.ts",
+};
+const EM_DASH: AuthoredGate = {
+  id: "em-dash",
+  scriptPath: "gates/em-dash-gate.ts",
+};
+const INLINE: AuthoredGate = {
+  id: "inline-message",
+  scriptPath: "gates/inline-message-gate.ts",
+};
 
 test("copilot: gates wire as versioned flat leaves on preToolUse, each role:gate", () => {
   const plan = planGateHooks(undefined, {
     clonePath: CLONE,
     harness: "copilot",
-    gates: ["rm-rf", "em-dash", "inline-message"],
+    gates: [RM_RF, EM_DASH, INLINE],
   });
 
   const file = plan.hooks as VersionedHooksFile;
@@ -45,7 +58,7 @@ test("copilot: gates wire as versioned flat leaves on preToolUse, each role:gate
     { v: 1, role: "gate", id: "inline-message" },
   ]);
   expect(leaves[0]?.command).toBe(
-    `REGIMEN_HARNESS=copilot bun "${CLONE}/examples/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=copilot bun "${CLONE}/tests/fixtures/rm-rf-gate.ts"`,
   );
   // No capture is ever wired, and no claude/codex-style PreToolUse event appears.
   expect(leaves.some((l) => l._regimen?.role === "capture")).toBe(false);
@@ -72,7 +85,7 @@ test("copilot: a user leaf and a foreign capture leaf are preserved before the g
   const plan = planGateHooks(existing, {
     clonePath: CLONE,
     harness: "copilot",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
 
   const leaves = (plan.hooks as VersionedHooksFile).hooks?.preToolUse ?? [];
@@ -99,7 +112,7 @@ test("copilot: wire then unwire restores the original versioned file (round-trip
   const wired = planGateHooks(original, {
     clonePath: CLONE,
     harness: "copilot",
-    gates: ["rm-rf", "em-dash"],
+    gates: [RM_RF, EM_DASH],
   }).hooks;
   // planGateHooksRemoval reports `.hooks` as the nested HooksFile, but the
   // versioned-command-leaves round-trip returns the same versioned shape it was
@@ -117,7 +130,7 @@ test("gemini: gates wire as a named+matched nested group on BeforeTool, each rol
   const plan = planGateHooks(undefined, {
     clonePath: CLONE,
     harness: "gemini",
-    gates: ["rm-rf", "em-dash", "inline-message"],
+    gates: [RM_RF, EM_DASH, INLINE],
   });
 
   // Gemini's pre-tool boundary is BeforeTool, not PreToolUse.
@@ -138,7 +151,7 @@ test("gemini: gates wire as a named+matched nested group on BeforeTool, each rol
   ]);
   for (const leaf of leaves) expect(leaf._regimen?.role).toBe("gate");
   expect(leaves[0]?.command).toBe(
-    `REGIMEN_HARNESS=gemini bun "${CLONE}/examples/rm-rf-gate.ts"`,
+    `REGIMEN_HARNESS=gemini bun "${CLONE}/tests/fixtures/rm-rf-gate.ts"`,
   );
   expect(plan.added).toContainEqual({ event: "BeforeTool", id: "rm-rf" });
 });
@@ -160,7 +173,7 @@ test("gemini: a user group and a foreign capture leaf are preserved before the g
   const plan = planGateHooks(existing, {
     clonePath: CLONE,
     harness: "gemini",
-    gates: ["rm-rf"],
+    gates: [RM_RF],
   });
 
   const groups = (plan.hooks.hooks?.BeforeTool ?? []) as MatcherGroup[];
@@ -180,7 +193,7 @@ test("gemini: re-applying the same wiring is idempotent (one gate group, nothing
   const ctx = {
     clonePath: CLONE,
     harness: "gemini" as const,
-    gates: ["rm-rf" as const],
+    gates: [RM_RF],
   };
   const first = planGateHooks(undefined, ctx);
   const second = planGateHooks(first.hooks, ctx);
