@@ -26,6 +26,7 @@
       "dependencies": {
         "@regimen/enforcement": "workspace:*",
         "@regimen/feedback": "workspace:*",
+        "@regimen/guidance": "workspace:*",
         "@regimen/shared": "workspace:*",
       },
       "devDependencies": {

@@ -64,12 +64,20 @@ function recordingSteps(calls: Call[]): InstrumentSteps {
       });
       return 0;
     },
+    guidanceInstall: () => {
+      calls.push({ step: "guidanceInstall", harness: harnessEnv() });
+      return 0;
+    },
     feedbackUninstall: () => {
       calls.push({ step: "feedbackUninstall", harness: harnessEnv() });
       return 0;
     },
     enforcementUninstall: () => {
       calls.push({ step: "enforcementUninstall", harness: harnessEnv() });
+      return 0;
+    },
+    guidanceUninstall: () => {
+      calls.push({ step: "guidanceUninstall", harness: harnessEnv() });
       return 0;
     },
     selfLink: (verb) => {
@@ -158,7 +166,7 @@ test("install writes a manifest entry for the resolved harness with config-home 
   expect(manifest?.entries).toEqual([
     {
       harness: "codex",
-      pillars: ["feedback", "enforcement"],
+      pillars: ["feedback", "enforcement", "guidance"],
       scope: "config-home",
     },
   ]);
@@ -195,7 +203,7 @@ test("update with no manifest falls back to a fresh install", () => {
   expect(readManifest(manifestPath(dir))?.entries).toEqual([
     {
       harness: "codex",
-      pillars: ["feedback", "enforcement"],
+      pillars: ["feedback", "enforcement", "guidance"],
       scope: "config-home",
     },
   ]);
@@ -236,6 +244,30 @@ test("update re-runs the install for each recorded entry, targeting each harness
     .filter((c) => c.step === "feedbackInstall")
     .map((c) => c.harness);
   expect(installed).toEqual(["codex", "gemini"]);
+});
+
+test("update re-applies the guidance pillar for each recorded entry", () => {
+  const dir = tempDataDir();
+  delete process.env.REGIMEN_HARNESS;
+  seedManifest(dir, [
+    {
+      harness: "codex",
+      pillars: ["feedback", "enforcement", "guidance"],
+      scope: "config-home",
+    },
+    {
+      harness: "gemini",
+      pillars: ["feedback", "enforcement", "guidance"],
+      scope: "workspace:/work/proj",
+    },
+  ]);
+  const calls: Call[] = [];
+  const exit = update(["update"], recordingSteps(calls), lifecycleDeps(calls));
+  expect(exit).toBe(0);
+  const guided = calls
+    .filter((c) => c.step === "guidanceInstall")
+    .map((c) => c.harness);
+  expect(guided).toEqual(["codex", "gemini"]);
 });
 
 test("update cycles the daemon so it runs the freshly-resolved loader path", () => {
@@ -357,7 +389,7 @@ test("status renders the manifest version, entries with pillars and scope", asyn
     entries: [
       {
         harness: "gemini",
-        pillars: ["feedback", "enforcement"],
+        pillars: ["feedback", "enforcement", "guidance"],
         scope: "workspace:/work/proj",
       },
     ],
@@ -370,7 +402,7 @@ test("status renders the manifest version, entries with pillars and scope", asyn
   expect(out).toContain("0.4.2");
   expect(out).toContain("gemini");
   expect(out).toContain("workspace:/work/proj");
-  expect(out).toContain("feedback, enforcement");
+  expect(out).toContain("feedback, enforcement, guidance");
 });
 
 test("status with no manifest says nothing is installed yet", async () => {

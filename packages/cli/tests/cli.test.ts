@@ -123,20 +123,23 @@ function recordingSteps(
     feedbackInstall: (o) =>
       run({ step: "feedbackInstall", selfLink: o.selfLink, daemon: o.daemon }),
     enforcementInstall: () => run({ step: "enforcementInstall" }),
+    guidanceInstall: () => run({ step: "guidanceInstall" }),
     feedbackUninstall: (o) =>
       run({ step: "feedbackUninstall", selfLink: o.selfLink }),
     enforcementUninstall: () => run({ step: "enforcementUninstall" }),
+    guidanceUninstall: () => run({ step: "guidanceUninstall" }),
     selfLink: (verb) => run({ step: "selfLink", verb }),
   };
 }
 
-test("install runs capture (feedback) before the gate (enforcement), then the one self-link", () => {
+test("install runs the three pillars in order (feedback, enforcement, guidance), then the one self-link", () => {
   const calls: Call[] = [];
   const exit = install(["install"], recordingSteps(calls));
   expect(exit).toBe(0);
   expect(calls.map((c) => c.step)).toEqual([
     "feedbackInstall",
     "enforcementInstall",
+    "guidanceInstall",
     "selfLink",
   ]);
 });
@@ -176,11 +179,12 @@ test("install without --no-daemon leaves the daemon step in place", () => {
   expect(feedback.daemon).not.toBe(false);
 });
 
-test("uninstall tears down in reverse: gate (enforcement) before capture (feedback), self-unlink last", () => {
+test("uninstall tears down in reverse (guidance, enforcement, feedback), self-unlink last", () => {
   const calls: Call[] = [];
   const exit = uninstall(["uninstall"], recordingSteps(calls));
   expect(exit).toBe(0);
   expect(calls.map((c) => c.step)).toEqual([
+    "guidanceUninstall",
     "enforcementUninstall",
     "feedbackUninstall",
     "selfLink",
@@ -188,14 +192,15 @@ test("uninstall tears down in reverse: gate (enforcement) before capture (feedba
   expect(calls.find((c) => c.step === "selfLink")!.verb).toBe("unlink");
 });
 
-test("uninstall is best-effort: a failing gate teardown still runs the later steps and aggregates nonzero", () => {
+test("uninstall is best-effort: a failing guidance teardown still runs the later steps and aggregates nonzero", () => {
   const calls: Call[] = [];
   const exit = uninstall(
     ["uninstall"],
-    recordingSteps(calls, new Set(["enforcementUninstall"])),
+    recordingSteps(calls, new Set(["guidanceUninstall"])),
   );
   expect(exit).not.toBe(0);
   expect(calls.map((c) => c.step)).toEqual([
+    "guidanceUninstall",
     "enforcementUninstall",
     "feedbackUninstall",
     "selfLink",
