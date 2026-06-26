@@ -8,7 +8,13 @@
  * markers before calling.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -119,5 +125,22 @@ test("uninstallSkill on a missing skill is a clean no-op", () => {
   withCodexHome(() => {
     const exit = uninstallSkill({ dryRun: false });
     expect(exit).toBe(0);
+  });
+});
+
+test("uninstallSkill is best-effort: a removal failure is recorded, not thrown", () => {
+  withCodexHome((codexHome) => {
+    installSkill({ dryRun: false });
+    const skillsDir = join(codexHome, "skills");
+    // Make the skills directory non-writable so removing the skill subdirectory
+    // under it fails (EACCES), the realistic IO failure the loop must survive.
+    chmodSync(skillsDir, 0o500);
+    try {
+      const exit = uninstallSkill({ dryRun: false });
+      // Best-effort: the failure is reported through the exit code, never thrown.
+      expect(exit).not.toBe(0);
+    } finally {
+      chmodSync(skillsDir, 0o700);
+    }
   });
 });

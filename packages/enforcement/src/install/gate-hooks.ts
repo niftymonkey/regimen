@@ -22,7 +22,7 @@
  * stamped on each leaf, not by the command string, so recognition survives a
  * moved clone.
  */
-import { basename, isAbsolute } from "node:path";
+import { isAbsolute } from "node:path";
 import {
   assertSafeClonePath,
   type Harness,
@@ -117,21 +117,6 @@ export function isGateLeaf(leaf: LeafHook): boolean {
   return leaf._regimen?.role === "gate";
 }
 
-/**
- * The script path a gate command points at, for dedup by basename. The command
- * string quotes the interpolated path (so a space in the clone path stays one
- * shell argument), so the path is the contents of the last double-quoted segment
- * when present; otherwise it is the last whitespace-separated token. Either way
- * any surrounding double quotes are stripped before basename so a quoted path
- * does not yield a basename with a trailing quote or a split-on-space fragment.
- */
-function commandBasename(command: string): string {
-  const [, quotedPath] = command.match(/"([^"]*)"(?!.*")/) ?? [];
-  const token =
-    quotedPath ?? (command.split(/\s+/).pop() ?? command).replace(/^"|"$/g, "");
-  return basename(token);
-}
-
 /** A fresh gate leaf for the given authored gate, clone, and harness. */
 function gateLeaf(
   gate: AuthoredGate,
@@ -152,10 +137,10 @@ function gateLeaf(
  * nothing reorders; a gate the caller re-supplies by id re-homes onto the
  * caller's current clone and scriptPath (a moved clone or a re-authored body),
  * while one the caller does not re-supply is preserved verbatim. The caller's new
- * gates are appended last. Deduped by gate id (an id already wired is not
- * re-added) and by script basename (two ids resolving to the same script file
- * would double-wire one gate). Format-independent: the engine wraps the same
- * leaves differently by the nested and versioned writers.
+ * gates are appended last. Deduped by gate id (its stable identity, so two
+ * distinct gates that happen to share a script basename in different directories
+ * both wire). Format-independent: the engine wraps the same leaves differently by
+ * the nested and versioned writers.
  */
 function buildGateLeaves(
   existingOwn: ReadonlyArray<LeafHook>,
@@ -164,18 +149,14 @@ function buildGateLeaves(
 ): { leaves: LeafHook[]; added: GateChange[]; unchanged: GateChange[] } {
   const added: GateChange[] = [];
   const unchanged: GateChange[] = [];
-  const seenBasenames = new Set<string>();
+  const seenIds = new Set<GateId>();
   const leaves: LeafHook[] = [];
   const requestedById = new Map(ctx.gates.map((g) => [g.id, g]));
-  const existingIds = new Set(
-    existingOwn
-      .map((l) => l._regimen?.id)
-      .filter((id): id is GateId => id !== undefined),
-  );
 
   for (const existing of existingOwn) {
     const id = existing._regimen?.id;
-    if (id === undefined) continue;
+    if (id === undefined || seenIds.has(id)) continue;
+    seenIds.add(id);
     // A re-supplied gate re-homes (its command is rebuilt from the current clone);
     // one not re-supplied is preserved exactly as it is on disk.
     const reSupplied = requestedById.get(id);
@@ -183,20 +164,14 @@ function buildGateLeaves(
       reSupplied === undefined
         ? existing
         : gateLeaf(reSupplied, ctx.clonePath, ctx.harness);
-    const name = commandBasename(leaf.command);
-    if (seenBasenames.has(name)) continue;
-    seenBasenames.add(name);
     leaves.push(leaf);
     unchanged.push({ event, id });
   }
 
   for (const gate of ctx.gates) {
-    if (existingIds.has(gate.id)) continue;
-    const leaf = gateLeaf(gate, ctx.clonePath, ctx.harness);
-    const name = commandBasename(leaf.command);
-    if (seenBasenames.has(name)) continue;
-    seenBasenames.add(name);
-    leaves.push(leaf);
+    if (seenIds.has(gate.id)) continue;
+    seenIds.add(gate.id);
+    leaves.push(gateLeaf(gate, ctx.clonePath, ctx.harness));
     added.push({ event, id: gate.id });
   }
 
@@ -230,9 +205,9 @@ function gateRole(
  * pre-tool event, selecting the on-disk shape from the harness's gate profile and
  * the shared contract's hooks format. Surgical and additive: it touches only gate
  * leaves, appends its gates AFTER any existing capture leaf or user hook, dedups
- * by gate id and by script basename, and a plain re-run never drops a gate wired
- * earlier. Throws on a relative clonePath, a shell-unsafe clonePath, a malformed
- * existing file, or an unregistered harness.
+ * by gate id, and a plain re-run never drops a gate wired earlier. Throws on a
+ * relative clonePath, a shell-unsafe clonePath, a malformed existing file, or an
+ * unregistered harness.
  */
 export function planGateHooks(
   existing: HooksFile | VersionedHooksFile | undefined,

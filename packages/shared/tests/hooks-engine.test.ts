@@ -254,3 +254,30 @@ test("versioned: a fresh file defaults version to 1; removal keeps version and f
   expect(file.hooks?.Pre).toEqual([foreign]);
   expect(removal.removed).toEqual([{ event: "Pre", role: "alpha" }]);
 });
+
+test("versioned: a malformed top-level version is refused, not carried forward", () => {
+  // `version` must be a number; a string or object would be carried forward
+  // verbatim and emit a malformed file, so it is refused loudly.
+  for (const badVersion of ["1", { major: 1 }, true, [1]]) {
+    expect(() =>
+      planHooks(
+        { version: badVersion } as unknown as VersionedHooksFile,
+        alphaRole(["Pre"]),
+        "versioned-command-leaves",
+      ),
+    ).toThrow(/version/);
+  }
+});
+
+test("versioned: an absent or numeric version is accepted", () => {
+  expect(() =>
+    planHooks(
+      { version: 3, hooks: {} },
+      alphaRole(["Pre"]),
+      "versioned-command-leaves",
+    ),
+  ).not.toThrow();
+  expect(() =>
+    planHooks({ hooks: {} }, alphaRole(["Pre"]), "versioned-command-leaves"),
+  ).not.toThrow();
+});

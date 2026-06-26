@@ -55,21 +55,40 @@ function parsePayload(raw: string): unknown {
 /**
  * Whether a Bash command runs a recursive, forced rm. Intentionally simple:
  * this gate is a reference example of the denial pattern, not a hardened
- * security control.
+ * security control. The recursive/forced check is scoped to each `rm`
+ * invocation's OWN flags so a `-rf` carried by an unrelated command segment (a
+ * `tar -rf`, say) does not make a harmless `rm` read as recursive-forced; a
+ * command is denied only when one of its rm invocations is itself recursive and
+ * forced.
  */
 function isRecursiveForcedRm(command: string): boolean {
-  if (!/\brm\b/.test(command)) return false;
+  return splitCommandSegments(command).some(isRecursiveForcedRmSegment);
+}
+
+/**
+ * Split a command line into the segments separated by the shell operators that
+ * end one command and begin another (`&&`, `||`, `;`, `|`, `&`, and a newline),
+ * so each rm invocation is inspected with only its own flags, not flags from a
+ * neighboring command.
+ */
+function splitCommandSegments(command: string): string[] {
+  return command.split(/&&|\|\||[;|&\n]/);
+}
+
+/** Whether one command segment is an `rm` invocation that is recursive and forced. */
+function isRecursiveForcedRmSegment(segment: string): boolean {
+  if (!/\brm\b/.test(segment)) return false;
   // Collect only genuine short-flag clusters (a single leading dash at a word
   // boundary), so the letters of a long flag like `--force` are not read as
   // short flags. Long flags are matched explicitly below.
-  const shortFlags = Array.from(command.matchAll(/(?:^|\s)-([a-zA-Z]+)/g))
+  const shortFlags = Array.from(segment.matchAll(/(?:^|\s)-([a-zA-Z]+)/g))
     .map((match) => match[1])
     .join("");
   // The recursive flag has two spellings, `-r` and `-R`, both equally
   // destructive, so it is matched case-insensitively. The force flag is only
   // lowercase `-f` (rm has no `-F`), so it stays a literal lowercase check.
-  const recursive = /r/i.test(shortFlags) || /--recursive\b/.test(command);
-  const forced = shortFlags.includes("f") || /--force\b/.test(command);
+  const recursive = /r/i.test(shortFlags) || /--recursive\b/.test(segment);
+  const forced = shortFlags.includes("f") || /--force\b/.test(segment);
   return recursive && forced;
 }
 

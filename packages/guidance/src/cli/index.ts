@@ -120,11 +120,15 @@ export function installSkill(options: { dryRun: boolean }): number {
 /**
  * Remove Guidance's bundled skill directory from the harness's skills subdirectory
  * (the inverse of install-skill). Reuses the bundler to locate each target. A
- * missing directory is not an error: uninstall must be idempotent.
+ * missing directory is not an error: uninstall must be idempotent. Best-effort per
+ * skill: a removal that fails (e.g. a permission error) is reported and recorded,
+ * but the loop continues to the remaining skills so a half-installed system can
+ * always be cleaned up; the exit code is nonzero when any removal failed.
  */
 export function uninstallSkill(options: { dryRun: boolean }): number {
   const target = resolveSkillTarget();
   if (target === null) return 1;
+  let failed = 0;
   for (const plan of planSkillInstall({
     home: target.home,
     bundleDir: bundleDir(),
@@ -134,12 +138,19 @@ export function uninstallSkill(options: { dryRun: boolean }): number {
     const skillDir = dirname(plan.targetPath);
     if (options.dryRun) {
       process.stdout.write(`would remove ${skillDir}\n`);
-    } else {
+      continue;
+    }
+    try {
       rmSync(skillDir, { recursive: true, force: true });
       process.stdout.write(`removed ${skillDir}\n`);
+    } catch (err) {
+      failed = 1;
+      process.stderr.write(
+        `failed to remove ${skillDir}: ${(err as Error).message}\n`,
+      );
     }
   }
-  return 0;
+  return failed;
 }
 
 /** The already-parsed options `install` acts on. */

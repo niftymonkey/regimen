@@ -20,7 +20,7 @@
 export function assertSafeClonePath(clonePath: string): void {
   if (/["$`\\]/.test(clonePath)) {
     throw new Error(
-      `clonePath contains a shell-unsafe character (one of " $ \` \\), which is special inside double quotes: ${clonePath}`,
+      `clonePath contains a shell-unsafe character (one of " $ \` \\), which is special inside double quotes: ${JSON.stringify(clonePath)}`,
     );
   }
   for (let i = 0; i < clonePath.length; i++) {

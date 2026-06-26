@@ -224,14 +224,21 @@ function planNestedHooks<Change>(
 
 /**
  * Refuse a structurally malformed Copilot-format file rather than rewriting it: a
- * present-but-non-object `hooks`, or an event whose value is not a flat array. The
- * versioned format has no matcher-group wrapper, so there is no group `hooks`
- * array to validate. The error names the offending path.
+ * top-level `version` that is present but not a number, a present-but-non-object
+ * `hooks`, or an event whose value is not a flat array. The versioned format has
+ * no matcher-group wrapper, so there is no group `hooks` array to validate. A
+ * non-numeric `version` would otherwise be carried forward verbatim into a
+ * malformed output file, so it is refused here too. The error names the offending
+ * path.
  */
 function assertVersionedWellFormed(
   existing: VersionedHooksFile | undefined,
 ): void {
-  if (existing?.hooks === undefined) return;
+  if (existing === undefined) return;
+  if (existing.version !== undefined && typeof existing.version !== "number") {
+    throw new Error("hooks.json: `version` must be a number");
+  }
+  if (existing.hooks === undefined) return;
   const { hooks } = existing;
   if (typeof hooks !== "object" || hooks === null || Array.isArray(hooks)) {
     throw new Error("hooks.json: `hooks` must be an object");

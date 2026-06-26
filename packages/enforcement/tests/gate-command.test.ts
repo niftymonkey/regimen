@@ -48,3 +48,22 @@ test("a shell-unsafe clone path is rejected before it reaches the command string
     buildGateCommand("/tmp/`touch pwned`/repo", SCRIPT, "codex"),
   ).toThrow();
 });
+
+test("a scriptPath with a `..` segment that escapes the clone is rejected", () => {
+  expect(() =>
+    buildGateCommand(CLONE, "../../../etc/passwd", "codex"),
+  ).toThrow();
+  expect(() =>
+    buildGateCommand(CLONE, "tests/../../escape.ts", "codex"),
+  ).toThrow();
+});
+
+test("an absolute scriptPath is rejected so it cannot point outside the clone", () => {
+  expect(() => buildGateCommand(CLONE, "/etc/passwd", "codex")).toThrow();
+});
+
+test("a normal relative scriptPath under the clone is accepted", () => {
+  expect(buildGateCommand(CLONE, SCRIPT, "codex")).toBe(
+    `REGIMEN_HARNESS=codex bun "${CLONE}/${SCRIPT}"`,
+  );
+});

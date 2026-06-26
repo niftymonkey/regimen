@@ -16,13 +16,13 @@ One event is one JSON object, one line of the append-only JSONL buffer. Fields, 
 | `harness`        | Which agent harness fired the event. One of the six normalized identifiers.                                                                 |
 | `model`          | The model that ran this event's turn. Per event, optional. See "Model is a per-event attribute".                                            |
 | `cwd`            | The working directory the session ran in. Transport only, projected to the conversation. See "Working directory is a session-level anchor". |
-| `event_type`     | Normalized, harness-agnostic event name. One of the eight types below.                                                                      |
+| `event_type`     | Normalized, harness-agnostic event name. One of the seven types below.                                                                      |
 | `trace_id`       | OTLP-native trace id, derived from `session_id`. The only id the capture hook assigns.                                                      |
 | `span_phase`     | `start`, `end`, or `point`. The span-boundary marker.                                                                                       |
 | `span_name`      | Human label for the span. Both events of a paired span carry the same name.                                                                 |
 | `attributes`     | Open object of event-specific detail. `tool.pre` and `tool.post` carry `tool_name` and `tool_call_id`.                                      |
 
-### The eight event types
+### The seven event types
 
 | `event_type`    | `span_phase` | What it marks                                                                                                                                                                       |
 | --------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

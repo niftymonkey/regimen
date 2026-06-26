@@ -84,6 +84,35 @@ test("with REGIMEN_HARNESS set, the gate blocks and writes nothing to the buffer
   expect(events).toHaveLength(0);
 });
 
+test("an unrelated command carrying -rf-like flags does not make a bare rm a denial", async () => {
+  // The recursive/forced detection must be scoped to the rm invocation itself.
+  // Here the `-rf` flags belong to an unrelated `tar` call, and the rm targets a
+  // single file with no recursive/forced flags, so nothing should be denied.
+  const dir = mkdtempSync(join(tmpdir(), "regimen-rmrf-gate-"));
+  try {
+    const proc = Bun.spawn(["bun", GATE], {
+      stdin: new TextEncoder().encode(
+        JSON.stringify({
+          hook_event_name: "PreToolUse",
+          session_id: "sess-rmrf-2",
+          tool_name: "Bash",
+          tool_use_id: "toolu_rm02",
+          tool_input: { command: "tar -rf archive.tar notes && rm notes.txt" },
+        }),
+      ),
+      env: { ...process.env, REGIMEN_DATA_DIR: dir, REGIMEN_HARNESS: "codex" },
+      stdout: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    const exit = await proc.exited;
+    expect(exit).toBe(0);
+    // No deny decision: the gate emitted nothing.
+    expect(stdout.trim()).toBe("");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("with REGIMEN_HARNESS unset, the gate still blocks and writes nothing", async () => {
   const { exit, stdout, events } = await runGate({
     REGIMEN_HARNESS: undefined,

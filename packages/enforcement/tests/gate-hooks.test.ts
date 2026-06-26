@@ -214,6 +214,38 @@ test("a re-run that re-supplies no gates preserves the wired gate verbatim", () 
   expect(second.added).toEqual([]);
 });
 
+test("two authored gates with the same basename but distinct ids both wire", () => {
+  // Two distinct gates can share a filename in different directories (the
+  // engineer's own naming). The dedup must distinguish them by identity, not by
+  // basename, so neither is silently dropped.
+  const repoGate: AuthoredGate = {
+    id: "repo-no-secrets",
+    scriptPath: "gates/repo/no-secrets-gate.ts",
+  };
+  const orgGate: AuthoredGate = {
+    id: "org-no-secrets",
+    scriptPath: "gates/org/no-secrets-gate.ts",
+  };
+  const plan = planGateHooks(undefined, {
+    clonePath: CLONE,
+    harness: "codex",
+    gates: [repoGate, orgGate],
+  });
+
+  const ids = leavesOn(plan, "PreToolUse")
+    .filter(isGateLeaf)
+    .map((l) => l._regimen?.id);
+  expect(ids).toEqual(["repo-no-secrets", "org-no-secrets"]);
+  expect(plan.added).toContainEqual({
+    event: "PreToolUse",
+    id: "repo-no-secrets",
+  });
+  expect(plan.added).toContainEqual({
+    event: "PreToolUse",
+    id: "org-no-secrets",
+  });
+});
+
 test("apply is additive: a later run with a different gate keeps the earlier one", () => {
   const first = planGateHooks(undefined, {
     clonePath: CLONE,
@@ -340,7 +372,7 @@ test("a clonePath with a space is quoted as one argument and stays idempotent", 
     `REGIMEN_HARNESS=codex bun "${spaced}/gates/inline-message-gate.ts"`,
   ]);
 
-  // (b) A re-run still recognizes each gate by basename, so nothing double-wires.
+  // (b) A re-run still recognizes each gate by id, so nothing double-wires.
   const second = planGateHooks(first.hooks, {
     clonePath: spaced,
     harness: "codex",
