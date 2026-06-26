@@ -101,10 +101,10 @@ test("the planner resolves a source and harness-home target for every bundled sk
   });
   const byName = new Map(plans.map((p) => [p.name, p]));
   expect([...byName.keys()].sort()).toEqual([
-    "feedback-evidence",
-    "feedback-judgment",
+    "regimen-evidence",
+    "regimen-judgment",
   ]);
-  for (const name of ["feedback-evidence", "feedback-judgment"]) {
+  for (const name of ["regimen-evidence", "regimen-judgment"]) {
     const plan = byName.get(name);
     expect(plan?.sourcePath).toBe(`/repo/skills/${name}/SKILL.md`);
     expect(plan?.targetPath).toBe(
@@ -137,7 +137,7 @@ test("install-skill --dry-run reports both target paths and writes nothing", asy
       CODEX_HOME: codexHome,
     });
     expect(exit).toBe(0);
-    for (const name of ["feedback-evidence", "feedback-judgment"]) {
+    for (const name of ["regimen-evidence", "regimen-judgment"]) {
       const target = join(codexHome, "skills", name, "SKILL.md");
       expect(stdout).toContain(`would write ${target}`);
       expect(existsSync(target)).toBe(false);
@@ -153,18 +153,18 @@ test("install-skill copies both bundled SKILL.md files into CODEX_HOME/skills", 
     });
     expect(exit).toBe(0);
 
-    const evidence = join(codexHome, "skills", "feedback-evidence", "SKILL.md");
+    const evidence = join(codexHome, "skills", "regimen-evidence", "SKILL.md");
     expect(stdout).toContain(`installed ${evidence}`);
     const evidenceContent = readFileSync(evidence, "utf8");
-    expect(evidenceContent).toContain("name: feedback-evidence");
+    expect(evidenceContent).toContain("name: regimen-evidence");
     // The bundled skill names no harness and uses the neutral unified command.
     expect(evidenceContent).toContain("regimen evidence");
     expect(evidenceContent).not.toContain("--harness");
 
-    const judgment = join(codexHome, "skills", "feedback-judgment", "SKILL.md");
+    const judgment = join(codexHome, "skills", "regimen-judgment", "SKILL.md");
     expect(stdout).toContain(`installed ${judgment}`);
     const judgmentContent = readFileSync(judgment, "utf8");
-    expect(judgmentContent).toContain("name: feedback-judgment");
+    expect(judgmentContent).toContain("name: regimen-judgment");
     expect(judgmentContent).toContain("regimen assess");
     expect(judgmentContent).not.toContain("--harness");
   });
@@ -182,9 +182,9 @@ test("install-skill overwrites an existing install (idempotent re-run)", async (
       CODEX_HOME: codexHome,
     });
     expect(second.exit).toBe(0);
-    const evidence = join(codexHome, "skills", "feedback-evidence", "SKILL.md");
-    expect(readFileSync(evidence, "utf8")).toContain("name: feedback-evidence");
-    const judgment = join(codexHome, "skills", "feedback-judgment", "SKILL.md");
-    expect(readFileSync(judgment, "utf8")).toContain("name: feedback-judgment");
+    const evidence = join(codexHome, "skills", "regimen-evidence", "SKILL.md");
+    expect(readFileSync(evidence, "utf8")).toContain("name: regimen-evidence");
+    const judgment = join(codexHome, "skills", "regimen-judgment", "SKILL.md");
+    expect(readFileSync(judgment, "utf8")).toContain("name: regimen-judgment");
   });
 });

@@ -1,6 +1,6 @@
 # Feedback setup
 
-One command stands up the Feedback instrument on a fresh machine: capture into the local store plus the daemon and the judgment layer, and the two bundled in-session skills that read it back (`feedback-evidence` and `feedback-judgment`). The bundle is just this package plus the bundled skills it ships. There is no separate artifact to download.
+One command stands up the Feedback instrument on a fresh machine: capture into the local store plus the daemon and the judgment layer, and the two bundled in-session skills that read it back (`regimen-evidence` and `regimen-judgment`). The bundle is just this package plus the bundled skills it ships. There is no separate artifact to download.
 
 The Enforcement pillar (the discipline gates and the denial emitter) is the sibling [`packages/enforcement`](../enforcement) package, installed from there. Feedback wires only its capture hook; it never wires gates. The two installs coexist in the same `~/.codex/hooks.json`: Feedback preserves enforcement's gate leaves verbatim, and enforcement preserves Feedback's capture leaf, so the order of the two installs does not matter.
 
@@ -14,7 +14,7 @@ This guide targets the trial machine: a Mac where the Codex CLI and the Codex ap
 
 - [Bun](https://bun.sh) installed and on your PATH. The capture hook runs as `bun <script>`, so `bun` must be resolvable in the shell Codex uses to run hooks, not only in your interactive shell.
 - A Codex build with hooks enabled. Confirm with `codex features list` that the hooks feature is on (it is `codex_hooks`, on by default on 0.128.0; newer builds rename it to `hooks`).
-- `ANTHROPIC_API_KEY` exported in your shell, for the `feedback-judgment` skill (it makes a live model call). Capture and evidence work without it; only the judged verdict needs it.
+- `ANTHROPIC_API_KEY` exported in your shell, for the `regimen-judgment` skill (it makes a live model call). Capture and evidence work without it; only the judged verdict needs it.
 - The monorepo cloned to a stable absolute path. The hooks are wired by absolute path; if you move the clone, re-run `feedback wire-hooks` (it re-homes the commands in place).
 
 ## Install
@@ -39,7 +39,7 @@ Feedback is one instrument the orchestrator composes. `feedback install` (run fo
 1. Enables capture (writes the enabled flag, the single capture-and-storage privacy gate).
 2. Installs and loads the loader daemon as a user-level launchd agent (`~/Library/LaunchAgents/dev.niftymonkey.regimen-feedback.plist`), which drains the capture buffer into the local SQLite store. `KeepAlive` is gated on unsuccessful exit, so it restarts on a crash and at login but a deliberate `feedback stop` stays stopped.
 3. Wires the capture hook into `~/.codex/hooks.json` on the five Codex events (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PreCompact). This merge is idempotent and never clobbers your own hooks, nor any enforcement gate leaves the enforcement package's install added (see Idempotency below).
-4. Installs both bundled skills into `~/.codex/skills/`: `feedback-evidence` (the deterministic evidence check) and `feedback-judgment` (its judged twin).
+4. Installs both bundled skills into `~/.codex/skills/`: `regimen-evidence` (the deterministic evidence check) and `regimen-judgment` (its judged twin).
 5. Links the `feedback` CLI onto PATH with `bun link`, so the in-session skills can invoke `feedback ...` in the agent's shell.
 
 The Enforcement pillar (discipline gates such as the `rm-rf` safe floor) is wired by `enforcement install`, which the orchestrator sequences right after `feedback install`; it is the sibling [`packages/enforcement`](../enforcement) package and can also be run on its own. Either way, it wires its gate leaves into the same `~/.codex/hooks.json` without disturbing Feedback's capture hook.
@@ -73,7 +73,7 @@ The install is safe to re-run: it recognizes its own capture-hook entries by a m
    feedback evidence
    ```
 
-   In a live session the agent gets the same digest by invoking the `feedback-evidence` skill, and a judged verdict (Intent, Outcome, evidence-anchored assessment) by invoking `feedback-judgment`, which runs `feedback assess` and makes a live model call. Export `ANTHROPIC_API_KEY` for the judge.
+   In a live session the agent gets the same digest by invoking the `regimen-evidence` skill, and a judged verdict (Intent, Outcome, evidence-anchored assessment) by invoking `regimen-judgment`, which runs `feedback assess` and makes a live model call. Export `ANTHROPIC_API_KEY` for the judge.
 
 Enforcement (the discipline gates) is verified separately, once the enforcement package is installed; its own setup guide covers that step. A gate denies a tool call and stops there; the denial lands in the harness transcript as an `is_error` tool-result, so the judge reads it from the captured conversation at assess time rather than from a self-reported store event (see [ADR-0014](../../docs/adr/0014-enforcement-drops-the-gate-denial-emit-seam.md)).
 

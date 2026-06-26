@@ -1,9 +1,9 @@
 ---
-name: feedback-evidence
+name: regimen-evidence
 description: "Pull deterministic evidence-layer signals about the current conversation from Regimen's Feedback store, so the agent can self-correct mid-task or answer how the session is going. Use mid-task to notice churn, tool thrash, or a stall before continuing, or when the engineer asks how the session is going."
 ---
 
-# feedback-evidence: in-session evidence check
+# regimen-evidence: in-session evidence check
 
 Pull the evidence-layer signals Regimen's Feedback instrument has recorded for the _current_ conversation, and read them back into context. Use this to self-correct mid-task (notice churn, tool thrash, or a stall before continuing), or when the engineer asks how the session is going.
 

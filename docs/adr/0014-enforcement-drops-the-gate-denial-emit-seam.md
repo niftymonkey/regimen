@@ -21,7 +21,7 @@ What the drop forfeits is a deterministic firing count. The `gate.denial` event 
 The drop removes the `gate.denial` producer chain across three packages, while leaving every gate's deny behavior untouched.
 
 - **`packages/enforcement`** deletes `src/denial-store.ts` and `hooks/emit-denial.ts`. Authored and wired gates still inspect the pending tool call and write the deny decision; they no longer spawn an emitter on a hit.
-- **`packages/feedback`** removes the now-dead `gate.denial` producers: the `gate.denial` event type, the `gate_denials` table, the `gateDenials` / `gateDenialCount` fields on the evidence digest, the `gate.denial` branch in the projections, the v1 translator entry for the event, the `denied_by_gate_id` span marker, and the `gateDenials` line in the bundled `feedback-evidence` skill.
+- **`packages/feedback`** removes the now-dead `gate.denial` producers: the `gate.denial` event type, the `gate_denials` table, the `gateDenials` / `gateDenialCount` fields on the evidence digest, the `gate.denial` branch in the projections, the v1 translator entry for the event, the `denied_by_gate_id` span marker, and the `gateDenials` line in the bundled `regimen-evidence` skill.
 - **`packages/otlp-bridge`** drops the `regimen.gate.denials` (and the corresponding `conversation.gate_denials`) metrics.
 
 ## What this ADR does not change: ADR-0005's seam survives

@@ -1,9 +1,9 @@
 ---
-name: guidance-respond
-description: "Help the engineer reach for the single right advisory move from the full breadth of Guidance (a standing-instruction line, a context doc, a memory edit, a skill, a slash command, a subagent, a prompt template, a checklist, an MCP server, a CLI tool, a retrieval source, a routing or output-style or scoping choice) so the model is asked to behave differently. Use right after Feedback surfaces a recurring pattern and the engineer asks what to do about it; if the correction-cost history shows asking has already failed, hand forward to the enforcement-respond helper instead."
+name: regimen-guidance
+description: "Help the engineer reach for the single right advisory move from the full breadth of Guidance (a standing-instruction line, a context doc, a memory edit, a skill, a slash command, a subagent, a prompt template, a checklist, an MCP server, a CLI tool, a retrieval source, a routing or output-style or scoping choice) so the model is asked to behave differently. Use right after Feedback surfaces a recurring pattern and the engineer asks what to do about it; if the correction-cost history shows asking has already failed, hand forward to the regimen-enforcement helper instead."
 ---
 
-# guidance-respond: reach for the advisory move
+# regimen-guidance: reach for the advisory move
 
 Help the engineer respond to a Feedback pattern by asking the model to behave differently. This is the act beat on the Guidance side: a recurring problem has surfaced, and where asking can plausibly work, the move is an advisory artifact the model is asked to honor and could still ignore. You help find, build, or reach for the single right move from the full breadth of Guidance, then point the engineer back to the see beat to confirm it worked.
 
@@ -17,7 +17,7 @@ Restate the surfaced pattern in terms of what recurring behavior must change, an
 
 ### 2. Run the mechanism check first
 
-Confirm the precondition before reaching for any move: can asking plausibly work? Read the correction-cost history (the same Feedback read that surfaced the pattern). If it shows asking has ALREADY been tried and has not stuck (the model kept doing it after being told not to, high correction cost), or the need is inherently "this must never happen" rather than "the agent should prefer," STOP and hand FORWARD to the `enforcement-respond` helper. Authoring a weaker advisory move for a pattern the model has already proven it will ignore is the failure mode this check prevents. Only proceed when asking can plausibly change the behavior.
+Confirm the precondition before reaching for any move: can asking plausibly work? Read the correction-cost history (the same Feedback read that surfaced the pattern). If it shows asking has ALREADY been tried and has not stuck (the model kept doing it after being told not to, high correction cost), or the need is inherently "this must never happen" rather than "the agent should prefer," STOP and hand FORWARD to the `regimen-enforcement` helper. Authoring a weaker advisory move for a pattern the model has already proven it will ignore is the failure mode this check prevents. Only proceed when asking can plausibly change the behavior.
 
 ### 3. Classify the need to a group, then a form
 
@@ -50,7 +50,7 @@ Across all three branches, "Regimen points, does not supply" holds: you locate, 
 
 ### 5. Name the validation path
 
-Close by telling the engineer how to confirm the move earned its keep: re-run the same Feedback read (the see beat, `feedback-evidence` then `feedback-judgment`) after the move has had a chance to act, watching the same intent-plus-outcome and correction cost for the original pattern abating. A move that does not move the pattern is dead weight to revisit. An unvalidated, cost-bearing advisory move that is never revisited is silent dead weight.
+Close by telling the engineer how to confirm the move earned its keep: re-run the same Feedback read (the see beat, `regimen-evidence` then `regimen-judgment`) after the move has had a chance to act, watching the same intent-plus-outcome and correction cost for the original pattern abating. A move that does not move the pattern is dead weight to revisit. An unvalidated, cost-bearing advisory move that is never revisited is silent dead weight.
 
 ## Notes
 

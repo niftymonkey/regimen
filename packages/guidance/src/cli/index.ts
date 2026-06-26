@@ -3,7 +3,7 @@
  * taking a typed, already-parsed options object, the surface the unified
  * `regimen` CLI dispatches to in-process (ADR-0012). Guidance is the thinnest
  * lever: it has no deterministic mechanism to wire, so its whole install job is to
- * lay down the lever's own operator skill, the `guidance-respond` respond-step
+ * lay down the lever's own operator skill, the `regimen-guidance` respond-step
  * helper, exactly as Feedback's install lays down its two skills and Enforcement's
  * lays down its one. There is NO gate wiring, NO emit, and no shipped catalog of
  * moves: an advisory move is the engineer's own, found or authored on demand by the
@@ -90,7 +90,7 @@ function bundleDir(): string {
  * Copy Guidance's bundled operator skill into the harness's skills subdirectory,
  * where the harness discovers it. The shared bundler resolves each skill's source
  * (from Guidance's OWN `bundleDir`) and harness-home target; Guidance passes its
- * own skill list so it bundles only `guidance-respond`, not Feedback's or
+ * own skill list so it bundles only `regimen-guidance`, not Feedback's or
  * Enforcement's. `--dry-run` reports the targets without writing.
  */
 export function installSkill(options: { dryRun: boolean }): number {
@@ -177,7 +177,7 @@ export interface InstallOptions {
 /**
  * `guidance install`: lay down the Guidance lever's operator skill. Guidance has no
  * deterministic mechanism to wire, so this is install's whole job: an advisory move
- * is the engineer's own, found or authored on demand by the `guidance-respond` skill
+ * is the engineer's own, found or authored on demand by the `regimen-guidance` skill
  * this step installs, not a Regimen product wired at install time. Honors
  * `--dry-run`. Runs on every OS (the bundled skill is a plain file).
  */

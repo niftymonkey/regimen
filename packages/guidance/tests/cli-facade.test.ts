@@ -83,7 +83,7 @@ function captureStderr(fn: () => void): string {
   return out;
 }
 
-const SKILL = join("skills", "guidance-respond", "SKILL.md");
+const SKILL = join("skills", "regimen-guidance", "SKILL.md");
 
 test("install lays down the operator skill and wires NO gates", () => {
   withCodexHome((codexHome) => {
@@ -96,12 +96,12 @@ test("install lays down the operator skill and wires NO gates", () => {
   });
 });
 
-test("install installs the guidance-respond skill, not a feedback skill", () => {
+test("install installs the regimen-guidance skill, not a feedback skill", () => {
   withCodexHome((codexHome) => {
     install({ dryRun: false });
     const content = readFileSync(join(codexHome, SKILL), "utf8");
-    expect(content).toContain("name: guidance-respond");
-    expect(existsSync(join(codexHome, "skills", "feedback-evidence"))).toBe(
+    expect(content).toContain("name: regimen-guidance");
+    expect(existsSync(join(codexHome, "skills", "regimen-evidence"))).toBe(
       false,
     );
   });
@@ -114,7 +114,7 @@ test("install --dry-run previews the skill target and writes nothing", () => {
       exit = install({ dryRun: true });
     });
     expect(exit).toBe(0);
-    expect(out).toContain("guidance-respond");
+    expect(out).toContain("regimen-guidance");
     expect(out).toContain("nothing was changed");
     expect(existsSync(join(codexHome, SKILL))).toBe(false);
   });
@@ -126,7 +126,7 @@ test("uninstall removes the operator skill", () => {
     expect(existsSync(join(codexHome, SKILL))).toBe(true);
     const exit = uninstall({ dryRun: false });
     expect(exit).toBe(0);
-    expect(existsSync(join(codexHome, "skills", "guidance-respond"))).toBe(
+    expect(existsSync(join(codexHome, "skills", "regimen-guidance"))).toBe(
       false,
     );
   });

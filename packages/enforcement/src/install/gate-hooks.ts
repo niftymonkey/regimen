@@ -9,7 +9,7 @@
  *
  * This is a LIBRARY function, not an install step: with no shipped gate catalog,
  * `enforcement install` lays down only the operator skill (see the facade). The
- * `enforcement-respond` skill calls this planner at AUTHORING time, when the
+ * `regimen-enforcement` skill calls this planner at AUTHORING time, when the
  * engineer confirms an authored gate, to merge that gate onto the right
  * per-harness pre-tool event. The gate is the engineer's own (`id` plus the body
  * `scriptPath`); the wiring, idempotency, and marker stamping are Regimen's

@@ -105,9 +105,7 @@ test("install with the daemon skipped still wires the capture hooks and installs
   expect(exit).toBe(0);
   expect(existsSync(join(home, ".claude", "settings.json"))).toBe(true);
   expect(
-    existsSync(
-      join(home, ".claude", "skills", "feedback-evidence", "SKILL.md"),
-    ),
+    existsSync(join(home, ".claude", "skills", "regimen-evidence", "SKILL.md")),
   ).toBe(true);
 });
 

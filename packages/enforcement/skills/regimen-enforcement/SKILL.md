@@ -1,9 +1,9 @@
 ---
-name: enforcement-respond
+name: regimen-enforcement
 description: "Help the engineer author and wire the single right deterministic mechanism from the full breadth of Enforcement (a pre-tool gate, a permission rule, a tool disablement, a sandbox, an output schema, a CI check, a pre-commit hook, a substitution) so the model's choice is removed. Use right after a Feedback pattern shows asking has failed and the engineer, or the Guidance respond-helper, decides the honest move is to remove the model's choice; if asking has not yet been tried, hand back to Guidance instead."
 ---
 
-# enforcement-respond: author the deterministic mechanism
+# regimen-enforcement: author the deterministic mechanism
 
 Help the engineer respond to a Feedback pattern by removing the model's choice. This is the act beat on the Enforcement side: a recurring problem has surfaced, asking has already failed (the model kept doing it after being told not to, high correction cost), and the honest move is a deterministic mechanism the model cannot choose its way past. You help author and wire the single right mechanism from the full breadth of Enforcement, then point the engineer back to the see beat to confirm it worked.
 
@@ -39,7 +39,7 @@ Then branch on the mechanism. v1 AUTHORS AND WIRES the pre-tool gates (a deny or
 
 ### 5. Name the validation path
 
-Close by telling the engineer how to confirm the mechanism earned its keep: re-run the same Feedback read (the see beat, `feedback-evidence` then `feedback-judgment`) after the mechanism has had a chance to fire, watching for the original pattern abating in the intent-plus-outcome read. A mechanism that the pattern keeps slipping past is mis-targeted or mis-wired; a pattern that abates is the mechanism working. There is no deterministic firing count to watch (no emit); the abating pattern in the conversation the judge reads is the signal. An unvalidated, cost-bearing mechanism that is never revisited is silent dead weight.
+Close by telling the engineer how to confirm the mechanism earned its keep: re-run the same Feedback read (the see beat, `regimen-evidence` then `regimen-judgment`) after the mechanism has had a chance to fire, watching for the original pattern abating in the intent-plus-outcome read. A mechanism that the pattern keeps slipping past is mis-targeted or mis-wired; a pattern that abates is the mechanism working. There is no deterministic firing count to watch (no emit); the abating pattern in the conversation the judge reads is the signal. An unvalidated, cost-bearing mechanism that is never revisited is silent dead weight.
 
 ## Notes
 

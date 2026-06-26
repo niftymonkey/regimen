@@ -3,7 +3,7 @@
  * A WIRING TEST FIXTURE and documentation exemplar: the shape an authored
  * discipline gate takes, harness-agnostic by construction. Enforcement ships NO
  * gate catalog; the engineer's own gate is authored on demand by the
- * `enforcement-respond` skill. This file exists ONLY so the gate-wiring tests
+ * `regimen-enforcement` skill. This file exists ONLY so the gate-wiring tests
  * have a real body to merge onto a harness's pre-tool event, and so a reader can
  * see what an authored `bun` gate looks like. It is not installed as product.
  *

@@ -293,17 +293,15 @@ test("install --dry-run previews a capture-only wiring with zero gate leaves and
   // No gates: Feedback no longer wires enforcement.
   expect(stdout).not.toContain("gate");
   // Guidance: both bundled skills.
-  expect(stdout).toContain("feedback-evidence/SKILL.md");
-  expect(stdout).toContain("feedback-judgment/SKILL.md");
+  expect(stdout).toContain("regimen-evidence/SKILL.md");
+  expect(stdout).toContain("regimen-judgment/SKILL.md");
   // CLI on PATH.
   expect(stdout).toContain("would run: bun link");
   expect(stdout).toContain("nothing was changed");
 
   // No side effects.
   expect(existsSync(hooksPath())).toBe(false);
-  expect(existsSync(join(codexHome, "skills", "feedback-evidence"))).toBe(
-    false,
-  );
+  expect(existsSync(join(codexHome, "skills", "regimen-evidence"))).toBe(false);
 });
 
 test("uninstall --dry-run previews teardown and writes nothing", async () => {
@@ -333,6 +331,6 @@ test("uninstall is best effort: a failing early step does not skip later teardow
   // But the later steps still ran (skill + daemon teardown previews present),
   // which a short-circuiting `||=` would have skipped.
   expect(stdout).toContain("would remove");
-  expect(stdout).toContain("feedback-evidence");
+  expect(stdout).toContain("regimen-evidence");
   expect(stdout).toContain("would run: bun unlink");
 });

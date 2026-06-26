@@ -1,11 +1,11 @@
 ---
-name: feedback-judgment
+name: regimen-judgment
 description: "Pull a judged verdict on the current conversation from Regimen's Feedback store, the Intent, the Outcome, and an evidence-anchored assessment, for mid-session 'did this serve me so far?' checkpoints. Use at a meaningful checkpoint, a phase boundary, before a risky step, or when the engineer asks; it makes a live model call, so it is not free."
 ---
 
-# feedback-judgment: in-session judged verdict
+# regimen-judgment: in-session judged verdict
 
-Pull a judged verdict for the _current_ conversation and read it back into context. This is the judged twin of `feedback-evidence`. Where evidence hands you deterministic facts and leaves the interpreting to you, judgment hands you the judge's interpretation already formed: an Intent, an Outcome, and an evidence-anchored assessment of how the conversation has gone so far.
+Pull a judged verdict for the _current_ conversation and read it back into context. This is the judged twin of `regimen-evidence`. Where evidence hands you deterministic facts and leaves the interpreting to you, judgment hands you the judge's interpretation already formed: an Intent, an Outcome, and an evidence-anchored assessment of how the conversation has gone so far.
 
 **This is heavier than evidence. Use it deliberately.** `regimen assess` makes a LIVE model call: it costs money and takes a few seconds, where `regimen evidence` is free and instant. It also writes the verdict to the store. Invoke it at a MEANINGFUL checkpoint, a phase boundary, before a risky step, or when the engineer asks "is this going well?", not reflexively and not on every turn.
 

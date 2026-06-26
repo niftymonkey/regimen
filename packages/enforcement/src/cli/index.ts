@@ -4,13 +4,13 @@
  * `regimen` CLI dispatches to in-process (ADR-0012). With no shipped gate
  * catalog (author-on-demand, ADR-0012 plus the enforcement re-eval), the
  * lifecycle commands are `install`/`uninstall`, and their job is to lay down the
- * Enforcement lever's own operator skill, the `enforcement-respond` respond-step
+ * Enforcement lever's own operator skill, the `regimen-enforcement` respond-step
  * helper, exactly as Feedback's install lays down its two skills. They wire NO
  * gates: a gate is the engineer's own rule, authored on demand by the skill, not
  * a Regimen product.
  *
  * The authored-gate wiring path survives as a LIBRARY function, `wireAuthoredGate`,
- * the `enforcement-respond` skill calls at AUTHORING time (when the engineer
+ * the `regimen-enforcement` skill calls at AUTHORING time (when the engineer
  * confirms a gate), never at install time. It resolves the harness and its hooks
  * file, merges the authored gate onto the right per-harness pre-tool event through
  * the shared engine (`planGateHooks`), and writes, idempotently and without
@@ -198,7 +198,7 @@ export interface WireAuthoredGateOptions {
 
 /**
  * Wire one AUTHORED gate onto the harness's pre-tool boundary. This is the
- * library function the `enforcement-respond` skill calls at authoring time, when
+ * library function the `regimen-enforcement` skill calls at authoring time, when
  * the engineer confirms a gate it drafted; it is NOT an install step. It resolves
  * the harness and hooks file, merges the gate idempotently through the shared
  * engine (without clobbering the user's own hooks or Feedback's capture leaf), and
@@ -298,7 +298,7 @@ export function unwireAuthoredGates(
  * Copy Enforcement's bundled operator skill into the harness's skills
  * subdirectory, where the harness discovers it. The shared bundler resolves each
  * skill's source (from Enforcement's OWN `bundleDir`) and harness-home target;
- * Enforcement passes its own skill list so it bundles only `enforcement-respond`,
+ * Enforcement passes its own skill list so it bundles only `regimen-enforcement`,
  * not Feedback's. `--dry-run` reports the targets without writing.
  */
 export function installSkill(options: { dryRun: boolean }): number {
@@ -359,7 +359,7 @@ export interface InstallOptions {
 /**
  * `enforcement install`: lay down the Enforcement lever's operator skill. With no
  * shipped gate catalog, this is install's whole job: a gate is the engineer's own
- * rule, authored on demand by the `enforcement-respond` skill this step installs,
+ * rule, authored on demand by the `regimen-enforcement` skill this step installs,
  * not a Regimen product wired at install time. Honors `--dry-run`. Runs on every
  * OS (the bundled skill is a plain file; there is no shell gate to skip on
  * Windows).

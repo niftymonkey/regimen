@@ -48,7 +48,7 @@ Installing Regimen is one clone and one command. Regimen brings the observabilit
 ### Prerequisites (only if missing)
 
 - Bun: `curl -fsSL https://bun.sh/install | bash`
-- `ANTHROPIC_API_KEY` exported, for the `feedback-judgment` skill
+- `ANTHROPIC_API_KEY` exported, for the `regimen-judgment` skill
 
 Everything Regimen captures stays in a local store on your machine. The key above is only for the judgment step's LLM call, to your own model provider, never to Regimen.
 

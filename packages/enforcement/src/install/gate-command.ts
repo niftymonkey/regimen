@@ -2,7 +2,7 @@
  * The one surviving piece of the old gate-command catalog: the command-BUILDING
  * helper that turns an authored gate body into the shell command string a harness
  * hooks file runs. Enforcement ships NO catalog of fixed gate ids; the engineer's
- * own gate is authored on demand by the `enforcement-respond` skill, and this
+ * own gate is authored on demand by the `regimen-enforcement` skill, and this
  * helper is what wires the authored body onto the harness's pre-tool boundary.
  *
  * The command carries `REGIMEN_HARNESS=<harness>` so the running gate reads the

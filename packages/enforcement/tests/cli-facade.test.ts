@@ -4,7 +4,7 @@
  * (ADR-0012). With no shipped gate catalog (author-on-demand), `install`/
  * `uninstall` lay down and remove the lever's operator skill; the authored-gate
  * wiring path survives as the library functions `wireAuthoredGate`/
- * `unwireAuthoredGates` the `enforcement-respond` skill calls at authoring time.
+ * `unwireAuthoredGates` the `regimen-enforcement` skill calls at authoring time.
  * The harness and config home travel in the environment (REGIMEN_HARNESS and the
  * contract's config-home env var), so each test sets a temp config home and
  * scrubs ambient markers before calling.
@@ -91,7 +91,7 @@ function gateIds(codexHome: string): Array<string | undefined> {
     .map((l) => l._regimen?.id);
 }
 
-const SKILL = join("skills", "enforcement-respond", "SKILL.md");
+const SKILL = join("skills", "regimen-enforcement", "SKILL.md");
 
 test("install lays down the operator skill and wires NO gates", () => {
   withCodexHome((codexHome) => {
@@ -104,12 +104,12 @@ test("install lays down the operator skill and wires NO gates", () => {
   });
 });
 
-test("install installs the enforcement-respond skill, not a feedback skill", () => {
+test("install installs the regimen-enforcement skill, not a feedback skill", () => {
   withCodexHome((codexHome) => {
     install({ dryRun: false });
     const content = readFileSync(join(codexHome, SKILL), "utf8");
-    expect(content).toContain("name: enforcement-respond");
-    expect(existsSync(join(codexHome, "skills", "feedback-evidence"))).toBe(
+    expect(content).toContain("name: regimen-enforcement");
+    expect(existsSync(join(codexHome, "skills", "regimen-evidence"))).toBe(
       false,
     );
   });
@@ -122,7 +122,7 @@ test("install --dry-run previews the skill target and writes nothing", () => {
       exit = install({ dryRun: true });
     });
     expect(exit).toBe(0);
-    expect(out).toContain("enforcement-respond");
+    expect(out).toContain("regimen-enforcement");
     expect(out).toContain("nothing was changed");
     expect(existsSync(join(codexHome, SKILL))).toBe(false);
   });
@@ -134,7 +134,7 @@ test("uninstall removes the operator skill", () => {
     expect(existsSync(join(codexHome, SKILL))).toBe(true);
     const exit = uninstall({ dryRun: false });
     expect(exit).toBe(0);
-    expect(existsSync(join(codexHome, "skills", "enforcement-respond"))).toBe(
+    expect(existsSync(join(codexHome, "skills", "regimen-enforcement"))).toBe(
       false,
     );
   });
