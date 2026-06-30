@@ -349,6 +349,16 @@ function stubSetupSource(): SetupSource {
   };
 }
 
+/**
+ * A no-op setup source: resolve always returns undefined, so the judge stays
+ * setup-blind exactly as it was before setup wiring. Injected into every sweep
+ * call that does NOT assert setup behavior, so those cases never reach the live
+ * adapter default, which would otherwise read the developer's real home
+ * (CLAUDE.md / skills), making the test non-hermetic. The canned mock judge
+ * ignores prompt content, so the verdict assertions are unchanged.
+ */
+const NOOP_SETUP_SOURCE: SetupSource = { resolve: () => undefined };
+
 function captureStdout(): { read: () => string } {
   let out = "";
   process.stdout.write = ((chunk: string | Uint8Array): boolean => {
@@ -400,6 +410,7 @@ test("assessAll judges an unjudged conversation by its own harness and persists 
       filter: {},
       force: false,
       batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
       decideNextBatch: ALWAYS_CONTINUE,
     });
     expect(exit).toBe(0);
@@ -437,6 +448,7 @@ test("assessAll prints the opening accounting and judges only the unjudged conve
       filter: {},
       force: false,
       batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
       decideNextBatch: ALWAYS_CONTINUE,
     });
     expect(exit).toBe(0);
@@ -479,6 +491,7 @@ test("assessAll continues past a missing transcript and reports it in the end su
       filter: {},
       force: false,
       batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
       decideNextBatch: ALWAYS_CONTINUE,
     });
     expect(exit).toBe(0);
@@ -520,6 +533,7 @@ test("assessAll prints a per-conversation progress line carrying the outcome", a
       filter: {},
       force: false,
       batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
       decideNextBatch: ALWAYS_CONTINUE,
     });
     const out = stdout.read();
@@ -553,6 +567,7 @@ test("assessAll with no judge backend exits 1 with a clear error and no rejectio
     filter: {},
     force: false,
     batchSize: 10,
+    setupSource: NOOP_SETUP_SOURCE,
     decideNextBatch: ALWAYS_CONTINUE,
   });
   expect(exit).toBe(1);
@@ -584,6 +599,7 @@ test("assessAll with force re-judges an already-judged conversation", async () =
       filter: {},
       force: true,
       batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
       decideNextBatch: ALWAYS_CONTINUE,
     });
     expect(exit).toBe(0);
@@ -672,6 +688,7 @@ test("assessAll judges each conversation through its OWN harness in a mixed swee
       filter: {},
       force: false,
       batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
       decideNextBatch: ALWAYS_CONTINUE,
     });
     expect(exit).toBe(0);
@@ -712,6 +729,7 @@ test("assessAll quits between batches and reports the remainder as skipped", asy
       filter: {},
       force: false,
       batchSize: 1,
+      setupSource: NOOP_SETUP_SOURCE,
       decideNextBatch: quit,
     });
     expect(exit).toBe(0);
