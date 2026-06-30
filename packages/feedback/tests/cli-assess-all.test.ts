@@ -24,6 +24,7 @@ import { assessAll } from "../src/cli/index.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
 const OTHER = "019e8c20-4491-7ea3-b809-000000000002";
+const CLAUDE_SESSION = "08551ace-1f3c-40b2-a088-ef00ce37027f";
 
 const HARNESS_MARKERS = [
   "REGIMEN_HARNESS",
@@ -36,6 +37,7 @@ const HARNESS_MARKERS = [
 const MANAGED_ENV = [
   ...HARNESS_MARKERS,
   "CODEX_HOME",
+  "CLAUDE_CONFIG_DIR",
   "REGIMEN_DATA_DIR",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
@@ -123,23 +125,78 @@ function seedRollout(codexHome: string, sessionId: string): void {
   );
 }
 
-/** Insert a conversations row so the sweep's selection finds the session. */
+/**
+ * Insert a conversations row so the sweep's selection finds the session. The
+ * harness and model default to codex/gpt-5 so the existing codex callers stay
+ * unchanged; a mixed-harness test passes `harness` to seed a non-codex row whose
+ * verdict must resolve through that harness's own adapter path.
+ */
 function seedConversation(
   dbPath: string,
-  opts: { sessionId: string; lastEventAt: string },
+  opts: {
+    sessionId: string;
+    lastEventAt: string;
+    harness?: string;
+    model?: string;
+  },
 ): void {
+  const harness = opts.harness ?? "codex";
+  const model = opts.model ?? "gpt-5";
   const store = openStore(dbPath);
   try {
     store.db
       .prepare(
         `INSERT INTO conversations
            (session_id, harness, model, first_event_at, last_event_at)
-         VALUES (?, 'codex', 'gpt-5', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(opts.sessionId, opts.lastEventAt, opts.lastEventAt);
+      .run(opts.sessionId, harness, model, opts.lastEventAt, opts.lastEventAt);
   } finally {
     store.close();
   }
+}
+
+/** A small but real-shape Claude transcript: a prompt and an assistant answer. */
+function claudeTranscriptFor(sessionId: string): string {
+  return [
+    line({
+      type: "user",
+      cwd: "/work/p",
+      message: { role: "user", content: "add a test for the parser" },
+      sessionId,
+      timestamp: "2026-06-15T10:00:01.000Z",
+      uuid: "u-1",
+    }),
+    line({
+      type: "assistant",
+      cwd: "/work/p",
+      message: {
+        id: "msg_1",
+        role: "assistant",
+        model: "claude-opus-4-8",
+        content: [{ type: "text", text: "Done, the parser test passes." }],
+      },
+      sessionId,
+      timestamp: "2026-06-15T10:00:02.000Z",
+      uuid: "u-2",
+    }),
+  ].join("\n");
+}
+
+/**
+ * Seed `sessionId`'s Claude transcript under CLAUDE_CONFIG_DIR. Claude Code
+ * writes one transcript per session at `<configHome>/projects/<cwd-slug>/<id>.jsonl`;
+ * the slug is arbitrary because `locateClaudeTranscript` matches on the base name
+ * (`<id>.jsonl`), so the claude conversation is found only when the sweep resolves
+ * the claude config home, not the codex one.
+ */
+function seedClaudeTranscript(configHome: string, sessionId: string): void {
+  const dir = join(configHome, "projects", "-work-p");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${sessionId}.jsonl`),
+    claudeTranscriptFor(sessionId),
+  );
 }
 
 /** Mark `sessionId` already judged by persisting a complete assessment. */
@@ -469,6 +526,58 @@ test("assessAll with force re-judges an already-judged conversation", async () =
     expect(stdout.read()).toContain("to judge 1");
     // Already-judged, but force sent it back to the judge.
     expect(mock.count()).toBe(1);
+  } finally {
+    mock.stop();
+  }
+});
+
+test("assessAll judges each conversation through its OWN harness in a mixed sweep", async () => {
+  // Two conversations resolving through DIFFERENT adapter paths: a codex rollout
+  // under CODEX_HOME/sessions and a claude transcript under CLAUDE_CONFIG_DIR/projects.
+  // assessAll resolves the harness location PER conversation, so both are found
+  // and judged. A regression that resolved the location once for the whole sweep
+  // would point both lookups at one harness home: the off-harness transcript
+  // would not be found there, that conversation would FAIL, and the matching
+  // isJudged assertion below would go false.
+  const dataDir = tempDir("regimen-sweep-cli-");
+  const codexHome = tempDir("regimen-sweep-home-");
+  const claudeHome = tempDir("regimen-sweep-claude-");
+  const dbPath = join(dataDir, "feedback.db");
+  // The codex conversation is the newest, so a once-per-sweep resolution would
+  // bind the codex home first and then fail to find the claude transcript there.
+  seedConversation(dbPath, {
+    sessionId: SESSION,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  seedRollout(codexHome, SESSION);
+  seedConversation(dbPath, {
+    sessionId: CLAUDE_SESSION,
+    lastEventAt: "2026-06-15T09:30:00.000Z",
+    harness: "claude",
+    model: "claude-opus-4-8",
+  });
+  seedClaudeTranscript(claudeHome, CLAUDE_SESSION);
+  const mock = startMockAnthropic();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  process.env.CODEX_HOME = codexHome;
+  process.env.CLAUDE_CONFIG_DIR = claudeHome;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  captureStdout();
+  try {
+    const exit = await assessAll({
+      dataDir,
+      filter: {},
+      force: false,
+      batchSize: 10,
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    expect(exit).toBe(0);
+    // Both reached the judge and both persisted a verdict, each via its own
+    // harness adapter (codex rollout reader and claude transcript reader).
+    expect(mock.count()).toBe(2);
+    expect(isJudged(dbPath, SESSION)).toBe(true);
+    expect(isJudged(dbPath, CLAUDE_SESSION)).toBe(true);
   } finally {
     mock.stop();
   }

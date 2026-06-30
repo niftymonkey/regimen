@@ -2,9 +2,11 @@
  * The `regimen assess --all` DISPATCH: argv routes to the bulk sweep facade
  * rather than the single-session judge. Driven in-process through runCli against
  * a temp data dir with an empty store, so no real conversation is judged and the
- * host store is never touched. The judge backend is pinned to a LOCAL mock so
- * resolving it succeeds; with zero conversations it is never actually called.
- * The interactive between-batch prompt is not reached (nothing to judge).
+ * host store is never touched. No judge backend is configured: the key is deleted
+ * and `--judge-via api` forces the HTTP backend, so resolving a judge would
+ * throw. The empty-store sweep must still succeed, which proves it short-circuits
+ * on toJudge === 0 BEFORE backend resolution rather than relying on a configured
+ * judge. The interactive between-batch prompt is not reached (nothing to judge).
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -46,45 +48,23 @@ function tempDataDir(): string {
   return dir;
 }
 
-function startMockAnthropic(): { baseUrl: string; stop: () => void } {
-  const server = Bun.serve({
-    port: 0,
-    fetch() {
-      return Response.json({
-        id: "msg_1",
-        type: "message",
-        role: "assistant",
-        model: "claude-opus-4-8",
-        content: [{ type: "text", text: "{}" }],
-        stop_reason: "end_turn",
-      });
-    },
-  });
-  return {
-    baseUrl: `http://localhost:${server.port}`,
-    stop: () => server.stop(true),
-  };
-}
-
 test("regimen assess --all routes to the bulk sweep and reports an empty store", async () => {
   const dataDir = tempDataDir();
-  const mock = startMockAnthropic();
   process.env.REGIMEN_DATA_DIR = dataDir;
-  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  // No judge backend: deleting the key and forcing --judge-via api means
+  // resolving one would throw, so a passing empty-store sweep proves the
+  // toJudge === 0 short-circuit returns before any backend resolution.
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_BASE_URL;
   let stdout = "";
   process.stdout.write = ((chunk: string | Uint8Array): boolean => {
     stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stdout.write;
-  try {
-    const exit = await runCli(["assess", "--all"]);
-    expect(exit).toBe(0);
-    // The sweep accounting, not the single-session judge (which would fail to
-    // resolve a current session against an empty store).
-    expect(stdout).toContain("matched 0");
-    expect(stdout).toContain("to judge 0");
-  } finally {
-    mock.stop();
-  }
+  const exit = await runCli(["assess", "--all", "--judge-via", "api"]);
+  expect(exit).toBe(0);
+  // The sweep accounting, not the single-session judge (which would fail to
+  // resolve a current session against an empty store).
+  expect(stdout).toContain("matched 0");
+  expect(stdout).toContain("to judge 0");
 });

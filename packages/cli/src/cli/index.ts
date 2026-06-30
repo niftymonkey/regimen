@@ -543,7 +543,7 @@ export function keyToDecision(key: string): BatchDecision | undefined {
  * backgrounded sweep cannot run up an unbounded bill; re-run to judge more, since
  * already-judged conversations are skipped.
  */
-function promptNextBatch(): Promise<BatchDecision> {
+export function promptNextBatch(): Promise<BatchDecision> {
   const stdin = process.stdin;
   if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
     process.stdout.write(

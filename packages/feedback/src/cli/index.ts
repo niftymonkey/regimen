@@ -519,8 +519,14 @@ function resolveHarnessLocation(
     throw new Error(`unsupported harness: ${harness}`);
   }
   const envVar = support.descriptor.contract.configHome.envVar;
-  const home = env.HOME ?? env.USERPROFILE;
-  if (home === undefined && env[envVar] === undefined) {
+  // Treat an empty HOME, USERPROFILE, or config-home override as unset so the
+  // resolver fails closed instead of resolving a relative directory.
+  const override = env[envVar];
+  const home = [env.HOME, env.USERPROFILE].find(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  const hasOverride = typeof override === "string" && override.length > 0;
+  if (home === undefined && !hasOverride) {
     throw new Error("HOME (or USERPROFILE on Windows) is not set");
   }
   const harnessHome = resolveHarnessHome(
@@ -650,15 +656,26 @@ export async function assessAll(options: {
 }): Promise<number> {
   const store = openStore(join(options.dataDir, "feedback.db"));
   try {
-    const matched = listSessions(store.db, options.filter).length;
+    // Freeze the clock once so relative since/until filters resolve to the same
+    // instant for the opening counts and the sweep selection; separate Date.now()
+    // calls could otherwise disagree across a relative boundary.
+    const sweepNow = Date.now();
+    const now = (): number => sweepNow;
+    const matched = listSessions(store.db, options.filter, now).length;
     // already-judged is the complement of the unjudged (force:false) selection,
     // so the count stays accurate even when --force grows toJudge to everything.
-    const unjudged = selectSessionsToJudge(store.db, options.filter, {
-      force: false,
-    }).length;
-    const toJudge = selectSessionsToJudge(store.db, options.filter, {
-      force: options.force,
-    }).length;
+    const unjudged = selectSessionsToJudge(
+      store.db,
+      options.filter,
+      { force: false },
+      now,
+    ).length;
+    const toJudge = selectSessionsToJudge(
+      store.db,
+      options.filter,
+      { force: options.force },
+      now,
+    ).length;
     process.stdout.write(
       `sweep: matched ${matched}, already judged ${matched - unjudged}, to judge ${toJudge}\n`,
     );
@@ -717,6 +734,7 @@ export async function assessAll(options: {
       batchSize: options.batchSize,
       judge,
       decideNextBatch: options.decideNextBatch,
+      now,
     });
     process.stdout.write(
       `done: judged ${summary.judged.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
