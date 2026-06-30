@@ -12,6 +12,6 @@ test("RUBRIC_VERSION is the per-label-criteria date-stamped value", () => {
   expect(RUBRIC_VERSION).toBe("2026-06-29");
 });
 
-test("PROMPT_VERSION is the v1 date-stamped value", () => {
-  expect(PROMPT_VERSION).toBe("2026-06-15");
+test("PROMPT_VERSION is the setup-injection date-stamped value", () => {
+  expect(PROMPT_VERSION).toBe("2026-06-29");
 });

@@ -7,6 +7,7 @@
 import { expect, test } from "bun:test";
 import type { ContentChunk } from "../src/loader/reader-types.ts";
 import { buildJudgePrompt } from "../src/judged/prompt.ts";
+import type { EngineerSetup } from "../src/judged/setup.ts";
 
 const CHUNKS: ContentChunk[] = [
   {
@@ -22,6 +23,15 @@ const CHUNKS: ContentChunk[] = [
     lineSeq: 1,
   },
 ];
+
+const SETUP: EngineerSetup = {
+  conventions: [
+    { scope: "project", text: "Harness- and model-agnostic by default." },
+  ],
+  practices: [
+    { name: "tdd", summary: "red-green-refactor before writing code" },
+  ],
+};
 
 test("the SYSTEM rubric names each Outcome label", () => {
   const { system } = buildJudgePrompt(CHUNKS);
@@ -67,4 +77,36 @@ test("the engagement signal is framed as orthogonal to the Outcome", () => {
 test("engagement carries the never-a-work-session criterion for not-engaged", () => {
   const { system } = buildJudgePrompt(CHUNKS);
   expect(system).toContain("never really became a work session");
+});
+
+test("injects a supplied convention's text and a practice's name when setup is present", () => {
+  const prompt = buildJudgePrompt(CHUNKS, SETUP);
+  const full = `${prompt.system}\n${prompt.user}`;
+  expect(full).toContain("Harness- and model-agnostic by default.");
+  expect(full).toContain("tdd");
+});
+
+test("the SYSTEM rubric gains the adherence instruction only when setup is present", () => {
+  expect(buildJudgePrompt(CHUNKS, SETUP).system).toContain(
+    "Expected-behaviors adherence",
+  );
+  expect(buildJudgePrompt(CHUNKS).system).not.toContain(
+    "Expected-behaviors adherence",
+  );
+});
+
+const EXPECTED_SETUP_BLIND_USER = [
+  "Here is the conversation, one chunk per block, labeled with its citable id:",
+  "",
+  "[0] (human_prompt)\nadd a test for the parser",
+  "[1] (assistant_answer)\nDone, the parser test passes.",
+].join("\n");
+
+test("reproduces the setup-blind prompt byte-for-byte when setup is omitted", () => {
+  const blind = buildJudgePrompt(CHUNKS);
+  expect(blind.user).toBe(EXPECTED_SETUP_BLIND_USER);
+  expect(blind.user).not.toContain(
+    "Expected behaviors (the engineer's own setup)",
+  );
+  expect(blind.system).not.toContain("Expected-behaviors adherence");
 });

@@ -11,4 +11,4 @@
 export const RUBRIC_VERSION = "2026-06-29";
 
 /** The prompt template's version stamp (the same date-stamped scheme). */
-export const PROMPT_VERSION = "2026-06-15";
+export const PROMPT_VERSION = "2026-06-29";

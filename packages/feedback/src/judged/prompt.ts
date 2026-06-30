@@ -12,6 +12,7 @@
  * grades software quality (ADR-0003, ADR-0008, feedback-surfacing.md).
  */
 import type { ContentChunk } from "../loader/reader-types.ts";
+import type { EngineerSetup } from "./setup.ts";
 
 export interface JudgePrompt {
   readonly system: string;
@@ -54,6 +55,51 @@ Anchors: each "anchors" array cites the chunk ids (the numbers in [brackets] bel
 
 Return only the JSON object, no prose around it.`;
 
+/** The closing instruction of {@link SYSTEM}; the adherence line is inserted before it. */
+const SYSTEM_CLOSER = "\n\nReturn only the JSON object, no prose around it.";
+
+/**
+ * Added to the SYSTEM rubric only when the engineer's expected behaviors are
+ * supplied: it tells the judge to weigh whether the stated conventions and
+ * established practices were honored, and to use that as the factor separating
+ * accomplished-cleanly from accomplished-with-correction.
+ */
+const ADHERENCE_INSTRUCTION = `Expected-behaviors adherence: the engineer's own expected behaviors are listed at the top of the conversation block below. Weigh whether the stated conventions and established practices were honored. Reflect this in the assessment prose, and treat it as a factor separating accomplished-cleanly (conventions and practices followed unprompted) from accomplished-with-correction (conventions met only after the engineer steered).`;
+
+/**
+ * Assemble the system rubric. With no setup it is the setup-blind baseline
+ * verbatim; with setup it gains the single adherence instruction, inserted
+ * before the closing line so the instruction is never baked into the baseline.
+ */
+function buildSystem(setup: EngineerSetup | undefined): string {
+  if (setup === undefined) return SYSTEM;
+  return SYSTEM.replace(
+    SYSTEM_CLOSER,
+    `\n\n${ADHERENCE_INSTRUCTION}${SYSTEM_CLOSER}`,
+  );
+}
+
+/**
+ * Render the engineer's setup as a clearly delimited expected-behaviors block,
+ * or nothing when no setup is supplied so the prompt stays the setup-blind
+ * baseline. The conventions are tagged by scope and the practice roster is named
+ * with its one-line summary; the judge weighs whether they were honored.
+ */
+function renderSetup(setup: EngineerSetup | undefined): string[] {
+  if (setup === undefined) return [];
+  const lines = [
+    "Expected behaviors (the engineer's own setup). Weigh whether these were honored:",
+  ];
+  for (const convention of setup.conventions) {
+    lines.push(`- convention (${convention.scope}): ${convention.text}`);
+  }
+  for (const practice of setup.practices) {
+    lines.push(`- practice ${practice.name}: ${practice.summary}`);
+  }
+  lines.push("");
+  return lines;
+}
+
 /** Render one chunk as a citable, labeled block. */
 function renderChunk(chunk: ContentChunk): string {
   return `[${chunk.lineSeq}] (${chunk.kind})\n${chunk.text}`;
@@ -65,11 +111,13 @@ function renderChunk(chunk: ContentChunk): string {
  */
 export function buildJudgePrompt(
   chunks: ReadonlyArray<ContentChunk>,
+  setup?: EngineerSetup,
 ): JudgePrompt {
   const user = [
+    ...renderSetup(setup),
     "Here is the conversation, one chunk per block, labeled with its citable id:",
     "",
     ...chunks.map(renderChunk),
   ].join("\n");
-  return { system: SYSTEM, user };
+  return { system: buildSystem(setup), user };
 }
