@@ -13,6 +13,7 @@ import type { AnchorRef, ContentChunk } from "../loader/reader-types.ts";
 import type { JudgeModelPort } from "./port.ts";
 import { resolveDefaultJudgeModel } from "./anthropic-adapter.ts";
 import { buildJudgePrompt } from "./prompt.ts";
+import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
   IntentValue,
   JudgedNarrative,
@@ -34,9 +35,6 @@ export interface JudgeConfig {
   readonly now?: () => Date;
 }
 
-/** The date-stamped defaults for v1 (spec section 9.3). */
-const DEFAULT_RUBRIC_VERSION = "2026-06-15";
-const DEFAULT_PROMPT_VERSION = "2026-06-15";
 const DEFAULT_RETRY_BUDGET = 2;
 
 /** The closed Intent vocabulary (ADR-0008). `other` is the escape. */
@@ -84,8 +82,8 @@ export async function judgeConversation(
   // production default adapter over the engineer's configured Claude is
   // resolved from the environment; tests inject a deterministic stub.
   const llm = config.llm ?? resolveDefaultJudgeModel();
-  const rubricVersion = config.rubricVersion ?? DEFAULT_RUBRIC_VERSION;
-  const promptVersion = config.promptVersion ?? DEFAULT_PROMPT_VERSION;
+  const rubricVersion = config.rubricVersion ?? RUBRIC_VERSION;
+  const promptVersion = config.promptVersion ?? PROMPT_VERSION;
   const retryBudget = config.retryBudget ?? DEFAULT_RETRY_BUDGET;
 
   const prompt = buildJudgePrompt(input.chunks);

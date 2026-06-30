@@ -21,13 +21,10 @@ import { readJudgmentDigest, type JudgmentDigest } from "./digest.ts";
 import { judgeConversation } from "./judge.ts";
 import type { JudgeModelPort } from "./port.ts";
 import type { JudgeResult } from "./types.ts";
+import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import { writeAssessment } from "./writer.ts";
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
-
-/** The date-stamped provenance v1 stamps on an evidence-starved run. */
-const DEFAULT_RUBRIC_VERSION = "2026-06-15";
-const DEFAULT_PROMPT_VERSION = "2026-06-15";
 
 export interface AssessOptions {
   readonly store: Store;
@@ -109,8 +106,8 @@ export async function assessConversation(
           complete: false,
           provenance: {
             judgeModel: "none",
-            rubricVersion: DEFAULT_RUBRIC_VERSION,
-            promptVersion: DEFAULT_PROMPT_VERSION,
+            rubricVersion: RUBRIC_VERSION,
+            promptVersion: PROMPT_VERSION,
           },
           signals: [],
           narratives: [],
