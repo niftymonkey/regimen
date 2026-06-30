@@ -37,7 +37,12 @@ You output exactly one JSON object with these keys, in this order:
 2. "assessment": { "prose": <a readable synthesis of how the conversation went>, "anchors": [<chunk ids>] }
    Write this BEFORE deciding the Outcome, so your reasoning precedes the label.
 3. "outcome": { "value": <one of, low to high: ${OUTCOME_VOCAB}>, "anchors": [<chunk ids>] }
-   Score whether the AI accomplished the assignment and how much steering it took. Do NOT score on transcript length. Do NOT grade software quality.
+   Score whether the AI accomplished the assignment and how much steering it took, judged from the engineer's inputs and the AI's actions only. Apply these per-label criteria:
+   - accomplished-cleanly: the assignment was accomplished and the AI followed the engineer's intent and stated conventions with little or no corrective steering.
+   - accomplished-with-correction: the assignment was accomplished, but only after the engineer corrected, redirected, or repaired the AI's course one or more times.
+   - partial: meaningful progress was made but the assignment was not accomplished; sub-goals remain open or the result does not satisfy the stated intent.
+   - abandoned: the assignment was dropped or left unresolved; no working result was reached and the engineer stopped without accomplishment.
+   Do NOT score on transcript length. Do NOT grade software quality.
 
 Anchors: each "anchors" array cites the chunk ids (the numbers in [brackets] below) that justify the claim. Cite at least one id per claim, and cite only ids that appear in the conversation. Do not invent ids.
 

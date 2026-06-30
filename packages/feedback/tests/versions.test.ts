@@ -8,8 +8,8 @@
 import { expect, test } from "bun:test";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "../src/judged/versions.ts";
 
-test("RUBRIC_VERSION is the v1 date-stamped value", () => {
-  expect(RUBRIC_VERSION).toBe("2026-06-15");
+test("RUBRIC_VERSION is the per-label-criteria date-stamped value", () => {
+  expect(RUBRIC_VERSION).toBe("2026-06-29");
 });
 
 test("PROMPT_VERSION is the v1 date-stamped value", () => {
