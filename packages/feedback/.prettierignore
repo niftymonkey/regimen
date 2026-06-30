@@ -1,2 +1,5 @@
 # Tracked .jsonl fixtures are sample transcripts with intentional shapes Prettier must not rewrite.
 *.jsonl
+
+# Throwaway prototypes: never committed (.gitignore), never formatted. Remove when the prototype is deleted.
+prototypes/
