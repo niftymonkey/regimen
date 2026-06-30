@@ -50,3 +50,6 @@ Both earn their place by aggregating what no human reliably tallies and by corre
 - Automatic/proactive triggering is deferred.
 - Confirm `ANTHROPIC_MODEL` is not overriding the Opus default on the Mac.
 - Batch-size default (10) is a starting guess, tunable after first real use.
+
+## Re-judging the corpus after the judge enrichment
+The per-conversation judge enrichments parked above (the per-label Outcome criteria, the engaged-vs-not-engaged distinction, and a setup-aware prompt) have now landed (see `plans/judge-prompt-setup-and-rubric-design.md`), so re-judge the captured corpus with `regimen assess --all --force` to re-score every conversation in place against the enriched, setup-aware prompt. The bumped `rubric_version` and `prompt_version` (both `2026-06-29`) stamped on each `assessment_run` make the re-judged verdicts distinguishable from the pre-enrichment ones.

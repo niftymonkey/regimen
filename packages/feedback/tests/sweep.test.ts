@@ -188,6 +188,73 @@ test("selectSessionsToJudge with force:true returns judged and unjudged conversa
   });
 });
 
+test("a force re-sweep selects an already-judged conversation and supersedes its verdict by run identity, not duplicating it", () => {
+  // The full re-sweep contract a `regimen assess --all --force` pass relies on,
+  // tying two unit behaviors covered separately elsewhere into one assertion: the
+  // force selection of an already-judged conversation (covered for the selector
+  // alone in the force:true test above) and the writer's supersede-by-run-identity
+  // on the re-judge (covered for the writer alone in judged-store.test.ts's
+  // "a re-judge supersedes the prior run's signals in place"). Here both hold for
+  // the SAME conversation across a default-skip then a forced re-judge.
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "resweep",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    // First judgment: the conversation is now already judged.
+    writeAssessment(
+      store,
+      run("resweep", "run-a"),
+      resultWithOutcome("accomplished-cleanly"),
+    );
+
+    // A default sweep skips it (already judged); a --force re-sweep selects it.
+    expect(
+      selectSessionsToJudge(store.db, {}, { force: false }, NOW).map(
+        (s) => s.sessionId,
+      ),
+    ).not.toContain("resweep");
+    expect(
+      selectSessionsToJudge(store.db, {}, { force: true }, NOW).map(
+        (s) => s.sessionId,
+      ),
+    ).toContain("resweep");
+
+    // Re-judge the same conversation with a new verdict and a new run id.
+    writeAssessment(
+      store,
+      run("resweep", "run-b"),
+      resultWithOutcome("partial"),
+    );
+
+    // No duplicate row for the supersede key (session_id, scope, assignment_id,
+    // signal_name): the second run replaced the first in place.
+    const duplicates = store.db
+      .prepare(
+        `SELECT session_id, scope, assignment_id, signal_name, COUNT(*) AS n
+           FROM judged_signal
+          WHERE session_id = 'resweep'
+          GROUP BY session_id, scope, assignment_id, signal_name
+         HAVING n > 1`,
+      )
+      .all() as ReadonlyArray<Record<string, unknown>>;
+    expect(duplicates).toEqual([]);
+
+    // The single surviving signal row reflects the new run, not the old verdict.
+    const signals = store.db
+      .prepare(
+        "SELECT value, run_id FROM judged_signal WHERE session_id = 'resweep'",
+      )
+      .all() as ReadonlyArray<Record<string, unknown>>;
+    expect(signals.length).toBe(1);
+    expect(signals[0]!.run_id).toBe("run-b");
+    expect(JSON.parse(signals[0]!.value as string)).toBe("partial");
+  });
+});
+
 test("selectSessionsToJudge passes the filter through to listSessions", () => {
   withStore((store) => {
     seedSession(store.db, {
