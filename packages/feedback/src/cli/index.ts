@@ -48,7 +48,7 @@ import {
   HARNESS_DESCRIPTORS,
   type HarnessDescriptor,
 } from "../harness/descriptor.ts";
-import { harnessSupport } from "../harness/support.ts";
+import { harnessSupport, type HarnessSupport } from "../harness/support.ts";
 import {
   bufferDir,
   type Harness,
@@ -67,6 +67,11 @@ import { openStore } from "../store.ts";
 import { assessConversation } from "../judged/assess.ts";
 import { resolveDefaultJudgeModel } from "../judged/anthropic-adapter.ts";
 import {
+  runSweep,
+  selectSessionsToJudge,
+  type BatchDecision,
+} from "../judged/sweep.ts";
+import {
   planInstall,
   serviceFileBytes,
   type InstallPlan,
@@ -81,6 +86,7 @@ import {
 import { waitForDaemonAlive } from "./wait-for-daemon.ts";
 
 export type { SessionFilter, SessionSummary } from "../sessions.ts";
+export type { BatchDecision } from "../judged/sweep.ts";
 
 /** How to run the daemon foreground when no supervisor is installed. */
 const FOREGROUND_HINT =
@@ -488,6 +494,44 @@ function printEvidence(dir: string, sessionId: string): number {
   return 0;
 }
 
+/** A harness's resolved on-disk location for the judge path. */
+interface HarnessLocation {
+  readonly support: HarnessSupport;
+  readonly harnessHome: string;
+  readonly sessionsDir: string;
+}
+
+/**
+ * Resolve where a known harness keeps its transcripts: its support registry
+ * entry, its config home (the contract env-var override or the user's home), and
+ * the transcripts directory under that home. Throws a clear Error when the
+ * harness is unsupported or no home is set, so the single-session and sweep
+ * callers both land on their stderr-plus-exit path. `harness` is a plain string
+ * because the sweep hands it conversation harnesses straight from the store; an
+ * unregistered one resolves to undefined support and the unsupported throw.
+ */
+function resolveHarnessLocation(
+  harness: string,
+  env: NodeJS.ProcessEnv,
+): HarnessLocation {
+  const support = harnessSupport(harness as Harness);
+  if (support === undefined) {
+    throw new Error(`unsupported harness: ${harness}`);
+  }
+  const envVar = support.descriptor.contract.configHome.envVar;
+  const home = env.HOME ?? env.USERPROFILE;
+  if (home === undefined && env[envVar] === undefined) {
+    throw new Error("HOME (or USERPROFILE on Windows) is not set");
+  }
+  const harnessHome = resolveHarnessHome(
+    support.descriptor.contract,
+    env,
+    home ?? "",
+  );
+  const sessionsDir = join(harnessHome, support.descriptor.transcriptsSubdir);
+  return { support, harnessHome, sessionsDir };
+}
+
 /**
  * Run one `feedback assess` pass over a conversation and print its JudgmentDigest
  * as JSON on stdout (the judged twin of `feedback evidence`). Unlike evidence,
@@ -525,28 +569,17 @@ export async function assess(options: {
     process.stderr.write(`${NO_HARNESS}\n`);
     return 1;
   }
-  const support = harnessSupport(harness);
-  if (support === undefined) {
-    process.stderr.write(`unsupported harness: ${harness}\n`);
+  // Config home is the contract's env-var override when set, else a default under
+  // the user's home; a set override stands in for an unset HOME so assess can run
+  // wherever the harness home is pinned by its own env var.
+  let location;
+  try {
+    location = resolveHarnessLocation(harness, process.env);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
     return 1;
   }
-
-  // The config home is the contract's env-var override when set, else a default
-  // under the user's home. Allow a set override to stand in for an unset HOME so
-  // assess can run wherever the harness home is pinned by its own env var.
-  const home = process.env.HOME ?? process.env.USERPROFILE;
-  const envVar = support.descriptor.contract.configHome.envVar;
-  if (home === undefined && process.env[envVar] === undefined) {
-    process.stderr.write("HOME (or USERPROFILE on Windows) is not set\n");
-    return 1;
-  }
-
-  const harnessHome = resolveHarnessHome(
-    support.descriptor.contract,
-    process.env,
-    home ?? "",
-  );
-  const sessionsDir = join(harnessHome, support.descriptor.transcriptsSubdir);
+  const { support, harnessHome, sessionsDir } = location;
 
   let sessionId: string | null = options.session ?? null;
   if (sessionId === null) {
@@ -591,6 +624,109 @@ export async function assess(options: {
   } catch (err) {
     process.stderr.write(`${(err as Error).message}\n`);
     return 1;
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * `regimen assess --all`: judge many conversations in one sweep. Selects the
+ * conversations matching `filter` (default skip already-judged; `--force`
+ * re-judges), then judges them in batches of `batchSize`, pausing between batches
+ * for the injected `decideNextBatch` (the CLI supplies the interactive prompt).
+ * Each conversation is judged exactly as the single-session `assess` does, by its
+ * own harness, and persisted identically. Continue-on-error: a conversation whose
+ * transcript is gone is summarized as a failure and the sweep moves on. Prints
+ * the opening accounting, a line per conversation, and an end summary.
+ */
+export async function assessAll(options: {
+  dataDir: string;
+  filter: SessionFilter;
+  force: boolean;
+  batchSize: number;
+  judgeModel?: string;
+  judgeVia?: "cli" | "api";
+  decideNextBatch: () => Promise<BatchDecision>;
+}): Promise<number> {
+  const store = openStore(join(options.dataDir, "feedback.db"));
+  try {
+    const matched = listSessions(store.db, options.filter).length;
+    // already-judged is the complement of the unjudged (force:false) selection,
+    // so the count stays accurate even when --force grows toJudge to everything.
+    const unjudged = selectSessionsToJudge(store.db, options.filter, {
+      force: false,
+    }).length;
+    const toJudge = selectSessionsToJudge(store.db, options.filter, {
+      force: options.force,
+    }).length;
+    process.stdout.write(
+      `sweep: matched ${matched}, already judged ${matched - unjudged}, to judge ${toJudge}\n`,
+    );
+
+    // Nothing to judge: report the empty run and skip judge-backend resolution,
+    // so an all-judged sweep succeeds without a configured judge.
+    if (toJudge === 0) {
+      process.stdout.write(`done: judged 0, failed 0, skipped 0\n`);
+      return 0;
+    }
+
+    let llm;
+    try {
+      llm = resolveDefaultJudgeModel({
+        ...(options.judgeModel === undefined
+          ? {}
+          : { model: options.judgeModel }),
+        ...(options.judgeVia === undefined
+          ? {}
+          : { judgeVia: options.judgeVia }),
+      });
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      return 1;
+    }
+    let index = 0;
+    const judge = async (session: SessionSummary): Promise<void> => {
+      index++;
+      const label = `[${index}/${toJudge}] ${session.harness} ${session.sessionId}`;
+      try {
+        const { sessionsDir } = resolveHarnessLocation(
+          session.harness,
+          process.env,
+        );
+        const digest = await assessConversation({
+          store,
+          harness: session.harness as Harness,
+          sessionsDir,
+          sessionId: session.sessionId,
+          llm,
+        });
+        const outcome = digest.judged
+          ? (digest.outcome?.value ?? "incomplete")
+          : "unjudged";
+        process.stdout.write(`${label} -> ${outcome}\n`);
+      } catch (caught) {
+        // Mark the failure inline so progress numbering stays contiguous, then
+        // re-throw so the engine records it for the end-summary detail.
+        process.stdout.write(`${label} -> FAILED\n`);
+        throw caught;
+      }
+    };
+    const summary = await runSweep(store.db, {
+      filter: options.filter,
+      force: options.force,
+      batchSize: options.batchSize,
+      judge,
+      decideNextBatch: options.decideNextBatch,
+    });
+    process.stdout.write(
+      `done: judged ${summary.judged.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
+    );
+    for (const failure of summary.failed) {
+      process.stdout.write(
+        `  failed: ${failure.session.harness} ${failure.session.sessionId} (${failure.error.message})\n`,
+      );
+    }
+    return 0;
   } finally {
     store.close();
   }
