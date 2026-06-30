@@ -34,6 +34,8 @@ import { dirname, join } from "node:path";
 import { dataDir, resolveHarnessFromEnvironment } from "@regimen/shared";
 import {
   assess as feedbackAssess,
+  assessAll as feedbackAssessAll,
+  type BatchDecision,
   evidence as feedbackEvidence,
   install as feedbackInstall,
   installableHarnesses as feedbackInstallableHarnesses,
@@ -162,6 +164,21 @@ function collectFlagValues(
     if (argv[i] === flag && argv[i + 1] !== undefined) out.push(argv[i + 1]!);
   }
   return out;
+}
+
+/** The default sweep batch size when `--batch` is absent or invalid. */
+export const DEFAULT_BATCH_SIZE = 10;
+
+/**
+ * Parse `--batch <n>` into a positive batch size, falling back to
+ * {@link DEFAULT_BATCH_SIZE} when the flag is absent, non-numeric, or not a
+ * positive integer. The positive guard matters: a zero or negative batch would
+ * stall the sweep's batch loop, so an unusable value defaults rather than breaks.
+ */
+export function parseBatchSize(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_BATCH_SIZE;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_BATCH_SIZE;
 }
 
 /** Project one `--flag value` pair onto a single-key partial of SessionFilter. */
@@ -503,15 +520,90 @@ function evidence(argv: ReadonlyArray<string>): number {
   });
 }
 
-/** Dispatch `regimen assess` to the feedback assess facade. */
+/**
+ * Map a single between-batch keypress to a {@link BatchDecision}, or undefined
+ * for an unrecognized key (which the prompt ignores so a stray press cannot
+ * start spending). `c` and Enter continue one batch; `a` runs every remaining
+ * batch; `q` and Ctrl-C quit. Case-insensitive.
+ */
+export function keyToDecision(key: string): BatchDecision | undefined {
+  const lower = key.toLowerCase();
+  if (lower === "c" || key === "\r" || key === "\n") return "continue";
+  if (lower === "a") return "all";
+  if (lower === "q" || key.charCodeAt(0) === 3) return "quit"; // q or Ctrl-C
+  return undefined;
+}
+
+/**
+ * The interactive between-batch decision for `assess --all`, read as a SINGLE
+ * keypress (no Enter): `c` continues one batch, `a` runs every remaining batch
+ * without asking again, `q` (or Ctrl-C) quits. Unrecognized keys are ignored so
+ * a stray press cannot start spending. A non-interactive run (no tty) STOPS
+ * after the current batch rather than silently judging everything, so a piped or
+ * backgrounded sweep cannot run up an unbounded bill; re-run to judge more, since
+ * already-judged conversations are skipped.
+ */
+export function promptNextBatch(): Promise<BatchDecision> {
+  const stdin = process.stdin;
+  if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+    process.stdout.write(
+      "non-interactive: stopping after this batch; re-run to judge more (already-judged are skipped)\n",
+    );
+    return Promise.resolve("quit");
+  }
+  process.stdout.write(
+    "judge the next batch? press [c]ontinue / [a]ll remaining / [q]uit ",
+  );
+  return new Promise((resolve) => {
+    const onKey = (data: Buffer): void => {
+      const decision = keyToDecision(data.toString());
+      if (decision === undefined) return; // ignore stray keys, keep listening
+      stdin.removeListener("data", onKey);
+      stdin.setRawMode(false);
+      stdin.pause();
+      const echo =
+        decision === "continue" ? "c" : decision === "all" ? "a" : "q";
+      process.stdout.write(`${echo}\n`);
+      resolve(decision);
+    };
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("data", onKey);
+  });
+}
+
+/**
+ * Dispatch `regimen assess`. With `--all` it runs the bulk sweep facade over the
+ * `list` filters (skip already-judged unless `--force`), in `--batch` batches,
+ * pausing for the interactive {@link promptNextBatch}; otherwise it judges the
+ * single current (or `--session`) conversation. The judge flags are shared.
+ */
 function assess(argv: ReadonlyArray<string>): Promise<number> {
-  const session = flagValue(argv, "--session");
   const judgeModel = flagValue(argv, "--judge-model");
   // --judge-via forces the judge backend; only the two known values pass
   // through, an unknown value falls through to the facade's auto-selection.
   const judgeViaRaw = flagValue(argv, "--judge-via");
   const judgeVia =
     judgeViaRaw === "cli" || judgeViaRaw === "api" ? judgeViaRaw : undefined;
+  if (argv.includes("--all")) {
+    const filter: SessionFilter = {
+      ...optionalFilter(argv, "--harness", "harness"),
+      ...optionalFilter(argv, "--model", "model"),
+      ...optionalFilter(argv, "--since", "since"),
+      ...optionalFilter(argv, "--until", "until"),
+      ...optionalFilter(argv, "--outcome", "outcome"),
+    };
+    return feedbackAssessAll({
+      dataDir: dataDir(),
+      filter,
+      force: argv.includes("--force"),
+      batchSize: parseBatchSize(flagValue(argv, "--batch")),
+      ...(judgeModel === undefined ? {} : { judgeModel }),
+      ...(judgeVia === undefined ? {} : { judgeVia }),
+      decideNextBatch: promptNextBatch,
+    });
+  }
+  const session = flagValue(argv, "--session");
   return feedbackAssess({
     dataDir: dataDir(),
     ...(session === undefined ? {} : { session }),
@@ -578,11 +670,15 @@ Daemon:
 Read & judge:
   evidence                               quantitative digest of the current session (free, deterministic)
   assess                                 judged verdict of the current session (paid LLM call, writes a verdict)
+  assess --all [filters] [--batch <n>] [--force]   judge many sessions in one sweep (paid; batched, resumable)
   list [--harness <h>] [--since <when>] [--json]   enumerate captured sessions
 
 Flags:
   --dry-run                       preview without changing anything
   --no-daemon                     install capture without the loader daemon (install)
+  --all                           assess: judge every matching session, not just the current one
+  --batch <n>                     assess --all: sessions per batch before the continue/all/quit prompt (default 10)
+  --force                         assess --all: re-judge sessions already judged
 
 The harness is auto-detected per invocation, or set REGIMEN_HARNESS.
 `;
