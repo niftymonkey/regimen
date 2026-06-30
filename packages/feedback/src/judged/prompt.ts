@@ -24,6 +24,8 @@ const INTENT_VOCAB =
 const OUTCOME_VOCAB =
   "abandoned < partial < accomplished-with-correction < accomplished-cleanly";
 
+const ENGAGEMENT_VOCAB = "engaged | not-engaged";
+
 /**
  * The rubric/instruction system prompt. Pins the closed vocabularies, the
  * prose-before-Outcome order, the citable-id anchor rule, and the two explicit
@@ -43,6 +45,10 @@ You output exactly one JSON object with these keys, in this order:
    - partial: meaningful progress was made but the assignment was not accomplished; sub-goals remain open or the result does not satisfy the stated intent.
    - abandoned: the assignment was dropped or left unresolved; no working result was reached and the engineer stopped without accomplishment.
    Do NOT score on transcript length. Do NOT grade software quality.
+4. "engagement": { "value": <one of: ${ENGAGEMENT_VOCAB}>, "anchors": [<chunk ids>] }
+   Judge whether the conversation genuinely became a work session on the assignment. This is orthogonal to the Outcome: always decide it, whatever the Outcome was.
+   - engaged: the conversation genuinely became a work session on the assignment; the work was attempted in earnest.
+   - not-engaged: the conversation never really became a work session on the assignment (a throwaway question, an aborted start, an unrelated detour, a setup blip); non-accomplishment here is not the AI failing at a real task.
 
 Anchors: each "anchors" array cites the chunk ids (the numbers in [brackets] below) that justify the claim. Cite at least one id per claim, and cite only ids that appear in the conversation. Do not invent ids.
 

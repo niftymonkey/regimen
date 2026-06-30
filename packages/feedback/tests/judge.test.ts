@@ -99,6 +99,71 @@ test("a well-formed verdict parses to Intent, Outcome, and the assessment with p
   ]);
 });
 
+/**
+ * A well-formed verdict that also carries the engagement signal, citing chunk
+ * id 0. Kept separate from WELL_FORMED so the existing signals.length pins stay
+ * at two; engagement adds a third signal only in its own tests.
+ */
+const WITH_ENGAGEMENT = JSON.stringify({
+  intent: { value: "test-writing", anchors: [0] },
+  assessment: {
+    prose: "The engineer asked for a parser test; the agent delivered it.",
+    anchors: [0, 1],
+  },
+  outcome: { value: "accomplished-cleanly", anchors: [1] },
+  engagement: { value: "engaged", anchors: [0] },
+});
+
+test("a well-formed verdict yields an engagement signal (categorical, conversation-scoped)", async () => {
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(WITH_ENGAGEMENT) },
+  );
+  const engagement = result.signals.find((s) => s.signalName === "engagement");
+  expect(engagement).toBeDefined();
+  expect(engagement!.value).toBe("engaged");
+  expect(engagement!.valueKind).toBe("categorical");
+  expect(engagement!.scope).toBe("conversation");
+  // The cited chunk id 0 maps back to the real AnchorRef of chunk 0.
+  expect(engagement!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
+});
+
+test("an out-of-vocab engagement value is rejected; the signal is absent", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    engagement: { value: "half-engaged", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "engagement"),
+  ).toBeUndefined();
+  // The other signals are unaffected (abstention is per-signal).
+  expect(result.signals.find((s) => s.signalName === "intent")).toBeDefined();
+  expect(result.signals.find((s) => s.signalName === "outcome")).toBeDefined();
+});
+
+test("an engagement value with no resolvable anchors abstains", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    // Engagement cites only id 99 (not in the set): zero resolvable anchors -> absent.
+    engagement: { value: "engaged", anchors: [99] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "engagement"),
+  ).toBeUndefined();
+});
+
 test("the prompt the Judge builds enumerates each chunk with its citable id and the closed vocabularies", async () => {
   const port = stubPort(WELL_FORMED);
   await judgeConversation(

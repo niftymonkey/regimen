@@ -52,3 +52,19 @@ test("abandoned carries the dropped-or-unresolved criterion", () => {
   const { system } = buildJudgePrompt(CHUNKS);
   expect(system).toContain("dropped or left unresolved");
 });
+
+test("the SYSTEM rubric elicits the engagement signal with its closed vocabulary", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain('"engagement"');
+  expect(system).toContain("engaged | not-engaged");
+});
+
+test("the engagement signal is framed as orthogonal to the Outcome", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("orthogonal to the Outcome");
+});
+
+test("engagement carries the never-a-work-session criterion for not-engaged", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("never really became a work session");
+});

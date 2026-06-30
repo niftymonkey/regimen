@@ -16,7 +16,7 @@ import type { AnchorRef } from "../loader/reader-types.ts";
  * adding a member; a new signal is a new member plus its prompt fragment and
  * parser, never an interface change.
  */
-export type SignalName = "intent" | "outcome";
+export type SignalName = "intent" | "outcome" | "engagement";
 
 /**
  * The open value-kind tag (ADR-0008). `categorical` and `ordinal` are the live
@@ -43,6 +43,14 @@ export type OutcomeValue =
   | "partial"
   | "accomplished-with-correction"
   | "accomplished-cleanly";
+
+/**
+ * Engagement: one value naming whether the conversation genuinely became a work
+ * session on the assignment (categorical, conversation-scoped). It is orthogonal
+ * to Outcome and separates the AI falling short on real work from a session that
+ * was never a real work session.
+ */
+export type EngagementValue = "engaged" | "not-engaged";
 
 /** Why a run did not finish clean. Absent on a complete run. */
 export type IncompleteReason =
@@ -80,7 +88,7 @@ export interface JudgedSignal {
   readonly assignmentId?: string;
   readonly signalName: SignalName;
   readonly valueKind: ValueKind;
-  readonly value: IntentValue | OutcomeValue;
+  readonly value: IntentValue | OutcomeValue | EngagementValue;
   readonly anchors: ReadonlyArray<AnchorRef>;
 }
 

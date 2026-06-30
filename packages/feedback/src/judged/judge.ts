@@ -15,6 +15,7 @@ import { resolveDefaultJudgeModel } from "./anthropic-adapter.ts";
 import { buildJudgePrompt } from "./prompt.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
+  EngagementValue,
   IntentValue,
   JudgedNarrative,
   JudgedSignal,
@@ -54,6 +55,12 @@ const OUTCOME_VALUES: ReadonlySet<string> = new Set<OutcomeValue>([
   "partial",
   "accomplished-with-correction",
   "accomplished-cleanly",
+]);
+
+/** The closed Engagement vocabulary (Decision 5 of the judge-prompt design). */
+const ENGAGEMENT_VALUES: ReadonlySet<string> = new Set<EngagementValue>([
+  "engaged",
+  "not-engaged",
 ]);
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
@@ -173,6 +180,7 @@ interface ParsedVerdict {
   readonly intent?: ParsedClaim;
   readonly outcome?: ParsedClaim;
   readonly assessment?: ParsedClaim;
+  readonly engagement?: ParsedClaim;
 }
 
 /**
@@ -272,6 +280,23 @@ function buildSignals(
         signalName: "outcome",
         valueKind: "ordinal",
         value: verdict.outcome.value as OutcomeValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
+    verdict.engagement !== undefined &&
+    typeof verdict.engagement.value === "string" &&
+    ENGAGEMENT_VALUES.has(verdict.engagement.value)
+  ) {
+    const anchors = resolveAnchors(verdict.engagement.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "engagement",
+        valueKind: "categorical",
+        value: verdict.engagement.value as EngagementValue,
         anchors,
       });
     }
