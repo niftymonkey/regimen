@@ -20,6 +20,7 @@ import {
 } from "../src/judged/writer.ts";
 import type { JudgeResult, OutcomeValue } from "../src/judged/types.ts";
 import type { BatchDecision } from "../src/judged/sweep.ts";
+import type { SetupSource } from "../src/judged/setup.ts";
 import { assessAll } from "../src/cli/index.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
@@ -285,6 +286,69 @@ function startMockAnthropic(): {
   };
 }
 
+/**
+ * Like {@link startMockAnthropic} but also records the raw request body of each
+ * call, so a test can assert on the prompt that reached the judge (e.g. that the
+ * injected setup was threaded through). Nothing leaves the machine.
+ */
+function startCapturingMockAnthropic(): {
+  baseUrl: string;
+  stop: () => void;
+  count: () => number;
+  lastBody: () => string | undefined;
+} {
+  const verdict = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: {
+      prose: "The engineer asked for a parser test; the agent delivered it.",
+      anchors: [0, 1],
+    },
+    outcome: { value: "accomplished-cleanly", anchors: [1] },
+  });
+  let hits = 0;
+  let lastBody: string | undefined;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const url = new URL(req.url);
+      if (req.method !== "POST" || url.pathname !== "/v1/messages") {
+        return new Response("not found", { status: 404 });
+      }
+      hits++;
+      lastBody = await req.text();
+      return Response.json({
+        id: "msg_1",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-4-8",
+        content: [{ type: "text", text: verdict }],
+        stop_reason: "end_turn",
+      });
+    },
+  });
+  return {
+    baseUrl: `http://localhost:${server.port}`,
+    stop: () => server.stop(true),
+    count: () => hits,
+    lastBody: () => lastBody,
+  };
+}
+
+/** A recognizable convention text a stub setup source carries into the prompt. */
+const SWEEP_CONVENTION = "SWEEP-STUB-CONVENTION honored";
+
+/** A stub SetupSource returning a fixed EngineerSetup for any cwd/asOf. */
+function stubSetupSource(): SetupSource {
+  return {
+    resolve() {
+      return {
+        conventions: [{ scope: "project", text: SWEEP_CONVENTION }],
+        practices: [],
+      };
+    },
+  };
+}
+
 function captureStdout(): { read: () => string } {
   let out = "";
   process.stdout.write = ((chunk: string | Uint8Array): boolean => {
@@ -526,6 +590,44 @@ test("assessAll with force re-judges an already-judged conversation", async () =
     expect(stdout.read()).toContain("to judge 1");
     // Already-judged, but force sent it back to the judge.
     expect(mock.count()).toBe(1);
+  } finally {
+    mock.stop();
+  }
+});
+
+test("assessAll --force re-judges using the setup-aware prompt from the injected source", async () => {
+  const dataDir = tempDir("regimen-sweep-cli-");
+  const codexHome = tempDir("regimen-sweep-home-");
+  const dbPath = join(dataDir, "feedback.db");
+  // Already judged, so only --force sends it back to the judge.
+  seedConversation(dbPath, {
+    sessionId: SESSION,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  prejudge(dbPath, SESSION);
+  // The transcript must exist for the re-judge to read it.
+  seedRollout(codexHome, SESSION);
+  const mock = startCapturingMockAnthropic();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  process.env.CODEX_HOME = codexHome;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  captureStdout();
+  try {
+    const exit = await assessAll({
+      dataDir,
+      filter: {},
+      force: true,
+      batchSize: 10,
+      setupSource: stubSetupSource(),
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    expect(exit).toBe(0);
+    // Force sent the already-judged conversation back to the judge,
+    expect(mock.count()).toBe(1);
+    // and the prompt that reached the judge carried the injected setup, so the
+    // sweep re-judges with the enriched (setup-aware) prompt.
+    expect(mock.lastBody()).toContain(SWEEP_CONVENTION);
   } finally {
     mock.stop();
   }

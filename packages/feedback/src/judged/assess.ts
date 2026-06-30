@@ -17,9 +17,11 @@ import { readFileSync } from "node:fs";
 import type { Harness } from "@regimen/shared";
 import type { Store } from "../store.ts";
 import { harnessSupport } from "../harness/support.ts";
+import type { RegimenEvent } from "../../hooks/event-log.ts";
 import { readJudgmentDigest, type JudgmentDigest } from "./digest.ts";
 import { judgeConversation } from "./judge.ts";
 import type { JudgeModelPort } from "./port.ts";
+import type { EngineerSetup, SetupSource } from "./setup.ts";
 import type { JudgeResult } from "./types.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import { writeAssessment } from "./writer.ts";
@@ -35,6 +37,13 @@ export interface AssessOptions {
   readonly sessionId: string;
   /** The injected Judge model port; tests pass a deterministic stub. */
   readonly llm: JudgeModelPort;
+  /**
+   * The injected source of the engineer's setup (the expected behaviors the
+   * judge weighs). Optional and additive: with no source injected, no setup is
+   * resolved and the judge stays setup-blind, byte-identical to before. The CLI
+   * binds the live adapter; tests inject a stub.
+   */
+  readonly setupSource?: SetupSource;
   /** The run id to mint; omit for a generated one. */
   readonly runId?: string;
   /** Injectable clock for deterministic created_at and generatedAt. */
@@ -100,6 +109,16 @@ export async function assessConversation(
   // incomplete run with no fabricated signal, never calling the judge (it
   // requires a non-empty conversation as a caller contract). The structural
   // events are still inserted above, so the record stays valid.
+  // Resolve the engineer's setup (the expected behaviors) only on the path that
+  // actually judges, so an insufficient-evidence run does no setup I/O. The
+  // injected source is optional: with none, setup stays undefined and the judge
+  // is setup-blind, byte-identical to before. The setup is time-scoped to the
+  // conversation, not to now (ADR-0016): see {@link conversationAsOf}.
+  const setup =
+    read.content.length > 0
+      ? resolveSetup(options.setupSource, read.events, now)
+      : undefined;
+
   const result: JudgeResult =
     read.content.length === 0
       ? {
@@ -115,7 +134,7 @@ export async function assessConversation(
         }
       : await judgeConversation(
           { sessionId, chunks: read.content },
-          { llm, now },
+          { llm, now, setup },
         );
 
   writeAssessment(
@@ -130,4 +149,58 @@ export async function assessConversation(
   );
 
   return readJudgmentDigest(store.db, sessionId, () => now().getTime());
+}
+
+/**
+ * Resolve the engineer's setup for one conversation through the injected source,
+ * time-scoped to the conversation and rooted at the conversation's working
+ * directory. Returns undefined when no source is injected (the judge stays
+ * setup-blind) or the source discovers nothing.
+ */
+function resolveSetup(
+  source: SetupSource | undefined,
+  events: ReadonlyArray<RegimenEvent>,
+  now: () => Date,
+): EngineerSetup | undefined {
+  if (source === undefined) return undefined;
+  return source.resolve({
+    cwd: conversationCwd(events) ?? process.cwd(),
+    asOf: conversationAsOf(events, now),
+  });
+}
+
+/**
+ * The conversation's representative instant for time-scoping the setup: the
+ * latest structural event's timestamp, the same instant the rest of the system
+ * treats as the conversation's time (`last_event_at`). The setup the judge
+ * reasons against must be the setup as of the conversation, not as of now
+ * (ADR-0016), so a conversation re-judged after the conventions changed is still
+ * weighed against the conventions in force when it ran. Falls back to `now()`
+ * when the read produced no parseable event timestamp.
+ */
+function conversationAsOf(
+  events: ReadonlyArray<RegimenEvent>,
+  now: () => Date,
+): Date {
+  let latest: number | undefined;
+  for (const event of events) {
+    const ms = Date.parse(event.timestamp);
+    if (Number.isNaN(ms)) continue;
+    if (latest === undefined || ms > latest) latest = ms;
+  }
+  return latest === undefined ? now() : new Date(latest);
+}
+
+/**
+ * The working directory the conversation ran in: the first event that reported
+ * one (a session-level anchor most events repeat). Undefined when no event
+ * carried a cwd, so the caller falls back to the process cwd.
+ */
+function conversationCwd(
+  events: ReadonlyArray<RegimenEvent>,
+): string | undefined {
+  for (const event of events) {
+    if (event.cwd !== undefined && event.cwd.length > 0) return event.cwd;
+  }
+  return undefined;
 }

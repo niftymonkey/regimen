@@ -66,6 +66,8 @@ import {
 import { openStore } from "../store.ts";
 import { assessConversation } from "../judged/assess.ts";
 import { resolveDefaultJudgeModel } from "../judged/anthropic-adapter.ts";
+import { createLiveSetupSource } from "../judged/live-setup-source.ts";
+import type { SetupSource } from "../judged/setup.ts";
 import {
   runSweep,
   selectSessionsToJudge,
@@ -558,6 +560,8 @@ export async function assess(options: {
   session?: string;
   judgeModel?: string;
   judgeVia?: "cli" | "api";
+  /** The setup source; defaults to the live adapter. Tests inject a stub. */
+  setupSource?: SetupSource;
 }): Promise<number> {
   const { dataDir: dir } = options;
   // Resolve the harness first, then drive everything (config home, sessions dir,
@@ -618,12 +622,17 @@ export async function assess(options: {
       ...(judgeModel === undefined ? {} : { model: judgeModel }),
       ...(judgeVia === undefined ? {} : { judgeVia }),
     });
+    // Bind the live setup adapter so real judging is setup-aware; a test injects
+    // a stub instead. The judge resolves the engineer's setup as of the
+    // conversation's time through this source.
+    const setupSource = options.setupSource ?? createLiveSetupSource();
     const digest = await assessConversation({
       store,
       harness,
       sessionsDir,
       sessionId,
       llm,
+      setupSource,
     });
     process.stdout.write(`${JSON.stringify(digest)}\n`);
     return 0;
@@ -652,6 +661,8 @@ export async function assessAll(options: {
   batchSize: number;
   judgeModel?: string;
   judgeVia?: "cli" | "api";
+  /** The setup source; defaults to the live adapter. Tests inject a stub. */
+  setupSource?: SetupSource;
   decideNextBatch: () => Promise<BatchDecision>;
 }): Promise<number> {
   const store = openStore(join(options.dataDir, "feedback.db"));
@@ -701,6 +712,10 @@ export async function assessAll(options: {
       process.stderr.write(`${(err as Error).message}\n`);
       return 1;
     }
+    // Bind the live setup adapter once for the whole sweep so every conversation
+    // is judged setup-aware (the same instance threads each one's own time and
+    // cwd through resolve); a test injects a stub instead.
+    const setupSource = options.setupSource ?? createLiveSetupSource();
     let index = 0;
     const judge = async (session: SessionSummary): Promise<void> => {
       index++;
@@ -716,6 +731,7 @@ export async function assessAll(options: {
           sessionsDir,
           sessionId: session.sessionId,
           llm,
+          setupSource,
         });
         const outcome = digest.judged
           ? (digest.outcome?.value ?? "incomplete")

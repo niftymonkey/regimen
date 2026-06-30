@@ -13,6 +13,7 @@ import type { AnchorRef, ContentChunk } from "../loader/reader-types.ts";
 import type { JudgeModelPort } from "./port.ts";
 import { resolveDefaultJudgeModel } from "./anthropic-adapter.ts";
 import { buildJudgePrompt } from "./prompt.ts";
+import type { EngineerSetup } from "./setup.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
   EngagementValue,
@@ -34,6 +35,12 @@ export interface JudgeConfig {
   readonly promptVersion?: string;
   readonly retryBudget?: number;
   readonly now?: () => Date;
+  /**
+   * The engineer's setup (the expected behaviors) the prompt weighs, resolved by
+   * the orchestrator as of the conversation's time. Optional and additive: when
+   * absent the prompt is byte-identical to the setup-blind baseline.
+   */
+  readonly setup?: EngineerSetup;
 }
 
 const DEFAULT_RETRY_BUDGET = 2;
@@ -93,7 +100,7 @@ export async function judgeConversation(
   const promptVersion = config.promptVersion ?? PROMPT_VERSION;
   const retryBudget = config.retryBudget ?? DEFAULT_RETRY_BUDGET;
 
-  const prompt = buildJudgePrompt(input.chunks);
+  const prompt = buildJudgePrompt(input.chunks, config.setup);
   let lastModel = "unknown";
   let parseError: string | undefined;
 
