@@ -2,6 +2,8 @@
 
 Architectural plus over-engineering re-evaluation of `packages/enforcement`, read-only, no code changed. Scope: the lever lifecycle (author a gate, wire it into a harness, fire on a denied tool call, emit a `gate.denial` event, land it as Feedback evidence), what is load-bearing versus carried over from the standalone `regimen-enforcement` repo (ADR-0004 era), and the simplest target shape now that the monorepo dispatches in-process (ADR-0012) with Feedback as the center (ADR-0013). Every claim cites `file:line`.
 
+> SUPERSEDED IN PART (2026-06-25): the `gate.denial` emit seam this report marks load-bearing (`denial-store.ts` plus `hooks/emit-denial.ts`) was later DROPPED after empirical validation that a denial already lands in the captured transcript as an `is_error` tool-result Feedback reads on every harness; see the CORRECTED note and DECISIONS in `plans/enforcement-respond-helper-design.md`. Kept unedited below as the original point-in-time report.
+
 ## 1. File map across the lever lifecycle (author, wire, fire, emit, Feedback)
 
 The package splits cleanly into three layers: the GATES (the things that deny), the WIRING (the installer that puts them into a harness hooks file), and the EMIT SEAM (how a fired denial becomes a Feedback row). Here is each file and where it sits in the author-wire-fire-emit-land chain.
