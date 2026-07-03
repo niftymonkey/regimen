@@ -3,68 +3,130 @@
  *
  * A cross-conversation read over the per-conversation verdicts already in the
  * store. This module owns the source-of-truth NUMBERS: the count of judged
- * conversations and their Outcome distribution, computed straight from SQL by
- * reusing {@link listJudgedSessions}. The synthesis layer (a later slice) reads
- * these numbers plus the assessment prose and interprets them, but it never
- * recomputes a count: the model miscounts buckets, so every number the rollup
- * reports comes from here, never from the model (the SQL-vs-model split).
+ * conversations and a per-signal value distribution, computed straight from SQL
+ * over the judged set. The synthesis layer (a later slice) reads these numbers
+ * plus the assessment prose and interprets them, but it never recomputes a
+ * count: the model miscounts buckets, so every number the rollup reports comes
+ * from here, never from the model (the SQL-vs-model split).
  *
- * Pure SQLite read: no Judge, no network, no writes, no schema change.
+ * Generalized per ADR-0017: the header is no longer only an Outcome tally. Every
+ * always-on signal must be a trustworthy number for both consumers, so the
+ * header groups the judged rows by `signal_name` and `value`, returning one
+ * distribution per signal. Pure SQLite read: no Judge, no network, no writes.
  */
 import type { Database } from "bun:sqlite";
 import { listJudgedSessions, type JudgedSessionFilter } from "./slice.ts";
 
-/** One bucket of the Outcome distribution: a value and how many verdicts hold it. */
-export interface OutcomeTally {
-  readonly outcome: string;
+/** One bucket of a signal's distribution: a value and how many verdicts hold it. */
+export interface SignalBucket {
+  readonly value: string;
   readonly count: number;
+}
+
+/** One signal's value distribution across the judged set. */
+export interface SignalDistribution {
+  readonly signalName: string;
+  readonly buckets: ReadonlyArray<SignalBucket>;
 }
 
 /**
  * The deterministic head of a verdict rollup: the total judged conversations and
- * their Outcome distribution. Every number a rollup reports comes from here.
+ * a value distribution per emitted signal. Every number a rollup reports comes
+ * from here.
  */
 export interface RollupHeader {
   readonly totalJudged: number;
-  readonly distribution: ReadonlyArray<OutcomeTally>;
+  readonly distributions: ReadonlyArray<SignalDistribution>;
 }
 
 /**
- * The Outcome values in ordinal order, worst to best (ADR-0008). The
- * distribution lists present outcomes in this order; any value outside it (an
- * unscored/incomplete run, or a future vocabulary member) sorts after, by name.
+ * The derived Outcome values in ordinal order, worst to best (ADR-0017). The
+ * outcome distribution lists present values in this order; any value outside it
+ * (an old pre-re-sweep verdict, or a future vocabulary member) sorts after, by
+ * name. Every other signal's buckets sort by value name.
  */
 const OUTCOME_ORDER: readonly string[] = [
-  "abandoned",
+  "not-accomplished",
   "partial",
-  "accomplished-with-correction",
+  "accomplished-under-heavy-correction",
+  "accomplished-under-light-correction",
   "accomplished-cleanly",
 ];
 
 /**
  * Read the deterministic header for the judged conversations matching `filter`.
- * Reuses {@link listJudgedSessions} for selection, then tallies the Outcome
- * values it returns. Every number here comes straight from SQL.
+ * `totalJudged` reuses {@link listJudgedSessions} for the judged-only selection;
+ * the distributions come from a single GROUP BY over the judged rows. Every
+ * number here comes straight from SQL.
  */
 export function rollupHeader(
   db: Database,
   filter?: JudgedSessionFilter,
 ): RollupHeader {
-  const sessions = listJudgedSessions(db, filter);
-  const counts = new Map<string, number>();
-  for (const session of sessions) {
-    const outcome = session.outcome ?? "(unscored)";
-    counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
+  const totalJudged = listJudgedSessions(db, filter).length;
+
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (filter?.harness !== undefined) {
+    clauses.push("c.harness = ?");
+    params.push(filter.harness);
   }
-  const ordered = [
-    ...OUTCOME_ORDER.filter((outcome) => counts.has(outcome)),
-    ...[...counts.keys()].filter((o) => !OUTCOME_ORDER.includes(o)).sort(),
-  ];
-  return {
-    totalJudged: sessions.length,
-    distribution: ordered.map((outcome) => ({
-      outcome,
-      count: counts.get(outcome) ?? 0,
-    })),
-  };
+  if (filter?.model !== undefined) {
+    clauses.push("c.model = ?");
+    params.push(filter.model);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+
+  // The writer supersede leaves only the latest run's rows in judged_signal, so
+  // grouping the whole table (scoped by the conversations join) is the latest
+  // verdict per session. json-decode each value to compare and report it plainly.
+  const rows = db
+    .prepare(
+      `SELECT s.signal_name AS signal_name, s.value AS value, COUNT(*) AS n
+         FROM judged_signal s
+         JOIN conversations c USING (session_id)
+         ${where}
+        GROUP BY s.signal_name, s.value`,
+    )
+    .all(...params) as ReadonlyArray<{
+    signal_name: string;
+    value: string;
+    n: number;
+  }>;
+
+  const bySignal = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    const value = JSON.parse(row.value) as string;
+    const buckets = bySignal.get(row.signal_name) ?? new Map<string, number>();
+    buckets.set(value, row.n);
+    bySignal.set(row.signal_name, buckets);
+  }
+
+  const distributions = [...bySignal.keys()].sort().map((signalName) => ({
+    signalName,
+    buckets: orderBuckets(signalName, bySignal.get(signalName)!),
+  }));
+
+  return { totalJudged, distributions };
+}
+
+/**
+ * Order one signal's buckets deterministically: the outcome distribution by the
+ * worst-to-best {@link OUTCOME_ORDER} (unknown values after, by name), every
+ * other signal by value name.
+ */
+function orderBuckets(
+  signalName: string,
+  counts: Map<string, number>,
+): ReadonlyArray<SignalBucket> {
+  const values =
+    signalName === "outcome"
+      ? [
+          ...OUTCOME_ORDER.filter((value) => counts.has(value)),
+          ...[...counts.keys()]
+            .filter((value) => !OUTCOME_ORDER.includes(value))
+            .sort(),
+        ]
+      : [...counts.keys()].sort();
+  return values.map((value) => ({ value, count: counts.get(value)! }));
 }
