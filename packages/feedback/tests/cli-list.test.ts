@@ -9,7 +9,7 @@
  * the env and the streams so the in-process driving leaves no global state.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -21,7 +21,7 @@ import {
 } from "../src/judged/writer.ts";
 import type { JudgeResult, OutcomeValue } from "../src/judged/types.ts";
 
-const MANAGED_ENV = ["REGIMEN_DATA_DIR"];
+const MANAGED_ENV = ["REGIMEN_DATA_DIR", "COPILOT_HOME", "GEMINI_CONFIG_DIR"];
 const ASSIGNMENT = "whole-conversation";
 
 let savedEnv: Record<string, string | undefined>;
@@ -261,4 +261,141 @@ test("feedback list with an unparseable --since exits 1 with a clear error", asy
   const { exit, stderr } = await runList(["--since", "last-tuesday"], dataDir);
   expect(exit).toBe(1);
   expect(stderr).toContain("could not parse since");
+});
+
+test("feedback list backfills a copilot session's model from its transcript when the hook payload carried none", async () => {
+  const dataDir = tempDir("regimen-list-backfill-copilot-");
+  const copilotHome = tempDir("regimen-copilot-home-");
+  process.env.COPILOT_HOME = copilotHome;
+
+  const sessionId = "e2ba254f-5455-47e2-aa80-1bc2706d7294";
+  const store = openStore(join(dataDir, "feedback.db"));
+  try {
+    seedSession(store.db, {
+      sessionId,
+      harness: "copilot",
+      model: null,
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:00:02.000Z",
+    });
+  } finally {
+    store.close();
+  }
+
+  const transcriptDir = join(copilotHome, "session-state", sessionId);
+  mkdirSync(transcriptDir, { recursive: true });
+  writeFileSync(
+    join(transcriptDir, "events.jsonl"),
+    [
+      JSON.stringify({
+        type: "session.start",
+        data: { sessionId, context: { cwd: "/work/p" } },
+        id: "evt-start",
+        timestamp: "2026-06-15T10:00:00.000Z",
+        parentId: null,
+      }),
+      JSON.stringify({
+        type: "user.message",
+        data: { content: "add a test for the parser" },
+        id: "evt-user",
+        timestamp: "2026-06-15T10:00:01.000Z",
+        parentId: "evt-start",
+      }),
+      JSON.stringify({
+        type: "assistant.message",
+        data: {
+          content: "Done, the parser test passes.",
+          model: "gpt-5-mini",
+        },
+        id: "evt-answer",
+        timestamp: "2026-06-15T10:00:02.000Z",
+        parentId: "evt-user",
+      }),
+    ].join("\n"),
+  );
+
+  const { exit, stdout } = await runList(["--json"], dataDir);
+  expect(exit).toBe(0);
+  const rows = JSON.parse(stdout);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].model).toBe("gpt-5-mini");
+});
+
+test("feedback list backfills a gemini session's model from its transcript when the hook payload carried none", async () => {
+  const dataDir = tempDir("regimen-list-backfill-gemini-");
+  const geminiConfigDir = tempDir("regimen-gemini-config-");
+  process.env.GEMINI_CONFIG_DIR = geminiConfigDir;
+
+  const sessionId = "bbddfdf7-482c-4b2d-bbfb-c9ba0982f534";
+  const store = openStore(join(dataDir, "feedback.db"));
+  try {
+    seedSession(store.db, {
+      sessionId,
+      harness: "gemini",
+      model: null,
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:00:02.000Z",
+    });
+  } finally {
+    store.close();
+  }
+
+  const chatsDir = join(geminiConfigDir, "tmp", "dev", "chats");
+  mkdirSync(chatsDir, { recursive: true });
+  writeFileSync(
+    join(chatsDir, `session-2026-06-15T10-00-${sessionId.slice(0, 8)}.jsonl`),
+    [
+      JSON.stringify({
+        sessionId,
+        projectHash: "ph",
+        startTime: "2026-06-15T10:00:00.000Z",
+        lastUpdated: "2026-06-15T10:00:00.000Z",
+        kind: "main",
+      }),
+      JSON.stringify({
+        id: "c9677e0c-c6b0-4fce-913a-ad01c9d0de44",
+        timestamp: "2026-06-15T10:00:01.000Z",
+        type: "user",
+        content: [{ text: "add a test for the parser" }],
+      }),
+      JSON.stringify({
+        id: "424b570c-8af7-4362-b336-cb3581b0507c",
+        timestamp: "2026-06-15T10:00:02.000Z",
+        type: "gemini",
+        content: "Done, the parser test passes.",
+        model: "gemini-3.5-flash",
+      }),
+    ].join("\n"),
+  );
+
+  const { exit, stdout } = await runList(["--json"], dataDir);
+  expect(exit).toBe(0);
+  const rows = JSON.parse(stdout);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].model).toBe("gemini-3.5-flash");
+});
+
+test("feedback list leaves a null model as null when no transcript is locatable", async () => {
+  const dataDir = tempDir("regimen-list-backfill-none-");
+  delete process.env.COPILOT_HOME;
+
+  const sessionId = "e2ba254f-5455-47e2-aa80-1bc2706d7295";
+  const store = openStore(join(dataDir, "feedback.db"));
+  try {
+    seedSession(store.db, {
+      sessionId,
+      harness: "copilot",
+      model: null,
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:00:02.000Z",
+    });
+  } finally {
+    store.close();
+  }
+
+  const { exit, stdout } = await runList(["--json"], dataDir);
+  expect(exit).toBe(0);
+  const rows = JSON.parse(stdout);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].model).toBeNull();
 });
