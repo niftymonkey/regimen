@@ -19,8 +19,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dispatchFeedback } from "./facade-dispatch.ts";
+import type { SetupSource } from "../src/judged/setup.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
+
+/**
+ * A no-op setup source: resolve always returns undefined, so the judge stays
+ * setup-blind exactly as it was before setup wiring. Injected into every assess
+ * call here so the suite never reaches the live adapter, which would otherwise
+ * read the developer's real home (CLAUDE.md / skills), making the test
+ * non-hermetic. The canned mock judge ignores prompt content, so the digest
+ * assertions are unchanged.
+ */
+const NOOP_SETUP_SOURCE: SetupSource = { resolve: () => undefined };
 
 /**
  * The per-harness marker env vars the resolver falls back to when REGIMEN_HARNESS
@@ -107,7 +118,9 @@ async function runCliWith(
     stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
     return true;
   }) as typeof process.stderr.write;
-  const exit = await dispatchFeedback(args);
+  const exit = await dispatchFeedback(args, {
+    setupSource: NOOP_SETUP_SOURCE,
+  });
   return { exit, stdout, stderr };
 }
 

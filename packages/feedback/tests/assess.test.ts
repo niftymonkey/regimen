@@ -12,7 +12,12 @@ import { join } from "node:path";
 import { openStore, type Store } from "../src/store.ts";
 import { rolloutContent } from "../src/loader/rollout/codex-reader.ts";
 import { assessConversation } from "../src/judged/assess.ts";
-import type { JudgeModelPort, JudgeModelResponse } from "../src/judged/port.ts";
+import type {
+  JudgeModelPort,
+  JudgeModelRequest,
+  JudgeModelResponse,
+} from "../src/judged/port.ts";
+import type { SetupSource } from "../src/judged/setup.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
 
@@ -101,6 +106,154 @@ function stubJudgeModel(content: string): JudgeModelPort {
     },
   };
 }
+
+/**
+ * A judge model that wraps {@link stubJudgeModel} (so the run completes with a
+ * real verdict) while recording the last request, so a test can assert on the
+ * prompt the orchestrator threaded into the judge.
+ */
+function capturingJudgeModel(content: string): JudgeModelPort & {
+  lastRequest: () => JudgeModelRequest | undefined;
+} {
+  const inner = stubJudgeModel(content);
+  let last: JudgeModelRequest | undefined;
+  return {
+    complete(request: JudgeModelRequest): Promise<JudgeModelResponse> {
+      last = request;
+      return inner.complete(request);
+    },
+    lastRequest: () => last,
+  };
+}
+
+/** A recognizable convention text and practice name a stub setup carries. */
+const STUB_CONVENTION = "STUB-CONVENTION honored across the conversation";
+const STUB_PRACTICE = "stub-practice";
+
+/** A stub SetupSource returning a fixed EngineerSetup for any cwd/asOf. */
+function stubSetupSource(): SetupSource {
+  return {
+    resolve() {
+      return {
+        conventions: [{ scope: "project", text: STUB_CONVENTION }],
+        practices: [{ name: STUB_PRACTICE, summary: "a stub practice" }],
+      };
+    },
+  };
+}
+
+test("an injected setup source threads the engineer's setup into the judge prompt", async () => {
+  await withHarness(async ({ store, sessionsDir }) => {
+    seedRollout(sessionsDir);
+    const judge = capturingJudgeModel(TRANSCRIPT);
+    await assessConversation({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      llm: judge,
+      setupSource: stubSetupSource(),
+      runId: "run-1",
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    const request = judge.lastRequest();
+    expect(request).toBeDefined();
+    const full = `${request!.system}\n${request!.user}`;
+    expect(full).toContain(STUB_CONVENTION);
+    expect(full).toContain(STUB_PRACTICE);
+  });
+});
+
+/**
+ * A SetupSource that records the input it was resolved with, so a test can
+ * assert on what cwd (if any) the orchestrator passed through.
+ */
+function capturingSetupSource(): SetupSource & {
+  lastInput: () => { cwd?: string; asOf: Date } | undefined;
+} {
+  let last: { cwd?: string; asOf: Date } | undefined;
+  return {
+    resolve(input) {
+      last = input;
+      return undefined;
+    },
+    lastInput: () => last,
+  };
+}
+
+test("a conversation with no reported cwd resolves setup with no cwd, never the CLI's own", async () => {
+  await withHarness(async ({ store, sessionsDir }) => {
+    // session_meta with no cwd field: the reader never observes one.
+    const noCwdTranscript = [
+      line({
+        timestamp: "2026-06-15T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: SESSION, originator: "codex_exec", source: "exec" },
+      }),
+      line({
+        timestamp: "2026-06-15T10:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "add a test for the parser" }],
+        },
+      }),
+      line({
+        timestamp: "2026-06-15T10:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [
+            { type: "output_text", text: "Done, the parser test passes." },
+          ],
+        },
+      }),
+    ].join("\n");
+    seedRollout(sessionsDir, noCwdTranscript);
+
+    const setupSource = capturingSetupSource();
+    await assessConversation({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      llm: stubJudgeModel(noCwdTranscript),
+      setupSource,
+      runId: "run-1",
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    const input = setupSource.lastInput();
+    expect(input).toBeDefined();
+    expect(input!.cwd).toBeUndefined();
+  });
+});
+
+test("with no setup source injected the judge prompt stays setup-blind", async () => {
+  await withHarness(async ({ store, sessionsDir }) => {
+    seedRollout(sessionsDir);
+    const judge = capturingJudgeModel(TRANSCRIPT);
+    await assessConversation({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      llm: judge,
+      runId: "run-1",
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    const request = judge.lastRequest();
+    expect(request).toBeDefined();
+    expect(request!.system).not.toContain("Expected-behaviors adherence");
+    expect(request!.user).not.toContain(
+      "Expected behaviors (the engineer's own setup)",
+    );
+  });
+});
 
 /** A second well-formed verdict the stub returns on a re-judge. */
 function rejudgeStub(content: string): JudgeModelPort {

@@ -13,7 +13,10 @@ import type { AnchorRef, ContentChunk } from "../loader/reader-types.ts";
 import type { JudgeModelPort } from "./port.ts";
 import { resolveDefaultJudgeModel } from "./anthropic-adapter.ts";
 import { buildJudgePrompt } from "./prompt.ts";
+import type { EngineerSetup } from "./setup.ts";
+import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
+  EngagementValue,
   IntentValue,
   JudgedNarrative,
   JudgedSignal,
@@ -32,11 +35,14 @@ export interface JudgeConfig {
   readonly promptVersion?: string;
   readonly retryBudget?: number;
   readonly now?: () => Date;
+  /**
+   * The engineer's setup (the expected behaviors) the prompt weighs, resolved by
+   * the orchestrator as of the conversation's time. Optional and additive: when
+   * absent the prompt is byte-identical to the setup-blind baseline.
+   */
+  readonly setup?: EngineerSetup;
 }
 
-/** The date-stamped defaults for v1 (spec section 9.3). */
-const DEFAULT_RUBRIC_VERSION = "2026-06-15";
-const DEFAULT_PROMPT_VERSION = "2026-06-15";
 const DEFAULT_RETRY_BUDGET = 2;
 
 /** The closed Intent vocabulary (ADR-0008). `other` is the escape. */
@@ -56,6 +62,12 @@ const OUTCOME_VALUES: ReadonlySet<string> = new Set<OutcomeValue>([
   "partial",
   "accomplished-with-correction",
   "accomplished-cleanly",
+]);
+
+/** The closed Engagement vocabulary (Decision 5 of the judge-prompt design). */
+const ENGAGEMENT_VALUES: ReadonlySet<string> = new Set<EngagementValue>([
+  "engaged",
+  "not-engaged",
 ]);
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
@@ -84,11 +96,11 @@ export async function judgeConversation(
   // production default adapter over the engineer's configured Claude is
   // resolved from the environment; tests inject a deterministic stub.
   const llm = config.llm ?? resolveDefaultJudgeModel();
-  const rubricVersion = config.rubricVersion ?? DEFAULT_RUBRIC_VERSION;
-  const promptVersion = config.promptVersion ?? DEFAULT_PROMPT_VERSION;
+  const rubricVersion = config.rubricVersion ?? RUBRIC_VERSION;
+  const promptVersion = config.promptVersion ?? PROMPT_VERSION;
   const retryBudget = config.retryBudget ?? DEFAULT_RETRY_BUDGET;
 
-  const prompt = buildJudgePrompt(input.chunks);
+  const prompt = buildJudgePrompt(input.chunks, config.setup);
   let lastModel = "unknown";
   let parseError: string | undefined;
 
@@ -175,6 +187,7 @@ interface ParsedVerdict {
   readonly intent?: ParsedClaim;
   readonly outcome?: ParsedClaim;
   readonly assessment?: ParsedClaim;
+  readonly engagement?: ParsedClaim;
 }
 
 /**
@@ -274,6 +287,23 @@ function buildSignals(
         signalName: "outcome",
         valueKind: "ordinal",
         value: verdict.outcome.value as OutcomeValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
+    verdict.engagement !== undefined &&
+    typeof verdict.engagement.value === "string" &&
+    ENGAGEMENT_VALUES.has(verdict.engagement.value)
+  ) {
+    const anchors = resolveAnchors(verdict.engagement.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "engagement",
+        valueKind: "categorical",
+        value: verdict.engagement.value as EngagementValue,
         anchors,
       });
     }

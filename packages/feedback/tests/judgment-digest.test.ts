@@ -127,6 +127,37 @@ test("a complete run reads the judged branch led by the assessment and the lone 
   });
 });
 
+test("an engagement signal round-trips through the writer into the digest's signals", () => {
+  withStore((store) => {
+    const result: JudgeResult = {
+      ...fullResult(),
+      signals: [
+        ...fullResult().signals,
+        {
+          scope: "conversation",
+          signalName: "engagement",
+          valueKind: "categorical",
+          value: "not-engaged",
+          anchors: [{ eventHash: "c".repeat(64) }],
+        },
+      ],
+    };
+    writeAssessment(store, run("run-1", "2026-06-15T10:00:00.000Z"), result);
+    const digest = readJudgmentDigest(store.db, SESSION, FIXED);
+    if (digest.judged !== true) throw new Error("expected judged");
+
+    // The conversation-scoped engagement signal flows generically into the
+    // digest's signals drill-down (no digest change needed: it reads all rows).
+    const engagement = digest.assignment.signals.find(
+      (s) => s.signalName === "engagement",
+    );
+    expect(engagement).toBeDefined();
+    expect(engagement!.value).toBe("not-engaged");
+    expect(engagement!.valueKind).toBe("categorical");
+    expect(engagement!.anchors).toEqual([{ eventHash: "c".repeat(64) }]);
+  });
+});
+
 test("an incomplete run still renders the judged branch carrying complete=false", () => {
   withStore((store) => {
     const incomplete: JudgeResult = {

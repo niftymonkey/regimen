@@ -27,6 +27,17 @@ import {
   wireHooks,
   type SessionFilter,
 } from "../src/cli/index.ts";
+import type { SetupSource } from "../src/judged/setup.ts";
+
+/** Optional injection a suite can pass through the dispatcher to a facade. */
+export interface DispatchOptions {
+  /**
+   * The setup source to inject into the `assess` facade. A suite passes a no-op
+   * source (resolve returns undefined) to keep `assess` hermetic, so the test
+   * never reads the developer's real home through the live adapter default.
+   */
+  readonly setupSource?: SetupSource;
+}
 
 /** Read a `--flag value` pair from argv, returning the value or undefined. */
 function flagValue(
@@ -65,6 +76,7 @@ function listFilter(args: ReadonlyArray<string>): SessionFilter {
  */
 export async function dispatchFeedback(
   argv: ReadonlyArray<string>,
+  options: DispatchOptions = {},
 ): Promise<number> {
   const [command, ...rest] = argv;
   const dataDir = process.env.REGIMEN_DATA_DIR ?? "";
@@ -98,6 +110,9 @@ export async function dispatchFeedback(
         ...(session !== undefined ? { session } : {}),
         ...(judgeModel !== undefined ? { judgeModel } : {}),
         ...(judgeVia === "cli" || judgeVia === "api" ? { judgeVia } : {}),
+        ...(options.setupSource !== undefined
+          ? { setupSource: options.setupSource }
+          : {}),
       });
     }
     case "list":
