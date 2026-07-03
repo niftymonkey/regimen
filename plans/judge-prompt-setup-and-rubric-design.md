@@ -46,7 +46,7 @@ The SetupSource adapter is the capture/adapter edge for setup, so per the projec
 
 How setup is discovered (no Claude-only path):
 
-- Stated conventions: a generic glob over a REGISTERED SET of agent-instruction file names at the conversation's repository root and at the engineer's home, not a single hardcoded path. CLAUDE.md and AGENTS.md are both just "the engineer's stated conventions"; GEMINI.md or any future harness's file joins the same registered set. The registry is the only harness-aware datum, and it lives at the edge.
+- Stated conventions: a lookup over a REGISTERED ROSTER of agent-instruction file names at the conversation's repository root and at the engineer's home, not a single hardcoded path. The adapter probes each registered exact filename; there is no wildcard matching. CLAUDE.md and AGENTS.md are both just "the engineer's stated conventions"; GEMINI.md or any future harness's file joins the same registered set. The registry is the only harness-aware datum, and it lives at the edge.
 - Established practices: the engineer's skill or practice directories (for example a harness skill folder, or a harness-agnostic skills location), each practice normalized to its name and its one-line summary or leading words. Again the directory locations are a registered set at the edge, normalized immediately.
 - Standing rules: carried inside the same convention files; no separate source.
 
@@ -104,7 +104,7 @@ Reversibility: HIGH (prompt text), but it changes verdicts, so it bumps `rubricV
 ADR-0016 notes that two of the four Outcome values (abandoned, partial) are non-accomplished and "currently indistinguishable as to cause." Model the cause as a new categorical judged signal, `engagement`, conversation-scoped, with the closed value set `engaged | not-engaged`:
 
 - engaged: the conversation genuinely became a work session on the assignment; the work was attempted in earnest.
-- not-engaged: the conversation never really became a work session on the assignment (a throwaway question, an aborted start, an unrelated detour, a setup blip); non-accomplishment here is not the AI failing at a real task.
+- not-engaged: the conversation never really became a work session on the assignment (a throwaway question, an aborted start, an unrelated detour, a setup blip [SUPERSEDED: ADR-0017 strikes the setup-blip wording]); non-accomplishment here is not the AI failing at a real task.
 
 `engagement` is orthogonal to Outcome and always defined, so the CAUSE of any non-accomplished verdict is read by COMPOSING the two: `not-engaged + abandoned` means the session was never a real attempt, while `engaged + abandoned|partial` means the AI fell short on real work. The orthogonal framing also gives the rollup a denominator: it can exclude `not-engaged` conversations before tallying "the AI fell short," so a corpus full of quick throwaway questions does not drag down the apparent performance.
 
