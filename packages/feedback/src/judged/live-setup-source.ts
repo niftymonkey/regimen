@@ -152,8 +152,9 @@ function readPractices(dirs: ReadonlyArray<string>): EstablishedPractice[] {
  * Normalize one directory entry to a practice, or undefined when it is not a
  * recognized one. A directory is a practice only if it carries a SKILL.md
  * (name/summary from that manifest's frontmatter, else its directory name and
- * the manifest's leading words); a plain file is a practice named by its file
- * name with the file's leading words as the summary.
+ * the manifest's leading words); a plain MARKDOWN file is a practice named by
+ * its file name with the file's leading words as the summary. Any other plain
+ * file (an OS artifact, a stray note) is not a practice.
  */
 function describePractice(
   dir: string,
@@ -165,6 +166,7 @@ function describePractice(
     return describeFromManifest(manifest, entry.name);
   }
   if (entry.isFile()) {
+    if (extname(entry.name).toLowerCase() !== ".md") return undefined;
     const text = tryReadText(join(dir, entry.name));
     if (text === undefined) return undefined;
     const name = basename(entry.name, extname(entry.name));
