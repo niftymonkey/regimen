@@ -155,7 +155,10 @@ export async function assessConversation(
  * Resolve the engineer's setup for one conversation through the injected source,
  * time-scoped to the conversation and rooted at the conversation's working
  * directory. Returns undefined when no source is injected (the judge stays
- * setup-blind) or the source discovers nothing.
+ * setup-blind) or the source discovers nothing. Never falls back to the CLI's
+ * own process cwd: an archived conversation that reported no cwd of its own
+ * must resolve setup with no cwd, not silently against whatever repo `assess`
+ * happens to be invoked from (e.g. during `assess --all` over other repos).
  */
 function resolveSetup(
   source: SetupSource | undefined,
@@ -164,7 +167,7 @@ function resolveSetup(
 ): EngineerSetup | undefined {
   if (source === undefined) return undefined;
   return source.resolve({
-    cwd: conversationCwd(events) ?? process.cwd(),
+    cwd: conversationCwd(events),
     asOf: conversationAsOf(events, now),
   });
 }

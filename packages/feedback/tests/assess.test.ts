@@ -165,6 +165,73 @@ test("an injected setup source threads the engineer's setup into the judge promp
   });
 });
 
+/**
+ * A SetupSource that records the input it was resolved with, so a test can
+ * assert on what cwd (if any) the orchestrator passed through.
+ */
+function capturingSetupSource(): SetupSource & {
+  lastInput: () => { cwd?: string; asOf: Date } | undefined;
+} {
+  let last: { cwd?: string; asOf: Date } | undefined;
+  return {
+    resolve(input) {
+      last = input;
+      return undefined;
+    },
+    lastInput: () => last,
+  };
+}
+
+test("a conversation with no reported cwd resolves setup with no cwd, never the CLI's own", async () => {
+  await withHarness(async ({ store, sessionsDir }) => {
+    // session_meta with no cwd field: the reader never observes one.
+    const noCwdTranscript = [
+      line({
+        timestamp: "2026-06-15T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: SESSION, originator: "codex_exec", source: "exec" },
+      }),
+      line({
+        timestamp: "2026-06-15T10:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "add a test for the parser" }],
+        },
+      }),
+      line({
+        timestamp: "2026-06-15T10:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [
+            { type: "output_text", text: "Done, the parser test passes." },
+          ],
+        },
+      }),
+    ].join("\n");
+    seedRollout(sessionsDir, noCwdTranscript);
+
+    const setupSource = capturingSetupSource();
+    await assessConversation({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      llm: stubJudgeModel(noCwdTranscript),
+      setupSource,
+      runId: "run-1",
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    const input = setupSource.lastInput();
+    expect(input).toBeDefined();
+    expect(input!.cwd).toBeUndefined();
+  });
+});
+
 test("with no setup source injected the judge prompt stays setup-blind", async () => {
   await withHarness(async ({ store, sessionsDir }) => {
     seedRollout(sessionsDir);
