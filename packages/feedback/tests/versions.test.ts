@@ -8,10 +8,10 @@
 import { expect, test } from "bun:test";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "../src/judged/versions.ts";
 
-test("RUBRIC_VERSION is the taxonomy-step-2 date-stamped value", () => {
-  expect(RUBRIC_VERSION).toBe("2026-07-04");
+test("RUBRIC_VERSION is the taxonomy-step-3 date-stamped value", () => {
+  expect(RUBRIC_VERSION).toBe("2026-07-04.2");
 });
 
-test("PROMPT_VERSION is the taxonomy-step-2 date-stamped value", () => {
-  expect(PROMPT_VERSION).toBe("2026-07-04");
+test("PROMPT_VERSION is the taxonomy-step-3 date-stamped value", () => {
+  expect(PROMPT_VERSION).toBe("2026-07-04.2");
 });

@@ -25,8 +25,12 @@ export type SignalName =
   | "correction-cost"
   | "outcome"
   | "engagement"
+  | "framing"
+  | "conducting"
   | "verification"
-  | "attribution";
+  | "effort"
+  | "attribution"
+  | "convention-adherence";
 
 /**
  * The open value-kind tag (ADR-0008). `categorical` and `ordinal` are the live
@@ -69,6 +73,35 @@ export type CorrectionCostValue = "none" | "light" | "heavy";
 export type EngagementValue = "engaged" | "not-engaged";
 
 /**
+ * Framing: how clearly the goal, scope, and context were stated at the outset,
+ * rank-ordered low to high (ADR-0017). Conversation-scoped and always-on; its
+ * poor floor `underspecified` is the Framing shortfall home even on a session
+ * that still succeeded. Degrades cleanly to a binary `underspecified < clear`.
+ */
+export type FramingValue = "underspecified" | "adequate" | "clear";
+
+/**
+ * Conducting: how the engineer ran the work in flight (decomposition, autonomy,
+ * intervention timing, context resets), rank-ordered low to high (ADR-0017).
+ * Conversation-scoped and always-on. A quality of steering, distinct from
+ * correction-cost's magnitude: a well-conducted session can carry heavy
+ * correction. Degrades cleanly to a binary `poorly-conducted < well-conducted`.
+ */
+export type ConductingValue =
+  | "poorly-conducted"
+  | "adequately-conducted"
+  | "well-conducted";
+
+/**
+ * Effort: the grind of the AI's own path (tool thrash, stalls, repeated-file
+ * churn, self-recovery), rank-ordered low to high (ADR-0017). Conversation-scoped
+ * and always-on, an objective deterministically-anchorable magnitude that feeds
+ * the driver's two cost reads; never a "worth it" verdict, which is the
+ * engineer's call.
+ */
+export type EffortValue = "low" | "moderate" | "high";
+
+/**
  * Verification: whether the engineer's own visible check of the AI's output
  * happened, categorical and conversation-scoped (ADR-0017). Not an ordinal: both
  * `accepted-unverified` (over-trust) and `over-verified` (wasteful under-trust)
@@ -98,6 +131,18 @@ export type AttributionValue =
   | "leverage"
   | "ai"
   | "environment";
+
+/**
+ * Convention-adherence: whether the AI honored the engineer's stated conventions
+ * and established practices, categorical and conversation-scoped (ADR-0017). An
+ * AI-action fact, not a person verdict; always-on but abstain-when-none-in-force
+ * (no row when no conventions are in force), so every emitted value is anchorable.
+ * It gives the consumers a sliceable convention-honored rate prose cannot.
+ */
+export type ConventionAdherenceValue =
+  | "followed"
+  | "partially-followed"
+  | "violated";
 
 /** Why a run did not finish clean. Absent on a complete run. */
 export type IncompleteReason =
@@ -141,8 +186,12 @@ export interface JudgedSignal {
     | CorrectionCostValue
     | DerivedOutcomeValue
     | EngagementValue
+    | FramingValue
+    | ConductingValue
     | VerificationValue
-    | AttributionValue;
+    | EffortValue
+    | AttributionValue
+    | ConventionAdherenceValue;
   readonly anchors: ReadonlyArray<AnchorRef>;
 }
 
