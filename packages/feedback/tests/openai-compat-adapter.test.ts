@@ -111,6 +111,46 @@ test("the adapter throws on a non-2xx response so the Judge sees a transport fai
   await expect(llm.complete({ system: "s", user: "u" })).rejects.toThrow();
 });
 
+test("the adapter passes an abort signal to fetch so a stalled endpoint is bounded", async () => {
+  const captured: CapturedRequest[] = [];
+  const llm = openAiCompatJudgeModel({
+    apiKey: "sk-or-test",
+    model: "some-model",
+    baseUrl: "https://openrouter.ai/api/v1",
+    fetch: mockFetch(captured, CHAT_RESPONSE),
+  });
+
+  await llm.complete({ system: "s", user: "u" });
+  expect(captured[0]!.init.signal).toBeInstanceOf(AbortSignal);
+});
+
+test("the adapter surfaces a clean timeout error when the endpoint stalls past the deadline", async () => {
+  // A fetch that honors its abort signal but otherwise never resolves, the
+  // stalled-local-endpoint failure mode; a tiny injected timeout keeps the
+  // test instant.
+  const stalledFetch = ((
+    _url: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("The operation was aborted.", "AbortError")),
+      );
+    })) as typeof fetch;
+
+  const llm = openAiCompatJudgeModel({
+    apiKey: "sk-or-test",
+    model: "some-model",
+    baseUrl: "http://localhost:11434/v1",
+    timeoutMs: 10,
+    fetch: stalledFetch,
+  });
+
+  await expect(llm.complete({ system: "s", user: "u" })).rejects.toThrow(
+    /timed out/,
+  );
+});
+
 test("the adapter returns an empty string when the response carries no choice content", async () => {
   const captured: CapturedRequest[] = [];
   const llm = openAiCompatJudgeModel({

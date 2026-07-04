@@ -31,12 +31,23 @@ export interface OpenAiCompatJudgeModelOptions {
   readonly model: string;
   /** The chat-completions base URL, e.g. an OpenRouter or local endpoint. */
   readonly baseUrl: string;
+  /** The request deadline in milliseconds; injectable for tests. */
+  readonly timeoutMs?: number;
   /** Injectable for tests; defaults to the global fetch in production. */
   readonly fetch?: typeof fetch;
 }
 
 /** A sane output cap for one whole-conversation verdict (one JSON object). */
 const MAX_TOKENS = 4096;
+
+/**
+ * The default request deadline. A stalled endpoint (a real failure mode for the
+ * local keyless backends this adapter targets) must fail the port call, which
+ * the Judge maps to an honest llm-unavailable run, rather than wedge the process
+ * indefinitely. One whole-conversation verdict from a slow free-tier or local
+ * model can legitimately take tens of seconds, so the bound is conservative.
+ */
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 /** One choice of a chat-completions response. */
 interface ChatCompletionChoice {
@@ -62,18 +73,36 @@ export function openAiCompatJudgeModel(
         headers["authorization"] = `Bearer ${options.apiKey}`;
       }
 
-      const response = await doFetch(`${options.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model: options.model,
-          max_tokens: MAX_TOKENS,
-          messages: [
-            { role: "system", content: request.system },
-            { role: "user", content: request.user },
-          ],
-        }),
-      });
+      // Bound the request so a stalled endpoint fails the port call instead of
+      // hanging complete() (and with it the whole assess) forever.
+      const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let response: Response;
+      try {
+        response = await doFetch(`${options.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: options.model,
+            max_tokens: MAX_TOKENS,
+            messages: [
+              { role: "system", content: request.system },
+              { role: "user", content: request.user },
+            ],
+          }),
+        });
+      } catch (err) {
+        if (controller.signal.aborted) {
+          throw new Error(
+            `chat-completions request timed out after ${timeoutMs}ms; the endpoint at ${options.baseUrl} did not respond`,
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
 
       if (!response.ok) {
         throw new Error(
