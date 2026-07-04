@@ -23,7 +23,7 @@
 14. "Go" means background. A requested sweep runs as a sub-agent; the driving conversation continues immediately, with a one-line acknowledgment and a report when done (readable then or in any later conversation).
 15. Assessments run in sub-agents, not in the asking conversation's own context. This keeps the conversation clean and removes most self-judgment concern on the no-key path. Verdict provenance is always recorded but surfaces in an answer only when it would genuinely skew that answer.
 16. Proposals are two sentences, detail on request. What it does and where it applies, then "want it?"; mechanism, placement, and validation plan unpack only if asked.
-17. Enforcement is proposed only after asking has demonstrably failed. The respond flow first checks the history (the advisory lever existed and was ignored) before recommending a deterministic boundary, and says so in one plain sentence.
+17. Enforcement is proposed only after asking has demonstrably failed. The respond-step flow first checks the history (the advisory lever existed and was ignored) before recommending a deterministic boundary, and says so in one plain sentence.
 
 ## Canonical example
 
