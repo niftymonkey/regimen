@@ -138,6 +138,46 @@ test("rollupHeader returns a value distribution per signal, one bucket per value
   });
 });
 
+function judgeAt(
+  store: Store,
+  sessionId: string,
+  lastEventAt: string,
+  signals: ReadonlyArray<JudgedSignal>,
+): void {
+  store.db
+    .prepare(
+      `INSERT INTO conversations
+         (session_id, harness, model, first_event_at, last_event_at)
+       VALUES (?, 'claude', 'claude-opus-4-8', ?, ?)`,
+    )
+    .run(sessionId, lastEventAt, lastEventAt);
+  const run: AssessmentRunIdentity = {
+    runId: `run-${sessionId}`,
+    sessionId,
+    assignmentId: ASSIGNMENT,
+    createdAt: lastEventAt,
+  };
+  writeAssessment(store, run, resultWith(signals));
+}
+
+test("rollupHeader honors a since window, excluding an out-of-window judged conversation", () => {
+  withStore((store) => {
+    judgeAt(store, "recent", "2026-06-15T10:00:00.000Z", [
+      signal("outcome", "accomplished-cleanly"),
+    ]);
+    judgeAt(store, "old", "2026-06-10T10:00:00.000Z", [
+      signal("outcome", "partial"),
+    ]);
+
+    const header = rollupHeader(store.db, { since: "2026-06-12" });
+
+    expect(header.totalJudged).toBe(1);
+    expect(distributionFor(header, "outcome")?.buckets).toEqual([
+      { value: "accomplished-cleanly", count: 1 },
+    ]);
+  });
+});
+
 test("rollupHeader orders the outcome distribution worst to best", () => {
   withStore((store) => {
     judge(store, "a", [signal("outcome", "accomplished-cleanly")]);

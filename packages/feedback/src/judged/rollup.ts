@@ -15,7 +15,11 @@
  * distribution per signal. Pure SQLite read: no Judge, no network, no writes.
  */
 import type { Database } from "bun:sqlite";
-import { listJudgedSessions, type JudgedSessionFilter } from "./slice.ts";
+import {
+  listSessions,
+  type SessionFilter,
+  type SessionSummary,
+} from "../sessions.ts";
 
 /** One bucket of a signal's distribution: a value and how many verdicts hold it. */
 export interface SignalBucket {
@@ -54,41 +58,50 @@ const OUTCOME_ORDER: readonly string[] = [
 ];
 
 /**
+ * Select the judged conversations matching `filter`: the judged subset of
+ * {@link listSessions}, symmetric with the sweep's unjudged selection (the sweep
+ * keeps the unjudged, the rollup keeps the judged). Widening past harness/model
+ * to the full `SessionFilter` gives the rollup its time window (`since`/`until`)
+ * and outcome slice through the one resolver `listSessions` already owns, so no
+ * time-filtering is reimplemented and `listJudgedSessions` never learns
+ * since/until. `now` resolves the relative bounds. The single selection seam both
+ * the header and {@link collectVerdicts} share, so their sets cannot diverge.
+ */
+export function selectJudged(
+  db: Database,
+  filter?: SessionFilter,
+  now: () => number = Date.now,
+): ReadonlyArray<SessionSummary> {
+  return listSessions(db, filter ?? {}, now).filter((s) => s.judged);
+}
+
+/**
  * Read the deterministic header for the judged conversations matching `filter`.
- * `totalJudged` reuses {@link listJudgedSessions} for the judged-only selection;
- * the distributions come from a single GROUP BY over the judged rows. Every
- * number here comes straight from SQL.
+ * Selection is {@link selectJudged} (the judged subset of `listSessions`), so the
+ * header honors the same time window and slice as the verdicts it heads; the
+ * distributions come from a single GROUP BY over the judged rows of exactly that
+ * set. Every number here comes straight from SQL.
  */
 export function rollupHeader(
   db: Database,
-  filter?: JudgedSessionFilter,
+  filter?: SessionFilter,
+  now: () => number = Date.now,
 ): RollupHeader {
-  const totalJudged = listJudgedSessions(db, filter).length;
+  const sessionIds = selectJudged(db, filter, now).map((s) => s.sessionId);
+  if (sessionIds.length === 0) return { totalJudged: 0, distributions: [] };
 
-  const clauses: string[] = [];
-  const params: string[] = [];
-  if (filter?.harness !== undefined) {
-    clauses.push("c.harness = ?");
-    params.push(filter.harness);
-  }
-  if (filter?.model !== undefined) {
-    clauses.push("c.model = ?");
-    params.push(filter.model);
-  }
-  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-
+  const placeholders = sessionIds.map(() => "?").join(", ");
   // The writer supersede leaves only the latest run's rows in judged_signal, so
-  // grouping the whole table (scoped by the conversations join) is the latest
-  // verdict per session. json-decode each value to compare and report it plainly.
+  // grouping the selected sessions' rows is the latest verdict per session.
+  // json-decode each value to compare and report it plainly.
   const rows = db
     .prepare(
-      `SELECT s.signal_name AS signal_name, s.value AS value, COUNT(*) AS n
-         FROM judged_signal s
-         JOIN conversations c USING (session_id)
-         ${where}
-        GROUP BY s.signal_name, s.value`,
+      `SELECT signal_name AS signal_name, value AS value, COUNT(*) AS n
+         FROM judged_signal
+        WHERE session_id IN (${placeholders})
+        GROUP BY signal_name, value`,
     )
-    .all(...params) as ReadonlyArray<{
+    .all(...sessionIds) as ReadonlyArray<{
     signal_name: string;
     value: string;
     n: number;
@@ -107,7 +120,7 @@ export function rollupHeader(
     buckets: orderBuckets(signalName, bySignal.get(signalName)!),
   }));
 
-  return { totalJudged, distributions };
+  return { totalJudged: sessionIds.length, distributions };
 }
 
 /**
