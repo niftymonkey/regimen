@@ -280,6 +280,23 @@ function buildRollupUser(input: SynthesisInput): string {
   ].join("\n");
 }
 
+/** The system and user text a rollup synthesis call sends the model. */
+export interface RollupPrompt {
+  readonly system: string;
+  readonly user: string;
+}
+
+/**
+ * The rollup synthesis prompt: the system rubric and the user projection over
+ * one {@link SynthesisInput}. A pure function of its argument only: no clock,
+ * no environment, no store or network access, so the same input always yields
+ * byte-identical text. Exported so an eval harness can build the exact prompt
+ * without also driving a {@link JudgeModelPort}.
+ */
+export function buildRollupPrompt(input: SynthesisInput): RollupPrompt {
+  return { system: ROLLUP_SYSTEM, user: buildRollupUser(input) };
+}
+
 /**
  * Turn the collected header and verdicts into the colleague-voice narrative by
  * one call through the injected {@link JudgeModelPort}. Returns the model's prose
@@ -290,10 +307,7 @@ export async function synthesizeRollup(
   input: SynthesisInput,
   config: SynthesisConfig,
 ): Promise<RollupSynthesis> {
-  const response = await config.llm.complete({
-    system: ROLLUP_SYSTEM,
-    user: buildRollupUser(input),
-  });
+  const response = await config.llm.complete(buildRollupPrompt(input));
   return {
     prose: response.text,
     judgeModel: response.model,

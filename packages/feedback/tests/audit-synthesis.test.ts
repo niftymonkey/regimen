@@ -9,6 +9,7 @@
  * (docs/regimen-voice-and-ux.md). No network, no store.
  */
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import type {
   JudgeModelPort,
   JudgeModelRequest,
@@ -17,6 +18,7 @@ import type {
 import type { LeverReport, LeverageAuditReport } from "../src/judged/audit.ts";
 import {
   AUDIT_SYNTHESIS_SYSTEM,
+  buildAuditSynthesisPrompt,
   synthesizeAudit,
 } from "../src/judged/audit-synthesis.ts";
 
@@ -93,6 +95,43 @@ test("an idle practice drives the on-demand model deep-dive", async () => {
   // The deterministic facts reach the model in the user prompt: the idle
   // practice's name and its counts, so the model interprets rather than tallies.
   expect(requests[0]?.user).toContain("work-router");
+});
+
+test("buildAuditSynthesisPrompt is pure: the same report yields byte-identical text across calls", () => {
+  const idleReport = report([
+    lever({ name: "work-router", health: "idle", firedSessions: 0 }),
+  ]);
+
+  const first = buildAuditSynthesisPrompt(idleReport);
+  const second = buildAuditSynthesisPrompt(idleReport);
+
+  expect(second).toEqual(first);
+});
+
+test("buildAuditSynthesisPrompt is a stable hash of a fixed report, with no clock or environment leaking in", () => {
+  const idleReport = report(
+    [
+      lever({ name: "tdd" }),
+      lever({
+        name: "work-router",
+        health: "idle",
+        eligibleSessions: 9,
+        firedSessions: 0,
+      }),
+    ],
+    [{ value: "followed", count: 4 }],
+  );
+
+  const prompt = buildAuditSynthesisPrompt(idleReport);
+  const systemHash = createHash("sha256").update(prompt.system).digest("hex");
+  const userHash = createHash("sha256").update(prompt.user).digest("hex");
+
+  expect(systemHash).toBe(
+    "1b6682a700b0f4b9248003b6872def87800134c57b032dab41ecc334f80d2bf3",
+  );
+  expect(userHash).toBe(
+    "cf34ca3bfd883898195c1a1fd8172989244f9f5c8d9dcfc151a69185166dc14b",
+  );
 });
 
 test("the deep-dive system prompt carries the binding voice constraints", async () => {

@@ -6,6 +6,7 @@
  * never software quality.
  */
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import type { ContentChunk } from "../src/loader/reader-types.ts";
 import { buildJudgePrompt } from "../src/judged/prompt.ts";
 import type { EngineerSetup } from "../src/judged/setup.ts";
@@ -203,4 +204,24 @@ test("reproduces the setup-blind prompt byte-for-byte when setup is omitted", ()
     "Expected behaviors (the engineer's own setup)",
   );
   expect(blind.system).not.toContain("Expected-behaviors adherence");
+});
+
+test("buildJudgePrompt is pure and idempotent: the same chunks and setup yield byte-identical text across calls", () => {
+  const first = buildJudgePrompt(CHUNKS, SETUP);
+  const second = buildJudgePrompt(CHUNKS, SETUP);
+
+  expect(second).toEqual(first);
+});
+
+test("buildJudgePrompt is a stable hash of a fixed chunk set and setup, with no clock or environment leaking in", () => {
+  const prompt = buildJudgePrompt(CHUNKS, SETUP);
+  const systemHash = createHash("sha256").update(prompt.system).digest("hex");
+  const userHash = createHash("sha256").update(prompt.user).digest("hex");
+
+  expect(systemHash).toBe(
+    "3c37c762cc24f449b81f6848f66473957e8b9f5a7a78d632c13ab0bee7f1e431",
+  );
+  expect(userHash).toBe(
+    "88aefffe6f0ef55f024d60fe0eeb9f14303ce8cbcc6a4f9968d8c7fe3d0beb80",
+  );
 });
