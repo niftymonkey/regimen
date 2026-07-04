@@ -36,7 +36,11 @@ function run(runId: string, createdAt: string): AssessmentRunIdentity {
   return { runId, sessionId: SESSION, assignmentId: ASSIGNMENT, createdAt };
 }
 
-/** A complete verdict with Intent, Outcome, and the assessment narrative. */
+/**
+ * A complete verdict with Intent and the two Outcome axes (accomplishment and
+ * correction-cost) plus the assessment narrative. Outcome is no longer passed in;
+ * the writer derives and stores it from the two axes (ADR-0017).
+ */
 function fullResult(judgeModel = "claude-opus-4-8"): JudgeResult {
   return {
     complete: true,
@@ -57,10 +61,18 @@ function fullResult(judgeModel = "claude-opus-4-8"): JudgeResult {
       {
         scope: "assignment",
         assignmentId: ASSIGNMENT,
-        signalName: "outcome",
+        signalName: "accomplishment",
         valueKind: "ordinal",
-        value: "accomplished-cleanly",
+        value: "accomplished",
         anchors: [{ eventHash: "b".repeat(64) }],
+      },
+      {
+        scope: "assignment",
+        assignmentId: ASSIGNMENT,
+        signalName: "correction-cost",
+        valueKind: "ordinal",
+        value: "light",
+        anchors: [{ eventHash: "c".repeat(64) }],
       },
     ],
     narratives: [
@@ -119,12 +131,21 @@ test("writeAssessment persists one run, one assignment, the signals, and the nar
         "SELECT signal_name, value_kind, value, run_id FROM judged_signal ORDER BY signal_name",
       )
       .all() as ReadonlyArray<Record<string, unknown>>;
-    expect(signals.map((s) => s.signal_name)).toEqual(["intent", "outcome"]);
-    expect(JSON.parse(signals[0]!.value as string)).toBe("feature");
-    expect(JSON.parse(signals[1]!.value as string)).toBe(
-      "accomplished-cleanly",
+    expect(signals.map((s) => s.signal_name)).toEqual([
+      "accomplishment",
+      "correction-cost",
+      "intent",
+      "outcome",
+    ]);
+    const byName = new Map(
+      signals.map((s) => [s.signal_name, JSON.parse(s.value as string)]),
     );
-    expect(signals[0]!.run_id).toBe("run-1");
+    expect(byName.get("intent")).toBe("feature");
+    expect(byName.get("accomplishment")).toBe("accomplished");
+    expect(byName.get("correction-cost")).toBe("light");
+    // The writer derives and stores the outcome read-key from the two axes.
+    expect(byName.get("outcome")).toBe("accomplished-under-light-correction");
+    expect(signals.every((s) => s.run_id === "run-1")).toBe(true);
 
     const narratives = store.db
       .prepare("SELECT narrative_type, prose, anchors, run_id FROM narrative")
@@ -134,6 +155,40 @@ test("writeAssessment persists one run, one assignment, the signals, and the nar
     expect(JSON.parse(narratives[0]!.anchors as string)).toEqual([
       { eventHash: "a".repeat(64) },
     ]);
+  });
+});
+
+test("the derived outcome anchors are the union of the two axes' anchors", () => {
+  withStore((store) => {
+    writeAssessment(
+      store,
+      run("run-1", "2026-06-15T10:00:00.000Z"),
+      fullResult(),
+    );
+    const outcome = store.db
+      .prepare(
+        "SELECT anchors FROM judged_signal WHERE signal_name = 'outcome'",
+      )
+      .get() as { anchors: string };
+    expect(JSON.parse(outcome.anchors)).toEqual([
+      { eventHash: "b".repeat(64) },
+      { eventHash: "c".repeat(64) },
+    ]);
+  });
+});
+
+test("an accomplished verdict with no correction-cost derives the clean outcome", () => {
+  withStore((store) => {
+    const base = fullResult();
+    const noCost: JudgeResult = {
+      ...base,
+      signals: base.signals.filter((s) => s.signalName !== "correction-cost"),
+    };
+    writeAssessment(store, run("run-1", "2026-06-15T10:00:00.000Z"), noCost);
+    const outcome = store.db
+      .prepare("SELECT value FROM judged_signal WHERE signal_name = 'outcome'")
+      .get() as { value: string };
+    expect(JSON.parse(outcome.value)).toBe("accomplished-cleanly");
   });
 });
 
@@ -149,8 +204,8 @@ test("a re-judge supersedes the prior run's signals in place, no duplicates", ()
     const rejudged: JudgeResult = {
       ...second,
       signals: second.signals.map((s) =>
-        s.signalName === "outcome"
-          ? { ...s, value: "accomplished-with-correction" as const }
+        s.signalName === "correction-cost"
+          ? { ...s, value: "heavy" as const }
           : s,
       ),
     };
@@ -164,17 +219,18 @@ test("a re-judge supersedes the prior run's signals in place, no duplicates", ()
     ).n;
     expect(runCount).toBe(2);
 
-    // The signal rows are superseded by the latest run, not duplicated.
+    // The signal rows (the three emitted plus the derived outcome) are superseded
+    // by the latest run, not duplicated.
     const signals = store.db
       .prepare(
         "SELECT signal_name, value, run_id FROM judged_signal ORDER BY signal_name",
       )
       .all() as ReadonlyArray<Record<string, unknown>>;
-    expect(signals.length).toBe(2);
+    expect(signals.length).toBe(4);
     expect(signals.every((s) => s.run_id === "run-2")).toBe(true);
     const outcome = signals.find((s) => s.signal_name === "outcome");
     expect(JSON.parse(outcome!.value as string)).toBe(
-      "accomplished-with-correction",
+      "accomplished-under-heavy-correction",
     );
   });
 });

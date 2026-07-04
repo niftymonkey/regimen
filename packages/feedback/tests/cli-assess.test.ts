@@ -185,7 +185,7 @@ function startMockAnthropic(): { baseUrl: string; stop: () => void } {
       prose: "The engineer asked for a parser test; the agent delivered it.",
       anchors: [0, 1],
     },
-    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
   });
   const server = Bun.serve({
     port: 0,

@@ -10,13 +10,21 @@
  * reader unchanged so the judged layer introduces no new id space.
  */
 import type { AnchorRef } from "../loader/reader-types.ts";
+import type { DerivedOutcomeValue } from "./outcome.ts";
 
 /**
- * The closed controlled vocabulary of signal names (ADR-0008). It grows by
- * adding a member; a new signal is a new member plus its prompt fragment and
- * parser, never an interface change.
+ * The closed controlled vocabulary of signal names (ADR-0008, amended by
+ * ADR-0017). It grows by adding a member; a new signal is a new member plus its
+ * prompt fragment and parser, never an interface change. `outcome` is no longer a
+ * judge-emitted primitive: it is the write-derived read-key the writer stores
+ * from the two axes `accomplishment` and `correction-cost`.
  */
-export type SignalName = "intent" | "outcome" | "engagement";
+export type SignalName =
+  | "intent"
+  | "accomplishment"
+  | "correction-cost"
+  | "outcome"
+  | "engagement";
 
 /**
  * The open value-kind tag (ADR-0008). `categorical` and `ordinal` are the live
@@ -33,16 +41,6 @@ export type IntentValue =
   | "exploration"
   | "schema-change"
   | "other";
-
-/**
- * Outcome: one value, rank-ordered low to high. The order is load-bearing for
- * trending and comparison (ADR-0008).
- */
-export type OutcomeValue =
-  | "abandoned"
-  | "partial"
-  | "accomplished-with-correction"
-  | "accomplished-cleanly";
 
 /**
  * Accomplishment: done-ness only, rank-ordered low to high (ADR-0017). Owns
@@ -104,7 +102,12 @@ export interface JudgedSignal {
   readonly assignmentId?: string;
   readonly signalName: SignalName;
   readonly valueKind: ValueKind;
-  readonly value: IntentValue | OutcomeValue | EngagementValue;
+  readonly value:
+    | IntentValue
+    | AccomplishmentValue
+    | CorrectionCostValue
+    | DerivedOutcomeValue
+    | EngagementValue;
   readonly anchors: ReadonlyArray<AnchorRef>;
 }
 

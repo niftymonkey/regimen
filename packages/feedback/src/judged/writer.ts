@@ -2,8 +2,10 @@
  * The judged-store writer (S3, ADR-0008).
  *
  * Maps one JudgeResult onto the four ADR-0008 tables in a single transaction:
- * one assessment_run, one whole-conversation assignment, the judged_signal
- * rows (Intent and Outcome when present), and one assessment narrative. The
+ * one assessment_run, one whole-conversation assignment, the judged_signal rows
+ * (the emitted signals plus the write-derived Outcome read-key computed from the
+ * accomplishment and correction-cost axes, ADR-0017), and one assessment
+ * narrative. The
  * write supersedes any prior run for the session by run identity (section 7):
  * re-emitted signals and narratives replace by their supersede-key PK, and any
  * prior-run row the new run did not re-emit is deleted, so a re-judge that
@@ -16,8 +18,65 @@
  * the conversation-scope narrative and signal supersede by PK rather than
  * silently accumulate a duplicate.
  */
+import type { AnchorRef } from "../loader/reader-types.ts";
 import type { Store } from "../store.ts";
-import type { JudgeResult } from "./types.ts";
+import { deriveOutcome } from "./outcome.ts";
+import type {
+  AccomplishmentValue,
+  CorrectionCostValue,
+  JudgedSignal,
+  JudgeResult,
+} from "./types.ts";
+
+const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
+
+/**
+ * The write-derived Outcome read-key row, or undefined when the verdict has no
+ * accomplishment to derive from (ADR-0017). Outcome is judged-from-judged: a pure
+ * function of the two axes, computed at write time so the `signal_name='outcome'`
+ * read sites keep returning a scored spectrum. Its anchors are the union of the
+ * two axes' anchors, deduplicated by event hash.
+ */
+function deriveOutcomeSignal(
+  signals: ReadonlyArray<JudgedSignal>,
+): JudgedSignal | undefined {
+  const accomplishment = signals.find((s) => s.signalName === "accomplishment");
+  if (accomplishment === undefined) return undefined;
+  const correctionCost = signals.find(
+    (s) => s.signalName === "correction-cost",
+  );
+  const value = deriveOutcome(
+    accomplishment.value as AccomplishmentValue,
+    correctionCost?.value as CorrectionCostValue | undefined,
+  );
+  return {
+    scope: "assignment",
+    assignmentId: WHOLE_CONVERSATION_ASSIGNMENT,
+    signalName: "outcome",
+    valueKind: "ordinal",
+    value,
+    anchors: unionAnchors(
+      accomplishment.anchors,
+      correctionCost?.anchors ?? [],
+    ),
+  };
+}
+
+/** Concatenate two anchor lists, deduplicating by identity, order-preserving. */
+function unionAnchors(
+  first: ReadonlyArray<AnchorRef>,
+  second: ReadonlyArray<AnchorRef>,
+): AnchorRef[] {
+  const seen = new Set<string>();
+  const union: AnchorRef[] = [];
+  for (const anchor of [...first, ...second]) {
+    const key = JSON.stringify(anchor);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    union.push(anchor);
+  }
+  return union;
+}
 
 /** The run identity the orchestrator mints for one judgment pass. */
 export interface AssessmentRunIdentity {
@@ -62,7 +121,12 @@ export function writeAssessment(
          (session_id, scope, assignment_id, signal_name, value_kind, value, anchors, run_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const signal of result.signals) {
+    const derivedOutcome = deriveOutcomeSignal(result.signals);
+    const signalsToWrite =
+      derivedOutcome === undefined
+        ? result.signals
+        : [...result.signals, derivedOutcome];
+    for (const signal of signalsToWrite) {
       insertSignal.run(
         run.sessionId,
         signal.scope,

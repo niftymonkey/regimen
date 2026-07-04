@@ -18,7 +18,8 @@ import {
   writeAssessment,
   type AssessmentRunIdentity,
 } from "../src/judged/writer.ts";
-import type { JudgeResult, OutcomeValue } from "../src/judged/types.ts";
+import type { JudgeResult } from "../src/judged/types.ts";
+import type { DerivedOutcomeValue } from "../src/judged/outcome.ts";
 import type { BatchDecision } from "../src/judged/sweep.ts";
 import type { SetupSource } from "../src/judged/setup.ts";
 import { assessAll } from "../src/cli/index.ts";
@@ -223,7 +224,7 @@ function prejudge(dbPath: string, sessionId: string): void {
           assignmentId: "whole-conversation",
           signalName: "outcome",
           valueKind: "ordinal",
-          value: "accomplished-cleanly" as OutcomeValue,
+          value: "accomplished-cleanly" as DerivedOutcomeValue,
           anchors: [{ eventHash: "b".repeat(64) }],
         },
       ],
@@ -258,7 +259,7 @@ function startMockAnthropic(): {
       prose: "The engineer asked for a parser test; the agent delivered it.",
       anchors: [0, 1],
     },
-    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
   });
   let hits = 0;
   const server = Bun.serve({
@@ -303,7 +304,7 @@ function startCapturingMockAnthropic(): {
       prose: "The engineer asked for a parser test; the agent delivered it.",
       anchors: [0, 1],
     },
-    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
   });
   let hits = 0;
   let lastBody: string | undefined;

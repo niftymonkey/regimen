@@ -16,12 +16,13 @@ import { buildJudgePrompt } from "./prompt.ts";
 import type { EngineerSetup } from "./setup.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
+  AccomplishmentValue,
+  CorrectionCostValue,
   EngagementValue,
   IntentValue,
   JudgedNarrative,
   JudgedSignal,
   JudgeResult,
-  OutcomeValue,
 } from "./types.ts";
 
 export interface JudgeInput {
@@ -56,13 +57,14 @@ const INTENT_VALUES: ReadonlySet<string> = new Set<IntentValue>([
   "other",
 ]);
 
-/** The 4-value ordinal Outcome vocabulary, low to high (ADR-0008). */
-const OUTCOME_VALUES: ReadonlySet<string> = new Set<OutcomeValue>([
-  "abandoned",
-  "partial",
-  "accomplished-with-correction",
-  "accomplished-cleanly",
-]);
+/** The 3-value ordinal accomplishment vocabulary, low to high (ADR-0017). */
+const ACCOMPLISHMENT_VALUES: ReadonlySet<string> = new Set<AccomplishmentValue>(
+  ["not-accomplished", "partial", "accomplished"],
+);
+
+/** The 3-value ordinal correction-cost vocabulary, low to high (ADR-0017). */
+const CORRECTION_COST_VALUES: ReadonlySet<string> =
+  new Set<CorrectionCostValue>(["none", "light", "heavy"]);
 
 /** The closed Engagement vocabulary (Decision 5 of the judge-prompt design). */
 const ENGAGEMENT_VALUES: ReadonlySet<string> = new Set<EngagementValue>([
@@ -185,7 +187,8 @@ interface ParsedClaim {
 
 interface ParsedVerdict {
   readonly intent?: ParsedClaim;
-  readonly outcome?: ParsedClaim;
+  readonly accomplishment?: ParsedClaim;
+  readonly "correction-cost"?: ParsedClaim;
   readonly assessment?: ParsedClaim;
   readonly engagement?: ParsedClaim;
 }
@@ -212,21 +215,23 @@ function parseVerdict(text: string): ParsedVerdict | undefined {
 
 /**
  * Why a parsed verdict is structurally unusable, or undefined when it is valid
- * enough to assemble. The prose-before-Outcome rule (ADR-0008) is enforced
- * here: an Outcome present with no assessment prose is invalid, so the Judge
- * never constructs an Outcome that was not preceded by reasoning.
+ * enough to assemble. The prose-before-label rule (ADR-0008, ADR-0017) is
+ * enforced here: an accomplishment present with no assessment prose is invalid,
+ * so the Judge never constructs a done-ness label that was not preceded by
+ * reasoning.
  */
 function validityError(verdict: ParsedVerdict | undefined): string | undefined {
   if (verdict === undefined) {
     return "the response was not a JSON object";
   }
-  const hasOutcome =
-    verdict.outcome !== undefined && verdict.outcome.value !== undefined;
+  const hasAccomplishment =
+    verdict.accomplishment !== undefined &&
+    verdict.accomplishment.value !== undefined;
   const hasAssessment =
     verdict.assessment !== undefined &&
     typeof verdict.assessment.prose === "string";
-  if (hasOutcome && !hasAssessment) {
-    return "an Outcome was given without the required assessment prose, which must precede it";
+  if (hasAccomplishment && !hasAssessment) {
+    return "an accomplishment was given without the required assessment prose, which must precede it";
   }
   return undefined;
 }
@@ -275,18 +280,40 @@ function buildSignals(
   }
 
   if (
-    verdict.outcome !== undefined &&
-    typeof verdict.outcome.value === "string" &&
-    OUTCOME_VALUES.has(verdict.outcome.value)
+    verdict.accomplishment !== undefined &&
+    typeof verdict.accomplishment.value === "string" &&
+    ACCOMPLISHMENT_VALUES.has(verdict.accomplishment.value)
   ) {
-    const anchors = resolveAnchors(verdict.outcome.anchors, chunkByLineSeq);
+    const anchors = resolveAnchors(
+      verdict.accomplishment.anchors,
+      chunkByLineSeq,
+    );
     if (anchors.length > 0) {
       signals.push({
         scope: "assignment",
         assignmentId: WHOLE_CONVERSATION_ASSIGNMENT,
-        signalName: "outcome",
+        signalName: "accomplishment",
         valueKind: "ordinal",
-        value: verdict.outcome.value as OutcomeValue,
+        value: verdict.accomplishment.value as AccomplishmentValue,
+        anchors,
+      });
+    }
+  }
+
+  const correctionCost = verdict["correction-cost"];
+  if (
+    correctionCost !== undefined &&
+    typeof correctionCost.value === "string" &&
+    CORRECTION_COST_VALUES.has(correctionCost.value)
+  ) {
+    const anchors = resolveAnchors(correctionCost.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "assignment",
+        assignmentId: WHOLE_CONVERSATION_ASSIGNMENT,
+        signalName: "correction-cost",
+        valueKind: "ordinal",
+        value: correctionCost.value as CorrectionCostValue,
         anchors,
       });
     }

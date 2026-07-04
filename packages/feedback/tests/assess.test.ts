@@ -98,7 +98,7 @@ function stubJudgeModel(content: string): JudgeModelPort {
       prose: "The engineer asked for a parser test; the agent delivered it.",
       anchors: [human.lineSeq, answer.lineSeq],
     },
-    outcome: { value: "accomplished-cleanly", anchors: [answer.lineSeq] },
+    accomplishment: { value: "accomplished", anchors: [answer.lineSeq] },
   });
   return {
     complete(): Promise<JudgeModelResponse> {
@@ -266,7 +266,7 @@ function rejudgeStub(content: string): JudgeModelPort {
       prose: "On a second look, the engineer was adding a feature.",
       anchors: [human.lineSeq, answer.lineSeq],
     },
-    outcome: { value: "partial", anchors: [answer.lineSeq] },
+    accomplishment: { value: "partial", anchors: [answer.lineSeq] },
   });
   return {
     complete(): Promise<JudgeModelResponse> {
@@ -297,12 +297,14 @@ test("a full assess pass writes one run, the assignment, signals, narrative, and
     ).n;
     expect(runCount).toBe(1);
 
+    // Intent and accomplishment are emitted; the writer derives and stores the
+    // outcome read-key, so three signal rows land.
     const signalCount = (
       store.db.prepare("SELECT COUNT(*) AS n FROM judged_signal").get() as {
         n: number;
       }
     ).n;
-    expect(signalCount).toBe(2);
+    expect(signalCount).toBe(3);
 
     // The load-bearing anchor insertion: the reader's structural events are in
     // the store, so a {eventHash} anchor in the verdict resolves to a real row.
@@ -367,7 +369,7 @@ test("a re-judge supersedes the prior run: one run's signals win, no duplicates"
         n: number;
       }
     ).n;
-    expect(signalCount).toBe(2);
+    expect(signalCount).toBe(3);
 
     // The latest verdict's values win.
     expect(second.outcome!.value).toBe("partial");

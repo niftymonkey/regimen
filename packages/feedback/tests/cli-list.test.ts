@@ -19,7 +19,8 @@ import {
   writeAssessment,
   type AssessmentRunIdentity,
 } from "../src/judged/writer.ts";
-import type { JudgeResult, OutcomeValue } from "../src/judged/types.ts";
+import type { JudgeResult } from "../src/judged/types.ts";
+import type { DerivedOutcomeValue } from "../src/judged/outcome.ts";
 
 const MANAGED_ENV = ["REGIMEN_DATA_DIR", "COPILOT_HOME", "GEMINI_CONFIG_DIR"];
 const ASSIGNMENT = "whole-conversation";
@@ -125,7 +126,7 @@ function run(sessionId: string, runId: string): AssessmentRunIdentity {
   };
 }
 
-function resultWithOutcome(outcome: OutcomeValue): JudgeResult {
+function resultWithOutcome(outcome: DerivedOutcomeValue): JudgeResult {
   return {
     complete: true,
     provenance: {
