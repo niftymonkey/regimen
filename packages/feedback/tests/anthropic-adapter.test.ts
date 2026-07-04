@@ -131,6 +131,46 @@ test("the adapter joins only defined text blocks, skipping non-text and text-les
   expect(response.text).toBe("left right");
 });
 
+test("the adapter passes an abort signal to fetch so a stalled endpoint is bounded", async () => {
+  const captured: CapturedRequest[] = [];
+  const llm = anthropicJudgeModel({
+    apiKey: "sk-ant-test",
+    model: "claude-opus-4-8",
+    baseUrl: "https://api.anthropic.com",
+    fetch: mockFetch(captured, ANTHROPIC_RESPONSE),
+  });
+
+  await llm.complete({ system: "s", user: "u" });
+  expect(captured[0]!.init.signal).toBeInstanceOf(AbortSignal);
+});
+
+test("the adapter surfaces a clean timeout error when the endpoint stalls past the deadline", async () => {
+  // A fetch that honors its abort signal but otherwise never resolves, the
+  // wedged-endpoint failure mode; a tiny injected timeout keeps the test
+  // instant.
+  const stalledFetch = ((
+    _url: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("The operation was aborted.", "AbortError")),
+      );
+    })) as typeof fetch;
+
+  const llm = anthropicJudgeModel({
+    apiKey: "sk-ant-test",
+    model: "claude-opus-4-8",
+    baseUrl: "https://api.anthropic.com",
+    timeoutMs: 10,
+    fetch: stalledFetch,
+  });
+
+  await expect(llm.complete({ system: "s", user: "u" })).rejects.toThrow(
+    /timed out/,
+  );
+});
+
 test("the adapter throws on a non-2xx response so the Judge sees a transport failure", async () => {
   const captured: CapturedRequest[] = [];
   const llm = anthropicJudgeModel({
