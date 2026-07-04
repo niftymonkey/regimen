@@ -910,8 +910,13 @@ export async function rollup(options: {
     printRollup(emptyRollup(filter, now), asJson);
     return 0;
   }
-  const db = new Database(storePath, { readonly: true });
+  // Constructed inside the guarded scope (the pattern `list` follows): a store
+  // that exists but cannot be opened (permissions, corruption, a TOCTOU race
+  // after the existsSync check) lands on the same stderr-plus-exit-1 path as
+  // every other failure here, never an unhandled throw.
+  let db: Database | undefined;
   try {
+    db = new Database(storePath, { readonly: true });
     // An empty slice short-circuits before backend resolution, so an empty
     // rollup succeeds without a configured judge (the sweep's symmetry).
     if (rollupHeader(db, filter, now).totalJudged === 0) {
@@ -936,7 +941,7 @@ export async function rollup(options: {
     process.stderr.write(`${(err as Error).message}\n`);
     return 1;
   } finally {
-    db.close();
+    db?.close();
   }
 }
 

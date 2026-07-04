@@ -12,7 +12,7 @@
  * both the env and the streams so the in-process driving leaves no global state.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -228,6 +228,19 @@ test("regimen rollup human view leads with the narrative and prints the determin
   expect(stdout).toContain("Solid week, one recurring snag.");
   expect(stdout).toContain("The numbers behind this:");
   expect(stdout).toContain("judged conversations: 2");
+});
+
+test("regimen rollup exits 1 with a clean stderr when the store cannot be opened", async () => {
+  const dataDir = tempDir("regimen-rollup-unopenable-");
+  // A directory at the store path passes the existsSync check but makes the
+  // Database constructor throw, so this proves a construction failure lands on
+  // the graceful stderr-plus-exit-1 path instead of escaping as an unhandled
+  // throw (the pattern the sibling list facade already follows).
+  mkdirSync(join(dataDir, "feedback.db"));
+
+  const { exit, stderr } = await runRollup(["--json"], dataDir);
+  expect(exit).toBe(1);
+  expect(stderr.length).toBeGreaterThan(0);
 });
 
 test("regimen rollup --harness reaches the selection filter", async () => {
