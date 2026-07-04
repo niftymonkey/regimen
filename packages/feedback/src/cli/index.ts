@@ -1239,9 +1239,10 @@ function formatSessionTable(sessions: ReadonlyArray<SessionSummary>): string {
 
 /**
  * Copy every bundled skill into the harness's skills subdirectory, where the
- * harness discovers them. The bundle ships `regimen-evidence` (deterministic)
- * and `regimen-judgment` (its judged twin); the planner returns one plan per
- * skill, so a third bundled skill installs without touching this loop. The
+ * harness discovers them. The bundle ships `regimen-evidence` (deterministic),
+ * `regimen-judgment` (its judged twin), and `regimen-ask` (the generalized ask
+ * surface); the planner returns one plan per skill, so another bundled skill
+ * installs without touching this loop. The
  * harness is resolved from the environment and its home from the contract;
  * `--dry-run` reports the targets without writing. The bundle lives two levels
  * up from this file (the repo root's `skills/` directory).

@@ -19,11 +19,16 @@ import type { HarnessContract } from "../harness/contract.ts";
 /**
  * The skills the Feedback package bundles, by their
  * `<home>/<skillsSubdir>/<name>/` directory. `regimen-evidence` is the
- * deterministic evidence check; `regimen-judgment` is its judged twin. Order is
- * the install order. Each lever package owns its own list and passes it as the
- * context's `skills`; this constant is Feedback's.
+ * deterministic evidence check; `regimen-judgment` is its judged twin;
+ * `regimen-ask` is the generalized ask surface composing the cross-conversation
+ * reads. Order is the install order. Each lever package owns its own list and
+ * passes it as the context's `skills`; this constant is Feedback's.
  */
-export const BUNDLED_SKILLS = ["regimen-evidence", "regimen-judgment"] as const;
+export const BUNDLED_SKILLS = [
+  "regimen-evidence",
+  "regimen-judgment",
+  "regimen-ask",
+] as const;
 
 export interface SkillInstallContext {
   /** The harness config home whose skills subdirectory receives the skills. */
