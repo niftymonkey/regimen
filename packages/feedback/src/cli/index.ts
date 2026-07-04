@@ -65,6 +65,11 @@ import {
 } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { assessConversation } from "../judged/assess.ts";
+import {
+  emitPrompt as agentEmitPrompt,
+  recordVerdict as agentRecordVerdict,
+  type RecordEnvelope,
+} from "../judged/agent-seam.ts";
 import { resolveJudgeModel } from "../judged/resolve.ts";
 import { createLiveSetupSource } from "../judged/live-setup-source.ts";
 import type { SetupSource } from "../judged/setup.ts";
@@ -763,6 +768,141 @@ export async function assessAll(options: {
       );
     }
     return 0;
+  } finally {
+    store.close();
+  }
+}
+
+/** The resolved judging target: the env-detected harness, its sessions dir, and the session id. */
+interface AssessTarget {
+  readonly harness: Harness;
+  readonly sessionsDir: string;
+  readonly sessionId: string;
+}
+
+/**
+ * Resolve the judging target the same way `assess` does: the harness from the
+ * environment (never a flag), its sessions dir from the registry, and the
+ * session id from `--session` or the harness's current-session resolver. Writes
+ * the fail-closed diagnostic to stderr and returns null on any resolution
+ * failure, so the caller exits 1 with a clean message. Shared by the tier C
+ * emit and record facades.
+ */
+function resolveAssessTarget(
+  session: string | undefined,
+  dataDir: string,
+): AssessTarget | null {
+  let harness;
+  try {
+    harness = resolveHarnessFromEnvironment(process.env);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return null;
+  }
+  if (harness === undefined) {
+    process.stderr.write(`${NO_HARNESS}\n`);
+    return null;
+  }
+  let location;
+  try {
+    location = resolveHarnessLocation(harness, process.env);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return null;
+  }
+  const { support, harnessHome, sessionsDir } = location;
+  let sessionId: string | null = session ?? null;
+  if (sessionId === null) {
+    sessionId = support.resolver.resolveCurrent({
+      dataDir,
+      harnessHome,
+      cwd: process.cwd(),
+    });
+    if (sessionId === null) {
+      process.stderr.write(
+        `could not resolve the current ${harness} session id\n`,
+      );
+      return null;
+    }
+  }
+  return { harness, sessionsDir, sessionId };
+}
+
+/**
+ * `regimen assess --emit-prompt`: the tier C zero-key path, front half. Prints
+ * the exact versioned judge prompt envelope (sessionId, versions, system, user)
+ * on stdout for one conversation and writes no assessment run, so the calling
+ * agent can produce the verdict itself. Opens the store read-write only to
+ * insert the load-bearing anchor events (idempotent); makes no LLM call.
+ */
+export async function emitPrompt(options: {
+  dataDir: string;
+  session?: string;
+  setupSource?: SetupSource;
+}): Promise<number> {
+  const target = resolveAssessTarget(options.session, options.dataDir);
+  if (target === null) return 1;
+  const store = openStore(join(options.dataDir, "feedback.db"));
+  try {
+    const envelope = agentEmitPrompt({
+      store,
+      harness: target.harness,
+      sessionsDir: target.sessionsDir,
+      sessionId: target.sessionId,
+      ...(options.setupSource === undefined
+        ? {}
+        : { setupSource: options.setupSource }),
+    });
+    process.stdout.write(`${JSON.stringify(envelope)}\n`);
+    return 0;
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return 1;
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * `regimen assess --record-verdict`: the tier C zero-key path, back half. Reads
+ * one verdict envelope from stdin (passed as `input`), re-validates it through
+ * the same verdict pipeline the in-process judge uses, and persists it stamped
+ * judge_backend=agent, printing the resulting digest. Rejects a malformed,
+ * stale (version mismatch), mismatched-session, or unanchorable verdict with a
+ * stderr reason and exit 1, writing nothing.
+ */
+export async function recordVerdict(options: {
+  dataDir: string;
+  session?: string;
+  input: string;
+}): Promise<number> {
+  const target = resolveAssessTarget(options.session, options.dataDir);
+  if (target === null) return 1;
+  let envelope: RecordEnvelope;
+  try {
+    envelope = JSON.parse(options.input) as RecordEnvelope;
+  } catch {
+    process.stderr.write("the verdict envelope on stdin was not valid JSON\n");
+    return 1;
+  }
+  const store = openStore(join(options.dataDir, "feedback.db"));
+  try {
+    const outcome = agentRecordVerdict({
+      store,
+      harness: target.harness,
+      sessionsDir: target.sessionsDir,
+      sessionId: target.sessionId,
+      envelope,
+    });
+    if (!outcome.ok) {
+      process.stderr.write(`${outcome.reason}\n`);
+      return 1;
+    }
+    process.stdout.write(`${JSON.stringify(outcome.digest)}\n`);
+    return 0;
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return 1;
   } finally {
     store.close();
   }
