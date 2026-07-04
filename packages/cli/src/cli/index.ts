@@ -743,15 +743,71 @@ The harness is auto-detected per invocation, or set REGIMEN_HARNESS.
 }
 
 /**
+ * Per-subcommand usage, printed by the `--help`/`-h` guard below in place of
+ * running the command, so a cost-bearing or store-touching subcommand (assess,
+ * list, install, ...) never does any work just because the engineer asked for
+ * its usage. Terse and plain (docs/regimen-voice-and-ux.md): what the command
+ * does and its flags, nothing more.
+ */
+const SUBCOMMAND_USAGE: Readonly<Record<string, string>> = {
+  install: `usage: regimen install [--all | --harnesses <h...>] [--no-daemon] [--dry-run]
+
+install Regimen (capture, skills) for the harness(es)
+`,
+  update: `usage: regimen update [--dry-run]
+
+re-resolve paths, re-run recorded installs, cycle the daemon, restamp
+`,
+  uninstall: `usage: regimen uninstall [--dry-run]
+
+remove Regimen for the current harness
+`,
+  status: `usage: regimen status
+
+installed version, harnesses + scopes, and daemon health
+`,
+  daemon: `usage: regimen daemon <start|stop|restart|status> [--dry-run]
+
+control or inspect the capture daemon
+`,
+  assess: `usage: regimen assess [--session <id>] [--judge-model <id>] [--judge-via <api|cli|agent>]
+       regimen assess --all [--harness <h>] [--since <when>] [--until <when>] [--outcome <o>] [--batch <n>] [--force]
+       regimen assess --emit-prompt | --record-verdict
+
+judged verdict of a session (paid LLM call, writes a verdict)
+`,
+  evidence: `usage: regimen evidence [--session <id>]
+
+quantitative digest of the current session (free, deterministic)
+`,
+  list: `usage: regimen list [--harness <h>] [--model <m>] [--since <when>] [--until <when>] [--outcome <o>] [--json]
+
+enumerate captured sessions
+`,
+};
+
+/**
  * Parse argv and dispatch to the owning facade in-process. argv is the program's
  * arguments with the node/script prefix already stripped (so the subcommand is
  * at index 0). Returns the process exit code; an unknown command fails closed.
+ *
+ * `--help`/`-h` anywhere after a known subcommand short-circuits here, before
+ * the subcommand's own handler runs: it prints that subcommand's usage and
+ * returns 0 without opening a store, resolving a judge, or spending anything.
  */
 export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
   const command = argv[0];
   if (command === undefined) {
     process.stderr.write(usage());
     return 1;
+  }
+  const subUsage = SUBCOMMAND_USAGE[command];
+  if (subUsage !== undefined) {
+    const rest = argv.slice(1);
+    if (rest.includes("--help") || rest.includes("-h")) {
+      process.stdout.write(subUsage);
+      return 0;
+    }
   }
   switch (command) {
     case "--help":

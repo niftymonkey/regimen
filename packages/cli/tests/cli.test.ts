@@ -12,7 +12,7 @@
  *    temp data dir so the host's real store is never touched.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -297,6 +297,69 @@ test("regimen daemon with no verb fails closed with a usage line", async () => {
     process.stderr.write = saved;
   }
   expect(stderr).toContain("usage: regimen daemon");
+});
+
+test("regimen assess --help prints usage and exits 0 without running a real assessment", async () => {
+  tempDataDir();
+  // No ANTHROPIC_API_KEY, no session, no claude on PATH: a real assess call
+  // would fail loudly (or, with a key set, spend money). --help must never
+  // reach that code at all.
+  delete process.env.ANTHROPIC_API_KEY;
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  let exit: number | Promise<number> = 1;
+  try {
+    exit = await runCli(["assess", "--help"]);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(exit).toBe(0);
+  expect(stdout).toContain("assess");
+  expect(stdout).not.toContain("{");
+});
+
+test("regimen list --help prints usage and exits 0 without touching the store", async () => {
+  const dir = tempDataDir();
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  let exit: number | Promise<number> = 1;
+  try {
+    exit = await runCli(["list", "--help"]);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(exit).toBe(0);
+  expect(stdout).toContain("regimen list");
+  expect(existsSync(join(dir, "feedback.db"))).toBe(false);
+});
+
+test("regimen install --help prints usage and exits 0 without installing anything", () => {
+  tempDataDir();
+  const stdout = captureStdout(() => {
+    const exit = runCli(["install", "--help"]);
+    expect(exit).toBe(0);
+  });
+  expect(stdout).toContain("regimen install");
+  // The real install's opening line, absent here: the handler never ran.
+  expect(stdout).not.toContain("capture then enforcement then guidance");
+});
+
+test("regimen daemon -h prints usage and exits 0 without inspecting the daemon", () => {
+  tempDataDir();
+  const stdout = captureStdout(() => {
+    const exit = runCli(["daemon", "-h"]);
+    expect(exit).toBe(0);
+  });
+  expect(stdout).toContain("regimen daemon");
+  expect(stdout).not.toContain("not running");
 });
 
 test("regimen list dispatches to the feedback list facade and renders an empty result", async () => {
