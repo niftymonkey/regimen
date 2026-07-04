@@ -100,14 +100,15 @@ export function writeAssessment(
   db.transaction(() => {
     db.prepare(
       `INSERT INTO assessment_run
-         (run_id, session_id, rubric_version, prompt_version, judge_model, complete, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (run_id, session_id, rubric_version, prompt_version, judge_model, judge_backend, complete, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.runId,
       run.sessionId,
       result.provenance.rubricVersion,
       result.provenance.promptVersion,
       result.provenance.judgeModel,
+      result.provenance.judgeBackend ?? null,
       result.complete ? 1 : 0,
       run.createdAt,
     );

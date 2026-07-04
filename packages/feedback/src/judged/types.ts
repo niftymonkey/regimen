@@ -154,14 +154,27 @@ export type IncompleteReason =
 export type JudgedScope = "conversation" | "assignment";
 
 /**
+ * The backend that produced a judgment, the mechanism vocabulary shared with
+ * `--judge-via` (judge-backends design decision 4). `api` is either HTTP path
+ * (Anthropic-native or the generic OpenAI-compatible), `cli` is the harness CLI
+ * adapter, `agent` is the tier C recorder stamping the calling agent's own
+ * verdict. Opaque provenance like `judgeModel`: nothing may branch on it, but
+ * the digest and rollup project it so a mixed corpus is sliceable and honest.
+ */
+export type JudgeBackend = "api" | "cli" | "agent";
+
+/**
  * Provenance stamped on every assessment_run, including an incomplete one, so a
  * re-judge after a rubric or prompt change is detectable. `judgeModel` is
- * opaque: nothing downstream may branch on its contents (ADR-0008).
+ * opaque: nothing downstream may branch on its contents (ADR-0008). `judgeBackend`
+ * is the additive backend dimension, absent on rows written before backends were
+ * recorded and set by the code path that ran, never self-reported.
  */
 export interface JudgeProvenance {
   readonly judgeModel: string;
   readonly rubricVersion: string;
   readonly promptVersion: string;
+  readonly judgeBackend?: JudgeBackend;
 }
 
 /**
