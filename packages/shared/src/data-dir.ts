@@ -72,6 +72,40 @@ export function dataDir(): string {
 }
 
 /**
+ * Resolve the config directory from an env snapshot and a platform string.
+ * `REGIMEN_CONFIG_DIR` overrides the platform default. Pure, same shape as
+ * `resolveDataDir`, so callers under test can pass fixed inputs.
+ */
+export function resolveConfigDir(
+  env: Partial<NodeJS.ProcessEnv>,
+  platform: string,
+): string {
+  const override = readEnv(env, "REGIMEN_CONFIG_DIR");
+  if (override !== undefined) return override;
+
+  if (platform === "linux" || platform === "darwin") {
+    const xdg = readEnv(env, "XDG_CONFIG_HOME");
+    if (xdg !== undefined) return pathPosix.join(xdg, APP_DIR_NAME);
+    const home = readEnv(env, "HOME");
+    if (home !== undefined) {
+      return pathPosix.join(home, ".config", APP_DIR_NAME);
+    }
+  }
+  if (platform === "win32") {
+    const appdata = readEnv(env, "APPDATA");
+    if (appdata !== undefined) return pathWin32.join(appdata, APP_DIR_NAME);
+  }
+  throw new Error(
+    `Regimen cannot resolve a config directory on platform "${platform}" with the given environment. Set REGIMEN_CONFIG_DIR to override.`,
+  );
+}
+
+/** The config directory for the running process. */
+export function configDir(): string {
+  return resolveConfigDir(process.env, process.platform);
+}
+
+/**
  * The buffer directory: where the capture hook appends envelopes and the
  * loader reads segments. Lives under the data directory so a buffer-only
  * reset (`feedback purge`) does not touch the SQLite store.
