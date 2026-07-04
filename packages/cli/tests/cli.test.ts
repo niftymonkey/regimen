@@ -30,6 +30,7 @@ const COMMAND_NAMES = [
   "daemon",
   "assess",
   "evidence",
+  "audit",
   "list",
 ];
 
@@ -377,6 +378,27 @@ test("regimen list dispatches to the feedback list facade and renders an empty r
     process.stdout.write = saved;
   }
   expect(JSON.parse(stdout)).toEqual([]);
+});
+
+test("regimen audit dispatches to the feedback audit facade and reports on an empty store", async () => {
+  tempDataDir();
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    // An empty store means every currently-in-force practice is too-new (zero
+    // eligible conversations), so no practice is idle and the audit makes NO model
+    // call: the dispatch resolves and returns 0 with a deterministic summary, with
+    // no judge backend configured.
+    const exit = await runCli(["audit"]);
+    expect(exit).toBe(0);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(stdout.length).toBeGreaterThan(0);
 });
 
 test("an unknown command names the bad command and prints the full usage to stderr, exit 1", () => {

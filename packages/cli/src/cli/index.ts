@@ -35,6 +35,8 @@ import { dataDir, resolveHarnessFromEnvironment } from "@regimen/shared";
 import {
   assess as feedbackAssess,
   assessAll as feedbackAssessAll,
+  audit as feedbackAudit,
+  type AuditFilter,
   type BatchDecision,
   emitPrompt as feedbackEmitPrompt,
   recordVerdict as feedbackRecordVerdict,
@@ -722,6 +724,31 @@ function rollup(argv: ReadonlyArray<string>): Promise<number> {
   });
 }
 
+/**
+ * Dispatch `regimen audit` to the feedback leverage-audit facade over the same
+ * harness/model/window filters `list` accepts. The audit reads deterministically
+ * and only pays the judge model when a practice is idle, so the shared judge flags
+ * apply exactly as in assess.
+ */
+function audit(argv: ReadonlyArray<string>): Promise<number> {
+  const filter: AuditFilter = {
+    ...optionalFilter(argv, "--harness", "harness"),
+    ...optionalFilter(argv, "--model", "model"),
+    ...optionalFilter(argv, "--since", "since"),
+    ...optionalFilter(argv, "--until", "until"),
+  };
+  const judgeModel = flagValue(argv, "--judge-model");
+  const judgeViaRaw = flagValue(argv, "--judge-via");
+  const judgeVia =
+    judgeViaRaw === "cli" || judgeViaRaw === "api" ? judgeViaRaw : undefined;
+  return feedbackAudit({
+    dataDir: dataDir(),
+    filter,
+    ...(judgeModel === undefined ? {} : { judgeModel }),
+    ...(judgeVia === undefined ? {} : { judgeVia }),
+  });
+}
+
 /** Dispatch `regimen list` to the feedback list facade. */
 function list(argv: ReadonlyArray<string>): number {
   const filter: SessionFilter = {
@@ -759,6 +786,7 @@ Read & judge:
   assess --record-verdict                read the agent's verdict from stdin and record it
   rollup [filters] [--json]              read across judged sessions: how it is going, patterns, remedies (paid LLM synthesis)
   list [--harness <h>] [--since <when>] [--json]   enumerate captured sessions
+  audit [--harness <h>] [--since <when>]           check whether your established practices are still being honored
 
 Flags:
   --dry-run                       preview without changing anything
@@ -862,6 +890,8 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
       return evidence(argv);
     case "rollup":
       return rollup(argv);
+    case "audit":
+      return audit(argv);
     case "list":
       return list(argv);
     default:
