@@ -38,3 +38,7 @@ test("on Windows, %APPDATA%\\regimen is the config dir", () => {
 test("an unrecognized platform throws an error naming the platform", () => {
   expect(() => resolveConfigDir({}, "haiku")).toThrow(/haiku/);
 });
+
+test("an unresolvable env on a known platform throws an error naming REGIMEN_CONFIG_DIR", () => {
+  expect(() => resolveConfigDir({}, "linux")).toThrow(/REGIMEN_CONFIG_DIR/);
+});
