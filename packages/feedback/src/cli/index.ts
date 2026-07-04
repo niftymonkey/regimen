@@ -80,6 +80,8 @@ import {
   rollupVerdicts,
   type VerdictRollup,
 } from "../judged/rollup.ts";
+import { leverageAudit, type AuditFilter } from "../judged/audit.ts";
+import { synthesizeAudit } from "../judged/audit-synthesis.ts";
 import {
   runSweep,
   selectSessionsToJudge,
@@ -101,6 +103,7 @@ import { waitForDaemonAlive } from "./wait-for-daemon.ts";
 
 export type { SessionFilter, SessionSummary } from "../sessions.ts";
 export type { BatchDecision } from "../judged/sweep.ts";
+export type { AuditFilter } from "../judged/audit.ts";
 
 /** How to run the daemon foreground when no supervisor is installed. */
 const FOREGROUND_HINT =
@@ -1024,6 +1027,80 @@ function formatRollup(rollup: VerdictRollup): string {
     }),
   ].join("\n");
   return `${rollup.synthesis.prose}\n\nThe numbers behind this:\n${numbers}\n`;
+}
+
+/**
+ * `regimen audit`: the leverage audit (ADR-0016 capability 2). Reads the store
+ * deterministically for each established practice's liveness (how many
+ * conversations it was in force for, via the setup snapshots, versus how many it
+ * actually fired in, via `skill_invocations`) plus the convention-adherence
+ * distribution, then synthesizes a colleague-voiced health summary. The synthesis
+ * consults the judge model ONLY when a practice is idle (silently unused): an
+ * all-healthy or empty read prints a deterministic line and makes no paid call, so
+ * a clean audit costs nothing.
+ *
+ * The practices in force NOW come from the live setup source (a test injects a
+ * stub) so a brand-new practice no conversation has run under yet surfaces as
+ * too-new, and every practice is marked whether it is still in the current setup.
+ * Time-scoping lives in the deterministic read: a conversation predating a
+ * practice never carried it in its snapshot, so it never counts against it. Opens
+ * the store readonly; an absent store audits an empty (in-memory) one so a
+ * brand-new practice still reports.
+ */
+export async function audit(options: {
+  dataDir: string;
+  filter?: AuditFilter;
+  judgeModel?: string;
+  judgeVia?: "cli" | "api";
+  /** The setup source; defaults to the live adapter. Tests inject a stub. */
+  setupSource?: SetupSource;
+}): Promise<number> {
+  const setupSource = options.setupSource ?? createLiveSetupSource();
+  const setup = setupSource.resolve({ cwd: process.cwd(), asOf: new Date() });
+  const currentLevers = setup?.practices.map((practice) => practice.name) ?? [];
+
+  const storePath = join(options.dataDir, "feedback.db");
+  const persisted = existsSync(storePath);
+  // An absent store means nothing has been captured yet; audit an empty in-memory
+  // store so a currently-in-force practice still reports (as too-new).
+  const store = persisted ? undefined : openStore(":memory:");
+  const db = store?.db ?? new Database(storePath, { readonly: true });
+  try {
+    const report = leverageAudit(db, {
+      ...(options.filter === undefined ? {} : { filter: options.filter }),
+      currentLevers,
+    });
+
+    // The judge is resolved only when a practice is idle, so a clean audit needs
+    // no configured backend. A resolution failure on the deep-dive path fails
+    // loudly (stderr + exit 1), mirroring assess.
+    let llm;
+    if (report.levers.some((lever) => lever.health === "idle")) {
+      try {
+        llm = resolveJudgeModel({
+          ...(options.judgeModel === undefined
+            ? {}
+            : { model: options.judgeModel }),
+          ...(options.judgeVia === undefined
+            ? {}
+            : { judgeVia: options.judgeVia }),
+        }).port;
+      } catch (err) {
+        process.stderr.write(`${(err as Error).message}\n`);
+        return 1;
+      }
+    }
+
+    const synthesis = await synthesizeAudit(
+      report,
+      llm === undefined ? {} : { llm },
+    );
+    process.stdout.write(`${synthesis.narrative}\n`);
+    return 0;
+  } finally {
+    if (store !== undefined) store.close();
+    else db.close();
+  }
 }
 
 /**

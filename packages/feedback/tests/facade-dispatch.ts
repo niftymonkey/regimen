@@ -10,6 +10,7 @@
  */
 import {
   assess,
+  audit,
   evidence,
   install,
   installDaemon,
@@ -123,6 +124,14 @@ export async function dispatchFeedback(
           : {}),
       });
     }
+    case "audit":
+      return audit({
+        dataDir,
+        filter: listFilter(rest),
+        ...(options.setupSource !== undefined
+          ? { setupSource: options.setupSource }
+          : {}),
+      });
     case "list":
       return list({
         dataDir,

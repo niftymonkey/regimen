@@ -30,6 +30,7 @@ const COMMAND_NAMES = [
   "daemon",
   "assess",
   "evidence",
+  "audit",
   "list",
 ];
 
@@ -341,6 +342,57 @@ test("regimen list --help prints usage and exits 0 without touching the store", 
   expect(existsSync(join(dir, "feedback.db"))).toBe(false);
 });
 
+test("regimen rollup --help prints usage and exits 0 without reading verdicts or resolving a judge", async () => {
+  const dir = tempDataDir();
+  // No ANTHROPIC_API_KEY: a real rollup over judged verdicts would resolve a
+  // judge backend (and with a key set, spend money). --help must short-circuit
+  // before the handler, so neither the store nor the resolver is ever touched.
+  delete process.env.ANTHROPIC_API_KEY;
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  let exit: number | Promise<number> = 1;
+  try {
+    exit = await runCli(["rollup", "--help"]);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(exit).toBe(0);
+  expect(stdout).toContain("regimen rollup");
+  // The handler's empty-slice line, absent here: the facade never ran.
+  expect(stdout).not.toContain("nothing to roll up");
+  expect(existsSync(join(dir, "feedback.db"))).toBe(false);
+});
+
+test("regimen audit --help prints usage and exits 0 without auditing or resolving a judge", async () => {
+  const dir = tempDataDir();
+  // No ANTHROPIC_API_KEY: an idle lever on a real audit would resolve a judge
+  // backend and pay for a deep-dive. --help must short-circuit before the
+  // handler, so the setup source, the store, and the resolver are never touched.
+  delete process.env.ANTHROPIC_API_KEY;
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  let exit: number | Promise<number> = 1;
+  try {
+    exit = await runCli(["audit", "--help"]);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(exit).toBe(0);
+  expect(stdout).toContain("regimen audit");
+  // The handler's summary lines, absent here: the facade never ran.
+  expect(stdout).not.toContain("nothing to audit");
+  expect(stdout).not.toContain("holding");
+  expect(existsSync(join(dir, "feedback.db"))).toBe(false);
+});
+
 test("regimen install --help prints usage and exits 0 without installing anything", () => {
   tempDataDir();
   const stdout = captureStdout(() => {
@@ -377,6 +429,27 @@ test("regimen list dispatches to the feedback list facade and renders an empty r
     process.stdout.write = saved;
   }
   expect(JSON.parse(stdout)).toEqual([]);
+});
+
+test("regimen audit dispatches to the feedback audit facade and reports on an empty store", async () => {
+  tempDataDir();
+  let stdout = "";
+  const saved = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    // An empty store means every currently-in-force practice is too-new (zero
+    // eligible conversations), so no practice is idle and the audit makes NO model
+    // call: the dispatch resolves and returns 0 with a deterministic summary, with
+    // no judge backend configured.
+    const exit = await runCli(["audit"]);
+    expect(exit).toBe(0);
+  } finally {
+    process.stdout.write = saved;
+  }
+  expect(stdout.length).toBeGreaterThan(0);
 });
 
 test("an unknown command names the bad command and prints the full usage to stderr, exit 1", () => {
