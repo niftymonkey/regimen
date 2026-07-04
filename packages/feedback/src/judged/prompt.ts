@@ -4,13 +4,17 @@
  *
  * The prompt is version-pinned and elicits, harness- and model-neutrally:
  * Intent (categorical, closed vocab), the two Outcome axes accomplishment and
- * correction-cost (ordinal, ADR-0017), and the conversation assessment prose
- * generated BEFORE the accomplishment and correction-cost labels. Each chunk
- * is presented with its citable id (its lineSeq); the judge cites only those
- * ids, and the Judge maps an id back to the chunk's real AnchorRef, so the
- * model never has to echo a 64-char hash. The judge reads the engineer's
- * inputs and the AI's actions only, never model-private reasoning, and never
- * grades software quality (ADR-0003, ADR-0008, feedback-surfacing.md).
+ * correction-cost (ordinal, ADR-0017), engagement (the gate), the always-on
+ * live-arc quality signals framing and conducting (ordinal) and verification
+ * (categorical, abstain-when-unclear), the always-on effort cost ordinal, the
+ * on-shortfall attribution diagnostic, convention-adherence (categorical,
+ * abstain-when-none-in-force), and the conversation assessment prose generated
+ * BEFORE the accomplishment and correction-cost labels. Each chunk is presented
+ * with its citable id (its lineSeq); the judge cites only those ids, and the
+ * Judge maps an id back to the chunk's real AnchorRef, so the model never has to
+ * echo a 64-char hash. The judge reads the engineer's inputs and the AI's actions
+ * only, never model-private reasoning, and never grades software quality
+ * (ADR-0003, ADR-0008, feedback-surfacing.md).
  */
 import type { ContentChunk } from "../loader/reader-types.ts";
 import type { EngineerSetup } from "./setup.ts";
@@ -34,6 +38,15 @@ const VERIFICATION_VOCAB =
 
 const ATTRIBUTION_VOCAB =
   "framing | conducting | verification | leverage | ai | environment";
+
+const FRAMING_VOCAB = "underspecified < adequate < clear";
+
+const CONDUCTING_VOCAB =
+  "poorly-conducted < adequately-conducted < well-conducted";
+
+const EFFORT_VOCAB = "low < moderate < high";
+
+const CONVENTION_ADHERENCE_VOCAB = "followed | partially-followed | violated";
 
 /**
  * The rubric/instruction system prompt. Pins the closed vocabularies, the
@@ -78,6 +91,30 @@ You output exactly one JSON object with these keys, in this order:
    - leverage: a missing, idle, or conflicting reusable lever (a skill or convention) caused the shortfall. Anchor where a lever should have applied.
    - ai: the model itself produced the failing output; this is not the engineer's fault. Anchor the AI's failing output.
    - environment: the tooling or harness failed; this is not the engineer's fault. Anchor the tool-failure or error chunk.
+8. "framing": { "value": <one of, low to high: ${FRAMING_VOCAB}>, "anchors": [<chunk ids>] }
+   Judge how clearly the goal, scope, and context were stated and supplied at the outset, from the engineer's opening input(s) only. Always decide it, whatever the accomplishment was; a session that still succeeded can be underspecified.
+   - underspecified: the opening input left the goal, scope, or needed context materially unstated, so the AI had to guess or the engineer had to backfill.
+   - adequate: the opening input stated enough to proceed, with some scope or context left implicit.
+   - clear: the opening input stated the goal, scope, and needed context so the AI could act without guessing.
+   Surface this only as the specific anchored pattern in the opening input, never as a trait of the engineer. Anchor the opening prompt chunk(s).
+9. "conducting": { "value": <one of, low to high: ${CONDUCTING_VOCAB}>, "anchors": [<chunk ids>] }
+   Judge how the engineer ran the work in flight: decomposition, delegation and fan-out, autonomy granted, when to intervene, and when to reset context. This is a quality of steering, distinct from correction-cost's magnitude: a well-conducted session can carry heavy correction (the engineer correctly caught and redirected). Distinct from framing (goal content, not execution shape). Always decide it, whatever the accomplishment was.
+   - poorly-conducted: the engineer let the work run off course, intervened too late or not at all, or drove it in a way that worked against the result.
+   - adequately-conducted: the engineer kept the work roughly on course, with lapses in decomposition, timing, or intervention.
+   - well-conducted: the engineer decomposed, delegated, and intervened at the right moments to keep the work on course.
+   Surface this only as the specific anchored steering pattern, never as a trait of the engineer. Anchor the engineer's steering or decomposition turns.
+10. "effort": { "value": <one of, low to high: ${EFFORT_VOCAB}>, "anchors": [<chunk ids>] }
+   Rate the grind of the AI's OWN path: tool thrash, stalls, repeated-file churn, and self-recovery, independent of the engineer's correction. This is an objective magnitude of the AI's work, not whether the work was worth it and not software quality; you rate how much grinding happened, never render a "worth it" verdict. Always decide it, whatever the accomplishment was.
+   - low: the AI reached its result on a direct path with little thrash, churn, or stalling.
+   - moderate: the AI's path carried noticeable thrash, churn, or stalls before reaching its result.
+   - high: the AI's path was heavily marked by thrash, repeated churn, stalls, or self-recovery.
+   Anchor the AI's grinding chunks (thrashing tool calls, repeated edits, stalls).
+11. "convention-adherence": { "value": <one of: ${CONVENTION_ADHERENCE_VOCAB}>, "anchors": [<chunk ids>] }
+   Judge whether the AI honored the engineer's stated conventions and established practices, listed in the expected-behaviors block at the top of the conversation block below. This is an AI-action fact, not a person verdict and not software quality. When no conventions or practices are stated in the expected-behaviors block (or no such block appears), OMIT the key entirely (abstain); adherence is not applicable with nothing in force.
+   - followed: the AI honored the stated conventions and practices.
+   - partially-followed: the AI honored some stated conventions or practices and missed others.
+   - violated: the AI acted against the stated conventions or practices.
+   Anchor the chunks where the AI honored or violated a stated convention or practice.
 
 Anchors: each "anchors" array cites the chunk ids (the numbers in [brackets] below) that justify the claim. Cite at least one id per claim, and cite only ids that appear in the conversation. Do not invent ids.
 

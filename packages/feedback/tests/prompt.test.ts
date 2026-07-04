@@ -121,6 +121,58 @@ test("attribution carries the blame-protection values for the AI and the environ
   expect(system).toContain("not the engineer's fault");
 });
 
+test("the SYSTEM rubric elicits the framing signal with its ordinal vocabulary", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain('"framing"');
+  expect(system).toContain("underspecified < adequate < clear");
+});
+
+test("the SYSTEM rubric elicits the conducting signal with its ordinal vocabulary", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain('"conducting"');
+  expect(system).toContain(
+    "poorly-conducted < adequately-conducted < well-conducted",
+  );
+});
+
+test("conducting is a quality of steering, distinct from correction-cost magnitude", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("decomposition");
+  expect(system).toContain(
+    "a well-conducted session can carry heavy correction",
+  );
+});
+
+test("the SYSTEM rubric elicits the effort signal with its ordinal vocabulary", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain('"effort"');
+  expect(system).toContain("low < moderate < high");
+});
+
+test("effort rates the AI's own grind objectively, not worth", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("thrash");
+  expect(system).toContain("not whether the work was worth it");
+});
+
+test("the SYSTEM rubric elicits the convention-adherence signal with its closed vocabulary", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain('"convention-adherence"');
+  expect(system).toContain("followed | partially-followed | violated");
+});
+
+test("convention-adherence abstains when no conventions are in force", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain(
+    "no conventions or practices are stated in the expected-behaviors block",
+  );
+});
+
+test("convention-adherence is judged as an AI-action, not a person verdict", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("whether the AI honored");
+});
+
 test("injects a supplied convention's text and a practice's name when setup is present", () => {
   const prompt = buildJudgePrompt(CHUNKS, SETUP);
   const full = `${prompt.system}\n${prompt.user}`;

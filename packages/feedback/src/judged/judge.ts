@@ -18,8 +18,12 @@ import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
   AccomplishmentValue,
   AttributionValue,
+  ConductingValue,
+  ConventionAdherenceValue,
   CorrectionCostValue,
+  EffortValue,
   EngagementValue,
+  FramingValue,
   IntentValue,
   JudgedNarrative,
   JudgedSignal,
@@ -74,6 +78,27 @@ const ENGAGEMENT_VALUES: ReadonlySet<string> = new Set<EngagementValue>([
   "not-engaged",
 ]);
 
+/** The 3-value ordinal framing vocabulary, low to high (ADR-0017). */
+const FRAMING_VALUES: ReadonlySet<string> = new Set<FramingValue>([
+  "underspecified",
+  "adequate",
+  "clear",
+]);
+
+/** The 3-value ordinal conducting vocabulary, low to high (ADR-0017). */
+const CONDUCTING_VALUES: ReadonlySet<string> = new Set<ConductingValue>([
+  "poorly-conducted",
+  "adequately-conducted",
+  "well-conducted",
+]);
+
+/** The 3-value ordinal effort vocabulary, low to high (ADR-0017). */
+const EFFORT_VALUES: ReadonlySet<string> = new Set<EffortValue>([
+  "low",
+  "moderate",
+  "high",
+]);
+
 /** The closed Verification vocabulary (ADR-0017). */
 const VERIFICATION_VALUES: ReadonlySet<string> = new Set<VerificationValue>([
   "verified",
@@ -91,6 +116,14 @@ const ATTRIBUTION_VALUES: ReadonlySet<string> = new Set<AttributionValue>([
   "ai",
   "environment",
 ]);
+
+/** The closed convention-adherence vocabulary (ADR-0017). */
+const CONVENTION_ADHERENCE_VALUES: ReadonlySet<string> =
+  new Set<ConventionAdherenceValue>([
+    "followed",
+    "partially-followed",
+    "violated",
+  ]);
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
 
@@ -211,8 +244,12 @@ interface ParsedVerdict {
   readonly "correction-cost"?: ParsedClaim;
   readonly assessment?: ParsedClaim;
   readonly engagement?: ParsedClaim;
+  readonly framing?: ParsedClaim;
+  readonly conducting?: ParsedClaim;
   readonly verification?: ParsedClaim;
+  readonly effort?: ParsedClaim;
   readonly attribution?: ParsedClaim;
+  readonly "convention-adherence"?: ParsedClaim;
 }
 
 /**
@@ -282,19 +319,24 @@ function resolveAnchors(
 
 /**
  * Whether a verdict represents a shortfall (ADR-0017): the assignment fell short
- * of accomplished, or a live-arc quality signal sits at its poor floor. Only
- * `verification` of the live-arc quality signals is emitted at this taxonomy
- * step, so its off-healthy reads (`accepted-unverified`, `over-verified`) are the
- * process-side shortfall here; `framing` and `conducting` extend this predicate
- * when they land. Attribution, the on-shortfall diagnostic, is emitted only on a
- * shortfall; on a clean success it is dropped with no write so the store never
- * persists a contradictory routing target.
+ * of accomplished, or a live-arc quality signal sits at its poor floor. The
+ * live-arc quality signals are `framing`, `conducting`, and `verification`; each
+ * at its poor floor (`framing=underspecified`, `conducting=poorly-conducted`,
+ * `verification` off the healthy middle at `accepted-unverified`/`over-verified`)
+ * is a process-side shortfall even on an accomplished assignment. `effort` and
+ * `convention-adherence` are not live-arc quality signals (cost and the leverage
+ * convention half), so a high `effort` or a `violated` convention is not a
+ * shortfall on its own. Attribution, the on-shortfall diagnostic, is emitted only
+ * on a shortfall; on a clean success it is dropped with no write so the store
+ * never persists a contradictory routing target.
  */
 function isShortfall(verdict: ParsedVerdict): boolean {
   const accomplishment = verdict.accomplishment?.value;
   if (accomplishment === "partial" || accomplishment === "not-accomplished") {
     return true;
   }
+  if (verdict.framing?.value === "underspecified") return true;
+  if (verdict.conducting?.value === "poorly-conducted") return true;
   const verification = verdict.verification?.value;
   return (
     verification === "accepted-unverified" || verification === "over-verified"
@@ -383,6 +425,40 @@ function buildSignals(
   }
 
   if (
+    verdict.framing !== undefined &&
+    typeof verdict.framing.value === "string" &&
+    FRAMING_VALUES.has(verdict.framing.value)
+  ) {
+    const anchors = resolveAnchors(verdict.framing.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "framing",
+        valueKind: "ordinal",
+        value: verdict.framing.value as FramingValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
+    verdict.conducting !== undefined &&
+    typeof verdict.conducting.value === "string" &&
+    CONDUCTING_VALUES.has(verdict.conducting.value)
+  ) {
+    const anchors = resolveAnchors(verdict.conducting.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "conducting",
+        valueKind: "ordinal",
+        value: verdict.conducting.value as ConductingValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
     verdict.verification !== undefined &&
     typeof verdict.verification.value === "string" &&
     VERIFICATION_VALUES.has(verdict.verification.value)
@@ -403,6 +479,23 @@ function buildSignals(
   }
 
   if (
+    verdict.effort !== undefined &&
+    typeof verdict.effort.value === "string" &&
+    EFFORT_VALUES.has(verdict.effort.value)
+  ) {
+    const anchors = resolveAnchors(verdict.effort.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "effort",
+        valueKind: "ordinal",
+        value: verdict.effort.value as EffortValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
     isShortfall(verdict) &&
     verdict.attribution !== undefined &&
     typeof verdict.attribution.value === "string" &&
@@ -415,6 +508,24 @@ function buildSignals(
         signalName: "attribution",
         valueKind: "categorical",
         value: verdict.attribution.value as AttributionValue,
+        anchors,
+      });
+    }
+  }
+
+  const conventionAdherence = verdict["convention-adherence"];
+  if (
+    conventionAdherence !== undefined &&
+    typeof conventionAdherence.value === "string" &&
+    CONVENTION_ADHERENCE_VALUES.has(conventionAdherence.value)
+  ) {
+    const anchors = resolveAnchors(conventionAdherence.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "convention-adherence",
+        valueKind: "categorical",
+        value: conventionAdherence.value as ConventionAdherenceValue,
         anchors,
       });
     }
