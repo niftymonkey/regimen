@@ -101,10 +101,11 @@ test("the planner resolves a source and harness-home target for every bundled sk
   });
   const byName = new Map(plans.map((p) => [p.name, p]));
   expect([...byName.keys()].sort()).toEqual([
+    "regimen-ask",
     "regimen-evidence",
     "regimen-judgment",
   ]);
-  for (const name of ["regimen-evidence", "regimen-judgment"]) {
+  for (const name of ["regimen-ask", "regimen-evidence", "regimen-judgment"]) {
     const plan = byName.get(name);
     expect(plan?.sourcePath).toBe(`/repo/skills/${name}/SKILL.md`);
     expect(plan?.targetPath).toBe(
@@ -137,7 +138,11 @@ test("install-skill --dry-run reports both target paths and writes nothing", asy
       CODEX_HOME: codexHome,
     });
     expect(exit).toBe(0);
-    for (const name of ["regimen-evidence", "regimen-judgment"]) {
+    for (const name of [
+      "regimen-ask",
+      "regimen-evidence",
+      "regimen-judgment",
+    ]) {
       const target = join(codexHome, "skills", name, "SKILL.md");
       expect(stdout).toContain(`would write ${target}`);
       expect(existsSync(target)).toBe(false);
@@ -145,7 +150,7 @@ test("install-skill --dry-run reports both target paths and writes nothing", asy
   });
 });
 
-test("install-skill copies both bundled SKILL.md files into CODEX_HOME/skills", async () => {
+test("install-skill copies every bundled SKILL.md file into CODEX_HOME/skills", async () => {
   await withCodexHome(async (codexHome) => {
     const { exit, stdout } = await runCliWith(["install-skill"], {
       REGIMEN_HARNESS: "codex",
@@ -167,6 +172,14 @@ test("install-skill copies both bundled SKILL.md files into CODEX_HOME/skills", 
     expect(judgmentContent).toContain("name: regimen-judgment");
     expect(judgmentContent).toContain("regimen assess");
     expect(judgmentContent).not.toContain("--harness");
+
+    const ask = join(codexHome, "skills", "regimen-ask", "SKILL.md");
+    expect(stdout).toContain(`installed ${ask}`);
+    const askContent = readFileSync(ask, "utf8");
+    expect(askContent).toContain("name: regimen-ask");
+    // The ask skill composes the cross-conversation reads.
+    expect(askContent).toContain("regimen rollup");
+    expect(askContent).toContain("regimen audit");
   });
 });
 
