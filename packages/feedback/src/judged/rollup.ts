@@ -21,6 +21,7 @@ import {
   type SessionSummary,
 } from "../sessions.ts";
 import { readJudgmentDigest } from "./digest.ts";
+import type { JudgeModelPort } from "./port.ts";
 
 /** One bucket of a signal's distribution: a value and how many verdicts hold it. */
 export interface SignalBucket {
@@ -192,4 +193,110 @@ function orderBuckets(
         ]
       : [...counts.keys()].sort();
   return values.map((value) => ({ value, count: counts.get(value)! }));
+}
+
+/**
+ * The rollup synthesis prompt's version stamp. Distinct from the per-conversation
+ * judge's PROMPT_VERSION: the rollup composes a different template (free-form
+ * colleague-voice prose, no structured parse), so a change to its wording is
+ * tracked on its own date-stamped stamp and recorded in the rollup's provenance.
+ */
+export const ROLLUP_PROMPT_VERSION = "2026-07-04";
+
+/**
+ * The interpretive half of a rollup: the model's patterns-and-remedies narrative
+ * plus provenance. `prose` is free-form colleague-voice text, never parsed;
+ * `judgeModel` is the model that answered (from the response, never
+ * self-reported); `promptVersion` is the pinned {@link ROLLUP_PROMPT_VERSION}.
+ * Carries no number: every count lives in the deterministic header.
+ */
+export interface RollupSynthesis {
+  readonly prose: string;
+  readonly judgeModel: string;
+  readonly promptVersion: string;
+}
+
+/** The collected header and verdicts the synthesis interprets. */
+export interface SynthesisInput {
+  readonly header: RollupHeader;
+  readonly verdicts: ReadonlyArray<Verdict>;
+}
+
+/** The synthesis seam: the injected model port, the one thing tests vary. */
+export interface SynthesisConfig {
+  readonly llm: JudgeModelPort;
+}
+
+/**
+ * The binding voice, distilled from docs/regimen-voice-and-ux.md into the
+ * synthesis system prompt. The doc is the source of truth; this is one of the
+ * three surfaces it governs and must not drift from it. The numbers rule is the
+ * SQL-vs-model split restated for the model: the counts arrive already tallied,
+ * so the model translates them into plain language and never invents or restates
+ * a raw count.
+ */
+const ROLLUP_SYSTEM = [
+  "You are a sharp colleague across the desk from an engineer, reviewing how their AI coding sessions have gone. Speak the way a co-worker would say it aloud, never like a report.",
+  'The numbers you are given are already counted. Translate them into plain language ("about two thirds", "four of the finished ones"); never recompute, restate, or invent a count, and never write counts-as-notation like n=9.',
+  'Use zero internal vocabulary in your answer: no signal names, enum values, axis names, or version labels. Say "needed heavy correction from you" rather than any label.',
+  "Write for someone one month into using AI at work. Assume no familiarity with judges, rubrics, or how any of this is built.",
+  'Shortfalls get a neutral subject; only wins get "you". Praise ownership ("your instinct to test first is solid"); name the pattern, the session, or the practice for a shortfall, never the person, because responsibility is shared between the engineer and the AI.',
+  'Remedies are "we", and recommendations announce themselves: "My recommendation is that we ..." anchored to a concrete action, with the outcome as the why-clause.',
+  'Route blunt options through the reader\'s own judgment ("if you think you have been fine without it, retire it"), never critique them directly.',
+  'Help, not homework: when something is missing, ask the specific question and bring a candidate answer; never end with "be clearer next time" in any phrasing.',
+  'Offer capabilities plainly, without liability waivers: "Regimen can help you draft that if you would like, and you can choose whether to install it."',
+  "Be terse. If a paragraph can be a sentence, make it a sentence.",
+  'Leave no dangling threads: every pattern you flag but do not act on carries a resolution Regimen owns, not the reader\'s memory, for example "I have noted it; if next week shows it again I will raise it as actionable."',
+  "Shape: open with how the stretch went in a sentence or two, name the recurring pattern behind the shortfalls and why it happened, give one labeled recommendation with an offer to help, then re-raise any watch item you are not acting on yet. You may reference specific conversations by their session id when it grounds a claim.",
+].join("\n");
+
+/** Render the deterministic header as given facts for the prompt (never recomputed by the model). */
+function renderHeaderFacts(header: RollupHeader): string {
+  const lines = [`judged conversations: ${header.totalJudged}`];
+  for (const dist of header.distributions) {
+    const buckets = dist.buckets.map((b) => `${b.value}=${b.count}`).join(", ");
+    lines.push(`${dist.signalName}: ${buckets}`);
+  }
+  return lines.join("\n");
+}
+
+/** Render one collected verdict as a labeled input line the model interprets. */
+function renderVerdict(verdict: Verdict): string {
+  const slice = `${verdict.harness}/${verdict.model ?? "unknown-model"}`;
+  const intent = verdict.intent ?? "unstated";
+  const outcome = verdict.outcome ?? "unjudged";
+  const prose = verdict.prose ?? "(no assessment)";
+  return `- session ${verdict.sessionId} (${slice}), intent ${intent}, outcome ${outcome}: ${prose}`;
+}
+
+/** Build the user projection: the given-facts header, then the per-conversation verdicts. */
+function buildRollupUser(input: SynthesisInput): string {
+  return [
+    "Here are the numbers, already counted. Do not recount them; translate them into plain language.",
+    renderHeaderFacts(input.header),
+    "",
+    "Here are the per-conversation assessments (one line each; the session id is how a claim traces back):",
+    ...input.verdicts.map(renderVerdict),
+  ].join("\n");
+}
+
+/**
+ * Turn the collected header and verdicts into the colleague-voice narrative by
+ * one call through the injected {@link JudgeModelPort}. Returns the model's prose
+ * plus provenance; it computes no number (the header owns them) and does not
+ * parse the response (the prose is free-form).
+ */
+export async function synthesizeRollup(
+  input: SynthesisInput,
+  config: SynthesisConfig,
+): Promise<RollupSynthesis> {
+  const response = await config.llm.complete({
+    system: ROLLUP_SYSTEM,
+    user: buildRollupUser(input),
+  });
+  return {
+    prose: response.text,
+    judgeModel: response.model,
+    promptVersion: ROLLUP_PROMPT_VERSION,
+  };
 }

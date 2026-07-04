@@ -23,8 +23,16 @@ import type { JudgeResult, JudgedSignal } from "../src/judged/types.ts";
 import {
   collectVerdicts,
   rollupHeader,
+  ROLLUP_PROMPT_VERSION,
+  synthesizeRollup,
+  type RollupHeader,
   type SignalDistribution,
+  type Verdict,
 } from "../src/judged/rollup.ts";
+import type {
+  JudgeModelRequest,
+  JudgeModelResponse,
+} from "../src/judged/port.ts";
 
 const ASSIGNMENT = "whole-conversation";
 
@@ -232,4 +240,93 @@ test("rollupHeader orders the outcome distribution worst to best", () => {
       { value: "accomplished-cleanly", count: 2 },
     ]);
   });
+});
+
+/** A mock JudgeModelPort that records its request and returns fixed output. */
+function capturingPort(text: string, model: string) {
+  const calls: JudgeModelRequest[] = [];
+  return {
+    calls,
+    port: {
+      complete(request: JudgeModelRequest): Promise<JudgeModelResponse> {
+        calls.push(request);
+        return Promise.resolve({ text, model });
+      },
+    },
+  };
+}
+
+const SAMPLE_HEADER: RollupHeader = {
+  totalJudged: 3,
+  distributions: [
+    {
+      signalName: "outcome",
+      buckets: [
+        { value: "partial", count: 1 },
+        { value: "accomplished-cleanly", count: 2 },
+      ],
+    },
+  ],
+};
+
+const SAMPLE_VERDICTS: ReadonlyArray<Verdict> = [
+  {
+    sessionId: "sess-alpha",
+    harness: "claude",
+    model: "claude-opus-4-8",
+    intent: "refactor",
+    outcome: "partial",
+    prose:
+      "The boundaries were never stated, so the first attempt overreached.",
+  },
+];
+
+test("synthesizeRollup returns the model's prose and its provenance", async () => {
+  const { port } = capturingPort("Pretty good week overall.", "some-model");
+
+  const synthesis = await synthesizeRollup(
+    { header: SAMPLE_HEADER, verdicts: SAMPLE_VERDICTS },
+    { llm: port },
+  );
+
+  expect(synthesis.prose).toBe("Pretty good week overall.");
+  expect(synthesis.judgeModel).toBe("some-model");
+  expect(synthesis.promptVersion).toBe(ROLLUP_PROMPT_VERSION);
+});
+
+test("the synthesis prompt embeds the binding voice constraints", async () => {
+  const { port, calls } = capturingPort("ok", "m");
+
+  await synthesizeRollup(
+    { header: SAMPLE_HEADER, verdicts: SAMPLE_VERDICTS },
+    { llm: port },
+  );
+
+  const system = calls[0]!.system.toLowerCase();
+  // The colleague voice, the neutral-subject/we-framed remedy rule, the
+  // no-internal-vocabulary rule, the never-recompute-a-number rule, and the
+  // no-dangling-threads follow-through, all load-bearing (voice-and-ux doc).
+  expect(system).toContain("colleague");
+  expect(system).toContain("my recommendation is that we");
+  expect(system).toContain("zero internal vocabulary");
+  expect(system).toContain("never recompute");
+  expect(system).toContain("noted it");
+});
+
+test("the synthesis prompt passes the deterministic distributions and the session ids as facts", async () => {
+  const { port, calls } = capturingPort("ok", "m");
+
+  await synthesizeRollup(
+    { header: SAMPLE_HEADER, verdicts: SAMPLE_VERDICTS },
+    { llm: port },
+  );
+
+  const user = calls[0]!.user;
+  // The header counts arrive as given facts the model must not recompute.
+  expect(user).toContain("judged conversations: 3");
+  expect(user).toContain("accomplished-cleanly=2");
+  expect(user).toContain("partial=1");
+  // Each verdict carries its session id so a narrative claim traces back.
+  expect(user).toContain("sess-alpha");
+  expect(user).toContain("boundaries were never stated");
 });
