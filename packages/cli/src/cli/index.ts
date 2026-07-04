@@ -839,6 +839,14 @@ judged verdict of a session (paid LLM call, writes a verdict)
 
 quantitative digest of the current session (free, deterministic)
 `,
+  rollup: `usage: regimen rollup [--harness <h>] [--model <m>] [--since <when>] [--until <when>] [--outcome <o>] [--judge-model <id>] [--judge-via <api|cli>] [--json]
+
+read across judged sessions: how it is going, patterns, remedies (paid LLM synthesis)
+`,
+  audit: `usage: regimen audit [--harness <h>] [--model <m>] [--since <when>] [--until <when>] [--judge-model <id>] [--judge-via <api|cli>]
+
+check whether your established practices are still being honored
+`,
   list: `usage: regimen list [--harness <h>] [--model <m>] [--since <when>] [--until <when>] [--outcome <o>] [--json]
 
 enumerate captured sessions
