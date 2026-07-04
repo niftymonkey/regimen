@@ -23,6 +23,7 @@ import type {
   IntentValue,
   JudgedNarrative,
   JudgedSignal,
+  SignalName,
   VerificationValue,
 } from "./types.ts";
 
@@ -462,4 +463,103 @@ function buildNarratives(
       anchors,
     },
   ];
+}
+
+/** The closed vocabulary for each judge-emitted signal, single-sourced here so a
+ * health check reads the same sets the assembler enforces. `outcome` is absent:
+ * it is write-derived, never emitted by the judge. */
+const VOCAB_BY_SIGNAL: ReadonlyMap<SignalName, ReadonlySet<string>> = new Map<
+  SignalName,
+  ReadonlySet<string>
+>([
+  ["intent", INTENT_VALUES],
+  ["accomplishment", ACCOMPLISHMENT_VALUES],
+  ["correction-cost", CORRECTION_COST_VALUES],
+  ["engagement", ENGAGEMENT_VALUES],
+  ["framing", FRAMING_VALUES],
+  ["conducting", CONDUCTING_VALUES],
+  ["verification", VERIFICATION_VALUES],
+  ["effort", EFFORT_VALUES],
+  ["attribution", ATTRIBUTION_VALUES],
+  ["convention-adherence", CONVENTION_ADHERENCE_VALUES],
+]);
+
+/** A structural-gate rule a raw verdict can violate (health mode). */
+export type GateViolation =
+  | "attribution-without-shortfall"
+  | "correction-cost-without-accomplished"
+  | "engagement-missing";
+
+/**
+ * One emitted signal's elicitation health: its raw value, whether that value is
+ * in the closed vocabulary, and whether at least one cited anchor resolved to a
+ * chunk in the conversation (the same membership rule the assembler enforces).
+ */
+export interface SignalDiagnostic {
+  readonly signalName: SignalName;
+  readonly value: string;
+  readonly inVocabulary: boolean;
+  readonly anchorsResolved: boolean;
+}
+
+/**
+ * The rubric-regression diagnostics for one raw verdict, the health-mode twin of
+ * assembleVerdict. It reports whether the text parsed, a per-emitted-signal
+ * vocabulary and anchor-resolution health, and the structural-gate violations
+ * (attribution off a shortfall, correction-cost off an accomplished verdict,
+ * engagement missing entirely). Pure: no store, no clock. It reads the RAW
+ * verdict so it can see an out-of-vocabulary value the assembler would silently
+ * drop, which is exactly the elicitation regression the health gate must catch.
+ */
+export function diagnoseVerdict(
+  rawText: string,
+  chunks: ReadonlyArray<ContentChunk>,
+): {
+  parsed: boolean;
+  signals: SignalDiagnostic[];
+  gateViolations: GateViolation[];
+} {
+  const verdict = parseVerdict(rawText);
+  if (verdict === undefined) {
+    return { parsed: false, signals: [], gateViolations: [] };
+  }
+  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
+  const signals: SignalDiagnostic[] = [];
+  for (const [signalName, vocab] of VOCAB_BY_SIGNAL) {
+    const claim = (verdict as Record<string, ParsedClaim | undefined>)[
+      signalName
+    ];
+    if (claim === undefined || typeof claim.value !== "string") continue;
+    signals.push({
+      signalName,
+      value: claim.value,
+      inVocabulary: vocab.has(claim.value),
+      anchorsResolved: resolveAnchors(claim.anchors, chunkByLineSeq).length > 0,
+    });
+  }
+
+  const gateViolations: GateViolation[] = [];
+  const attribution = verdict.attribution;
+  if (
+    attribution !== undefined &&
+    typeof attribution.value === "string" &&
+    !isShortfall(verdict)
+  ) {
+    gateViolations.push("attribution-without-shortfall");
+  }
+  const correctionCost = verdict["correction-cost"];
+  if (
+    correctionCost !== undefined &&
+    typeof correctionCost.value === "string" &&
+    verdict.accomplishment?.value !== "accomplished"
+  ) {
+    gateViolations.push("correction-cost-without-accomplished");
+  }
+  if (
+    verdict.engagement === undefined ||
+    typeof verdict.engagement.value !== "string"
+  ) {
+    gateViolations.push("engagement-missing");
+  }
+  return { parsed: true, signals, gateViolations };
 }

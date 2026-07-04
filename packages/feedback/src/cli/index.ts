@@ -77,6 +77,19 @@ import { createLiveSetupSource } from "../judged/live-setup-source.ts";
 import type { SetupSource } from "../judged/setup.ts";
 import type { JudgeModelPort } from "../judged/port.ts";
 import {
+  calibrateSessions,
+  formatCalibration,
+  type CalibrateTarget,
+  type CalibrationMode,
+} from "../judged/calibrate.ts";
+import {
+  goldenPath,
+  readGolden,
+  writeGolden,
+  type GoldenEntry,
+} from "../judged/golden.ts";
+import { sessionHarnessModel } from "../judged/slice.ts";
+import {
   rollupHeader,
   rollupVerdicts,
   type VerdictRollup,
@@ -1101,6 +1114,152 @@ export async function audit(options: {
   } finally {
     if (store !== undefined) store.close();
     else db.close();
+  }
+}
+
+/**
+ * `regimen calibrate`: the READ-ONLY judge calibration harness. It measures a
+ * candidate judge configuration (any backend/model, resolved through the same
+ * `--judge-model`/`--judge-via` flags as assess) against the reference sessions
+ * without ever writing to the store: it reuses the emit-prompt preparation path
+ * to build the exact versioned prompt, calls the candidate directly, runs the
+ * response through the shared verdict pipeline, and compares in memory.
+ *
+ * Two modes: CALIBRATION scores per-signal agreement against the stored baseline
+ * at the same rubric version; HEALTH is a rubric-regression check of the
+ * candidate's own elicitation. `--save-golden` writes the `--sessions` list to
+ * the golden file and exits. With neither `--sessions` nor a golden file it fails
+ * closed. The store opens read-write only for the idempotent anchor-event insert
+ * the read path already does; no assessment run and no setup snapshot are
+ * written. Exit code gates: 0 on PASS, 1 on FAIL.
+ */
+export async function calibrate(options: {
+  dataDir: string;
+  configDir: string;
+  mode: CalibrationMode;
+  sessionIds?: ReadonlyArray<string>;
+  saveGolden?: boolean;
+  judgeModel?: string;
+  judgeVia?: "cli" | "api";
+  asJson?: boolean;
+  /** The candidate judge port; defaults to the resolved backend. Tests inject a stub. */
+  candidate?: JudgeModelPort;
+  /** The setup source; defaults to the live adapter. Tests inject a stub. */
+  setupSource?: SetupSource;
+}): Promise<number> {
+  const adHoc = options.sessionIds ?? [];
+
+  // `--save-golden` is a pure write of the golden set from the `--sessions`
+  // list, then exit: it runs no judge and touches no store.
+  if (options.saveGolden) {
+    if (adHoc.length === 0) {
+      process.stderr.write(
+        "nothing to save: pass --sessions <id,...> with --save-golden\n",
+      );
+      return 1;
+    }
+    const entries: GoldenEntry[] = adHoc.map((sessionId) => ({ sessionId }));
+    writeGolden(options.configDir, entries);
+    process.stdout.write(
+      `saved ${entries.length} session(s) to ${goldenPath(options.configDir)}\n`,
+    );
+    return 0;
+  }
+
+  let golden: GoldenEntry[] | undefined;
+  try {
+    golden = readGolden(options.configDir);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return 1;
+  }
+
+  // The reference set: the ad-hoc `--sessions` list (carrying any golden
+  // expectations for a matching id) when given, else the golden file.
+  let entries: GoldenEntry[];
+  if (adHoc.length > 0) {
+    const byId = new Map((golden ?? []).map((e) => [e.sessionId, e]));
+    entries = adHoc.map((sessionId) => byId.get(sessionId) ?? { sessionId });
+  } else if (golden !== undefined && golden.length > 0) {
+    entries = golden;
+  } else {
+    process.stderr.write(
+      "no sessions to calibrate: pass --sessions <id,...> or create a golden set with --save-golden\n",
+    );
+    return 1;
+  }
+
+  const store = openStore(join(options.dataDir, "feedback.db"));
+  try {
+    let candidate = options.candidate;
+    if (candidate === undefined) {
+      try {
+        candidate = resolveJudgeModel({
+          ...(options.judgeModel === undefined
+            ? {}
+            : { model: options.judgeModel }),
+          ...(options.judgeVia === undefined
+            ? {}
+            : { judgeVia: options.judgeVia }),
+        }).port;
+      } catch (err) {
+        process.stderr.write(`${(err as Error).message}\n`);
+        return 1;
+      }
+    }
+
+    const targets: CalibrateTarget[] = [];
+    const unresolved: string[] = [];
+    for (const entry of entries) {
+      const resolvedId = resolveSessionId(store.db, entry.sessionId);
+      if (!resolvedId.ok) {
+        unresolved.push(`${entry.sessionId}: ${resolvedId.reason}`);
+        continue;
+      }
+      const slice = sessionHarnessModel(store.db, resolvedId.sessionId);
+      if (slice === null) {
+        unresolved.push(
+          `${entry.sessionId}: no captured conversation row (unknown harness)`,
+        );
+        continue;
+      }
+      let location;
+      try {
+        location = resolveHarnessLocation(slice.harness, process.env);
+      } catch (err) {
+        unresolved.push(`${entry.sessionId}: ${(err as Error).message}`);
+        continue;
+      }
+      targets.push({
+        harness: slice.harness as Harness,
+        sessionsDir: location.sessionsDir,
+        sessionId: resolvedId.sessionId,
+        ...(entry.expect === undefined ? {} : { expect: entry.expect }),
+      });
+    }
+
+    const setupSource = options.setupSource ?? createLiveSetupSource();
+    const report = await calibrateSessions({
+      store,
+      mode: options.mode,
+      targets,
+      candidate,
+      setupSource,
+    });
+
+    if (options.asJson) {
+      process.stdout.write(`${JSON.stringify({ ...report, unresolved })}\n`);
+    } else {
+      process.stdout.write(formatCalibration(report));
+      for (const problem of unresolved) {
+        process.stdout.write(`unresolved ${problem}\n`);
+      }
+    }
+    // Any session that could not even be resolved fails the gate: the harness
+    // cannot certify a reference set it could not run over.
+    return report.pass && unresolved.length === 0 ? 0 : 1;
+  } finally {
+    store.close();
   }
 }
 

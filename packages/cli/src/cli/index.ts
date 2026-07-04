@@ -41,6 +41,7 @@ import {
   assess as feedbackAssess,
   assessAll as feedbackAssessAll,
   audit as feedbackAudit,
+  calibrate as feedbackCalibrate,
   type AuditFilter,
   type BatchDecision,
   emitPrompt as feedbackEmitPrompt,
@@ -754,6 +755,40 @@ function audit(argv: ReadonlyArray<string>): Promise<number> {
   });
 }
 
+/**
+ * Dispatch `regimen calibrate` to the READ-ONLY calibration harness. `--health`
+ * selects the rubric-regression health mode; the default is calibration against
+ * the stored baseline. `--sessions <a,b,c>` runs an ad-hoc set, else the golden
+ * file is the reference set; `--save-golden` persists the `--sessions` list.
+ * The judge-backend flags are the same ones `assess` shares. The exit code
+ * gates: 0 on PASS, 1 on FAIL.
+ */
+function calibrate(argv: ReadonlyArray<string>): Promise<number> {
+  const sessionsRaw = flagValue(argv, "--sessions");
+  const sessionIds =
+    sessionsRaw === undefined
+      ? undefined
+      : sessionsRaw
+          .split(",")
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0);
+  const mode = argv.includes("--health") ? "health" : "calibration";
+  const judgeModel = flagValue(argv, "--judge-model");
+  const judgeViaRaw = flagValue(argv, "--judge-via");
+  const judgeVia =
+    judgeViaRaw === "cli" || judgeViaRaw === "api" ? judgeViaRaw : undefined;
+  return feedbackCalibrate({
+    dataDir: dataDir(),
+    configDir: configDir(),
+    mode,
+    ...(sessionIds === undefined ? {} : { sessionIds }),
+    saveGolden: argv.includes("--save-golden"),
+    asJson: argv.includes("--json"),
+    ...(judgeModel === undefined ? {} : { judgeModel }),
+    ...(judgeVia === undefined ? {} : { judgeVia }),
+  });
+}
+
 /** Dispatch `regimen list` to the feedback list facade. */
 function list(argv: ReadonlyArray<string>): number {
   const filter: SessionFilter = {
@@ -792,6 +827,7 @@ Read & judge:
   rollup [filters] [--json]              read across judged sessions: how it is going, patterns, remedies (paid LLM synthesis)
   list [--harness <h>] [--since <when>] [--json]   enumerate captured sessions
   audit [--harness <h>] [--since <when>]           check whether your established practices are still being honored
+  calibrate [--sessions <a,b>] [--health]          check a candidate judge against the baselines or the rubric (read-only, PASS/FAIL)
 
 Flags:
   --dry-run                       preview without changing anything
@@ -856,6 +892,10 @@ check whether your established practices are still being honored
 
 enumerate captured sessions
 `,
+  calibrate: `usage: regimen calibrate [--sessions <a,b,c>] [--health] [--save-golden] [--judge-model <id>] [--judge-via <api|cli>] [--json]
+
+check a candidate judge against the stored baselines (calibration) or the rubric itself (--health), read-only, PASS/FAIL for gating
+`,
 };
 
 /**
@@ -911,6 +951,8 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
       return rollup(argv);
     case "audit":
       return audit(argv);
+    case "calibrate":
+      return calibrate(argv);
     case "list":
       return list(argv);
     default:

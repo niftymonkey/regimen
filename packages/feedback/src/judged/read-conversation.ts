@@ -34,6 +34,16 @@ export interface PrepareConversationOptions {
   readonly setupSource?: SetupSource;
   /** Injectable clock for time-scoping the setup resolution. */
   readonly now: () => Date;
+  /**
+   * Whether to persist the conversation-time setup snapshot (default true). The
+   * assess spine and the emit half of the agent seam leave it on so the leverage
+   * audit can read what setup was in force. A READ-ONLY caller (the judge
+   * calibration harness) passes false: it still resolves the setup so the
+   * candidate prompt matches the baseline's, but writes no snapshot, since a
+   * re-resolution against today's filesystem could otherwise overwrite an
+   * already-assessed session's provenance row.
+   */
+  readonly persistSetupSnapshot?: boolean;
 }
 
 /** The prepared conversation: its content chunks, structural events, and setup. */
@@ -95,7 +105,7 @@ export function prepareConversation(
     // and the emit half of the agent seam get the write exactly once, since
     // both compose this same front half; the record half deliberately injects
     // no setup source and so never reaches this branch.
-    if (setup !== undefined) {
+    if (setup !== undefined && options.persistSetupSnapshot !== false) {
       writeSetupSnapshot(store, sessionId, asOf.toISOString(), setup);
     }
   }
