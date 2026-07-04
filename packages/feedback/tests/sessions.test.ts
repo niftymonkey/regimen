@@ -19,7 +19,7 @@ import {
 } from "../src/judged/writer.ts";
 import type { JudgeResult } from "../src/judged/types.ts";
 import type { DerivedOutcomeValue } from "../src/judged/outcome.ts";
-import { listSessions } from "../src/sessions.ts";
+import { listSessions, resolveSessionId } from "../src/sessions.ts";
 
 const NOW = () => Date.parse("2026-06-15T12:00:00.000Z");
 const ASSIGNMENT = "whole-conversation";
@@ -416,5 +416,95 @@ test("listSessions rejects an unparseable until value with a clear error", () =>
     expect(() => listSessions(store.db, { until: "soon" }, NOW)).toThrow(
       /could not parse until/,
     );
+  });
+});
+
+test("resolveSessionId resolves an unambiguous prefix to the full stored session id", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "37ef64a7-1111-2222-3333-444455556666",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+
+    const result = resolveSessionId(store.db, "37ef64a7");
+    expect(result).toEqual({
+      ok: true,
+      sessionId: "37ef64a7-1111-2222-3333-444455556666",
+    });
+  });
+});
+
+test("resolveSessionId reports an ambiguous prefix with the matching ids", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "37ef64a7-1111-2222-3333-444455556666",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    seedSession(store.db, {
+      sessionId: "37ef64a7-9999-8888-7777-666655554444",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T11:00:00.000Z",
+      lastEventAt: "2026-06-15T11:30:00.000Z",
+    });
+
+    const result = resolveSessionId(store.db, "37ef64a7");
+    expect(result).toEqual({
+      ok: false,
+      reason:
+        '"37ef64a7" matches multiple sessions: 37ef64a7-1111-2222-3333-444455556666, 37ef64a7-9999-8888-7777-666655554444; use more characters to disambiguate',
+    });
+  });
+});
+
+test("resolveSessionId reports no match when nothing starts with the prefix", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "37ef64a7-1111-2222-3333-444455556666",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+
+    const result = resolveSessionId(store.db, "deadbeef");
+    expect(result).toEqual({
+      ok: false,
+      reason: 'no session found matching "deadbeef"',
+    });
+  });
+});
+
+test("resolveSessionId given a full id resolves it directly, even if it also prefixes another id", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "37ef64a7-1111-2222-3333-444455556666",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    seedSession(store.db, {
+      sessionId: "37ef64a7-1111-2222-3333-444455556666-extra",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T11:00:00.000Z",
+      lastEventAt: "2026-06-15T11:30:00.000Z",
+    });
+
+    const result = resolveSessionId(
+      store.db,
+      "37ef64a7-1111-2222-3333-444455556666",
+    );
+    expect(result).toEqual({
+      ok: true,
+      sessionId: "37ef64a7-1111-2222-3333-444455556666",
+    });
   });
 });

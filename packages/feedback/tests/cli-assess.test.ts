@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dispatchFeedback } from "./facade-dispatch.ts";
 import type { SetupSource } from "../src/judged/setup.ts";
+import { openStore } from "../src/store.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
 
@@ -282,6 +283,41 @@ test("feedback assess --session with no ANTHROPIC_API_KEY and no claude CLI exit
     // a throw escaping before the try.
     expect(stderr).not.toContain("    at ");
     expect(stderr).not.toContain("Bun v");
+  });
+});
+
+test("feedback assess --session accepts an unambiguous store-resolved prefix", async () => {
+  await withTemp(async ({ dataDir, codexHome }) => {
+    seedRollout(codexHome);
+    // Seed the conversations row as capture already would have, so the store
+    // can resolve the 8-char prefix `regimen list` prints back to the full id.
+    const store = openStore(join(dataDir, "feedback.db"));
+    store.db
+      .prepare(
+        `INSERT INTO conversations (session_id, harness, model, first_event_at, last_event_at)
+         VALUES (?, 'codex', 'gpt-5', '2026-06-15T10:00:00.000Z', '2026-06-15T10:00:02.000Z')`,
+      )
+      .run(SESSION);
+    store.close();
+
+    const mock = startMockAnthropic();
+    try {
+      const { exit, stdout } = await runCliWith(
+        ["assess", "--session", SESSION.slice(0, 8)],
+        {
+          REGIMEN_DATA_DIR: dataDir,
+          REGIMEN_HARNESS: "codex",
+          CODEX_HOME: codexHome,
+          ANTHROPIC_API_KEY: "sk-ant-test",
+          ANTHROPIC_BASE_URL: mock.baseUrl,
+        },
+      );
+      expect(exit).toBe(0);
+      const digest = JSON.parse(stdout);
+      expect(digest.sessionId).toBe(SESSION);
+    } finally {
+      mock.stop();
+    }
   });
 });
 

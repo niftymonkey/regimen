@@ -20,6 +20,8 @@ export interface AnthropicJudgeModelOptions {
   readonly apiKey: string;
   readonly model: string;
   readonly baseUrl: string;
+  /** The request deadline in milliseconds; injectable for tests. */
+  readonly timeoutMs?: number;
   /** Injectable for tests; defaults to the global fetch in production. */
   readonly fetch?: typeof fetch;
 }
@@ -29,6 +31,15 @@ const ANTHROPIC_VERSION = "2023-06-01";
 
 /** A sane output cap for one whole-conversation verdict (one JSON object). */
 const MAX_TOKENS = 4096;
+
+/**
+ * The default request deadline. A stalled endpoint must fail the port call,
+ * which the Judge maps to an honest llm-unavailable run, rather than wedge the
+ * process indefinitely (observed: a real hang past ten minutes in a small
+ * sample). One whole-conversation verdict can legitimately take tens of
+ * seconds, so the bound is conservative.
+ */
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 /** One text block of an Anthropic Messages response. */
 interface AnthropicTextBlock {
@@ -63,15 +74,33 @@ export function anthropicJudgeModel(
         };
       }
 
-      const response = await doFetch(`${options.baseUrl}/v1/messages`, {
-        method: "POST",
-        headers: {
-          "x-api-key": options.apiKey,
-          "anthropic-version": ANTHROPIC_VERSION,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
+      // Bound the request so a stalled endpoint fails the port call instead of
+      // hanging complete() (and with it the whole assess) forever.
+      const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let response: Response;
+      try {
+        response = await doFetch(`${options.baseUrl}/v1/messages`, {
+          method: "POST",
+          headers: {
+            "x-api-key": options.apiKey,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+          },
+          signal: controller.signal,
+          body: JSON.stringify(body),
+        });
+      } catch (err) {
+        if (controller.signal.aborted) {
+          throw new Error(
+            `Anthropic Messages API request timed out after ${timeoutMs}ms; the endpoint at ${options.baseUrl} did not respond`,
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
 
       if (!response.ok) {
         throw new Error(
