@@ -155,6 +155,52 @@ interface SessionRow {
   outcome: string | null;
 }
 
+/**
+ * The result of resolving a candidate session id (a full id, or an unambiguous
+ * prefix like the 8 characters {@link listSessions}'s table column shows) against
+ * the store. `ok: false` carries an actionable reason, distinguishing no match
+ * from an ambiguous one so a caller can surface either directly.
+ */
+export type SessionIdResolution =
+  | { readonly ok: true; readonly sessionId: string }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Resolve `idOrPrefix` to the one full session id it names. An exact match
+ * against `session_id` wins immediately (a full id always resolves to itself,
+ * even if it also happens to prefix another id); otherwise every session whose
+ * id starts with `idOrPrefix` is a candidate. Zero candidates or more than one
+ * both fail with a reason naming the problem (not found, or which ids the
+ * prefix is ambiguous between) rather than guessing.
+ */
+export function resolveSessionId(
+  db: Database,
+  idOrPrefix: string,
+): SessionIdResolution {
+  const exact = db
+    .prepare("SELECT session_id FROM conversations WHERE session_id = ?")
+    .get(idOrPrefix) as { session_id: string } | null;
+  if (exact !== null) return { ok: true, sessionId: exact.session_id };
+
+  const matches = db
+    .prepare(
+      "SELECT session_id FROM conversations WHERE session_id LIKE ? ORDER BY session_id",
+    )
+    .all(`${idOrPrefix}%`) as ReadonlyArray<{ session_id: string }>;
+
+  if (matches.length === 0) {
+    return { ok: false, reason: `no session found matching "${idOrPrefix}"` };
+  }
+  if (matches.length > 1) {
+    const ids = matches.map((m) => m.session_id).join(", ");
+    return {
+      ok: false,
+      reason: `"${idOrPrefix}" matches multiple sessions: ${ids}; use more characters to disambiguate`,
+    };
+  }
+  return { ok: true, sessionId: matches[0]!.session_id };
+}
+
 function toSummary(row: SessionRow): SessionSummary {
   return {
     sessionId: row.session_id,

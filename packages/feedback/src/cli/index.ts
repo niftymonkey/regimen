@@ -60,6 +60,7 @@ import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
 import {
   listSessions,
+  resolveSessionId,
   type SessionFilter,
   type SessionSummary,
 } from "../sessions.ts";
@@ -569,14 +570,6 @@ export async function assess(options: {
   setupSource?: SetupSource;
 }): Promise<number> {
   const { dataDir: dir } = options;
-  // One resolution path for every single-session judging surface: assess, the
-  // tier C emit, and the tier C record all resolve the harness, its location,
-  // and the session id through {@link resolveAssessTarget}, so the fail-closed
-  // messages cannot drift apart.
-  const target = resolveAssessTarget(options.session, dir);
-  if (target === null) return 1;
-  const { harness, sessionsDir, sessionId } = target;
-
   // The judge LLM is the engineer's configured Claude, resolved from env at
   // runtime (the judgeModel option overrides the model). Resolving it inside
   // the try keeps a missing key (or any resolution failure) on the clean
@@ -587,8 +580,18 @@ export async function assess(options: {
   // Assess writes the store (events + verdict), so it opens read-write, unlike
   // the read-only evidence command. It runs regardless of the enabled flag: the
   // explicit invocation against a named transcript is the consent (spec 9.6).
+  // Opened before target resolution: a --session prefix resolves against this
+  // same store (see resolveAssessTarget).
   const store = openStore(join(dir, "feedback.db"));
   try {
+    // One resolution path for every single-session judging surface: assess, the
+    // tier C emit, and the tier C record all resolve the harness, its location,
+    // and the session id through {@link resolveAssessTarget}, so the fail-closed
+    // messages cannot drift apart.
+    const target = resolveAssessTarget(options.session, dir, store.db);
+    if (target === null) return 1;
+    const { harness, sessionsDir, sessionId } = target;
+
     const resolved = resolveJudgeModel({
       ...(judgeModel === undefined ? {} : { model: judgeModel }),
       ...(judgeVia === undefined ? {} : { judgeVia }),
@@ -747,16 +750,31 @@ interface AssessTarget {
 }
 
 /**
+ * Below this length a `--session` value is treated as a prefix to resolve
+ * against the store (the 8 characters `regimen list` prints in its session
+ * column) rather than a literal full id; a real session id (a UUID) is at
+ * least this long. Keeping full ids on the direct passthrough means an
+ * already-known full id still resolves even before capture has written its
+ * conversations row (the transcript-only case a fresh, not-yet-captured
+ * session exercises).
+ */
+const MIN_FULL_SESSION_ID_LENGTH = 32;
+
+/**
  * Resolve the judging target the same way `assess` does: the harness from the
  * environment (never a flag), its sessions dir from the registry, and the
- * session id from `--session` or the harness's current-session resolver. Writes
- * the fail-closed diagnostic to stderr and returns null on any resolution
- * failure, so the caller exits 1 with a clean message. Shared by the tier C
- * emit and record facades.
+ * session id from `--session` or the harness's current-session resolver. A
+ * `--session` value shorter than a full id is resolved against the store
+ * FIRST (the transcript locator that runs after this needs the full id; an
+ * unambiguous prefix resolves, an ambiguous or unmatched one fails closed with
+ * an actionable stderr reason). Writes the fail-closed diagnostic to stderr
+ * and returns null on any resolution failure, so the caller exits 1 with a
+ * clean message. Shared by the tier C emit and record facades.
  */
 function resolveAssessTarget(
   session: string | undefined,
   dataDir: string,
+  db: Database,
 ): AssessTarget | null {
   let harness;
   try {
@@ -777,8 +795,19 @@ function resolveAssessTarget(
     return null;
   }
   const { support, harnessHome, sessionsDir } = location;
-  let sessionId: string | null = session ?? null;
-  if (sessionId === null) {
+  let sessionId: string | null = null;
+  if (session !== undefined) {
+    if (session.length >= MIN_FULL_SESSION_ID_LENGTH) {
+      sessionId = session;
+    } else {
+      const resolved = resolveSessionId(db, session);
+      if (!resolved.ok) {
+        process.stderr.write(`${resolved.reason}\n`);
+        return null;
+      }
+      sessionId = resolved.sessionId;
+    }
+  } else {
     sessionId = support.resolver.resolveCurrent({
       dataDir,
       harnessHome,
@@ -806,10 +835,14 @@ export async function emitPrompt(options: {
   session?: string;
   setupSource?: SetupSource;
 }): Promise<number> {
-  const target = resolveAssessTarget(options.session, options.dataDir);
-  if (target === null) return 1;
   const store = openStore(join(options.dataDir, "feedback.db"));
   try {
+    const target = resolveAssessTarget(
+      options.session,
+      options.dataDir,
+      store.db,
+    );
+    if (target === null) return 1;
     const envelope = agentEmitPrompt({
       store,
       harness: target.harness,
@@ -842,8 +875,6 @@ export async function recordVerdict(options: {
   session?: string;
   input: string;
 }): Promise<number> {
-  const target = resolveAssessTarget(options.session, options.dataDir);
-  if (target === null) return 1;
   let envelope: RecordEnvelope;
   try {
     envelope = JSON.parse(options.input) as RecordEnvelope;
@@ -853,6 +884,12 @@ export async function recordVerdict(options: {
   }
   const store = openStore(join(options.dataDir, "feedback.db"));
   try {
+    const target = resolveAssessTarget(
+      options.session,
+      options.dataDir,
+      store.db,
+    );
+    if (target === null) return 1;
     const outcome = agentRecordVerdict({
       store,
       harness: target.harness,
