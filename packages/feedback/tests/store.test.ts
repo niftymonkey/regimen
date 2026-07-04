@@ -70,6 +70,38 @@ test("openStore creates the conversation_setup_snapshot provenance table (v7)", 
   });
 });
 
+test("conversation_setup_snapshot.session_id enforces a foreign key on conversations", () => {
+  withTempDir((dir) => {
+    const store = openStore(join(dir, "feedback.db"));
+    try {
+      expect(() =>
+        store.db
+          .prepare(
+            `INSERT INTO conversation_setup_snapshot (session_id, captured_at, practices, conventions)
+             VALUES (?, ?, ?, ?)`,
+          )
+          .run("session-orphan", "2026-05-21T12:00:00.000Z", "[]", "[]"),
+      ).toThrow();
+
+      store.insertEvent(baseEvent);
+      store.db
+        .prepare(
+          `INSERT INTO conversation_setup_snapshot (session_id, captured_at, practices, conventions)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(baseEvent.session_id, "2026-05-21T12:00:00.000Z", "[]", "[]");
+      const row = store.db
+        .prepare(
+          "SELECT session_id FROM conversation_setup_snapshot WHERE session_id = ?",
+        )
+        .get(baseEvent.session_id) as { session_id: string };
+      expect(row.session_id).toBe(baseEvent.session_id);
+    } finally {
+      store.close();
+    }
+  });
+});
+
 test("insertEvent persists every column required by the events schema", () => {
   withTempDir((dir) => {
     const store = openStore(join(dir, "feedback.db"));

@@ -184,7 +184,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
     description: "conversation-time setup-provenance snapshot (ADR-0017)",
     up: `
       CREATE TABLE conversation_setup_snapshot (
-        session_id  TEXT PRIMARY KEY NOT NULL,
+        session_id  TEXT PRIMARY KEY NOT NULL REFERENCES conversations(session_id),
         captured_at TEXT NOT NULL,
         practices   TEXT NOT NULL,
         conventions TEXT NOT NULL
