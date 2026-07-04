@@ -20,6 +20,7 @@ import {
   type SessionFilter,
   type SessionSummary,
 } from "../sessions.ts";
+import { readJudgmentDigest } from "./digest.ts";
 
 /** One bucket of a signal's distribution: a value and how many verdicts hold it. */
 export interface SignalBucket {
@@ -121,6 +122,55 @@ export function rollupHeader(
   }));
 
   return { totalJudged: sessionIds.length, distributions };
+}
+
+/**
+ * One judged conversation as the synthesis model's input: the identity a
+ * citation traces back to (`sessionId`), its read-time slice (`harness`,
+ * `model`), the two categorical reads the narrative leans on (`intent`,
+ * `outcome`, each null when the run abstained), and the judge's assessment
+ * `prose`. The full per-signal numbers stay in the deterministic header; a
+ * Verdict carries only what the model interprets, never a count.
+ */
+export interface Verdict {
+  readonly sessionId: string;
+  readonly harness: string;
+  readonly model: string | null;
+  readonly intent: string | null;
+  readonly outcome: string | null;
+  readonly prose: string | null;
+}
+
+/**
+ * Collect the judged conversations matching `filter` as the synthesis model's
+ * input. Selection is the shared {@link selectJudged} (so the set is identical to
+ * the header's), then {@link readJudgmentDigest} per session pulls the assessment
+ * prose, the Outcome, the Intent, and the harness/model already recovered by that
+ * digest's join. No new store access is invented, and no number is computed here:
+ * the header owns every count, a Verdict carries only what the model interprets.
+ */
+export function collectVerdicts(
+  db: Database,
+  filter?: SessionFilter,
+  now: () => number = Date.now,
+): ReadonlyArray<Verdict> {
+  const verdicts: Verdict[] = [];
+  for (const session of selectJudged(db, filter, now)) {
+    const digest = readJudgmentDigest(db, session.sessionId);
+    if (!digest.judged) continue;
+    const intent = digest.assignment.signals.find(
+      (s) => s.signalName === "intent",
+    );
+    verdicts.push({
+      sessionId: digest.sessionId,
+      harness: digest.harness,
+      model: digest.model,
+      intent: intent?.value ?? null,
+      outcome: digest.outcome?.value ?? null,
+      prose: digest.assessment?.prose ?? null,
+    });
+  }
+  return verdicts;
 }
 
 /**

@@ -20,7 +20,11 @@ import {
   type AssessmentRunIdentity,
 } from "../src/judged/writer.ts";
 import type { JudgeResult, JudgedSignal } from "../src/judged/types.ts";
-import { rollupHeader, type SignalDistribution } from "../src/judged/rollup.ts";
+import {
+  collectVerdicts,
+  rollupHeader,
+  type SignalDistribution,
+} from "../src/judged/rollup.ts";
 
 const ASSIGNMENT = "whole-conversation";
 
@@ -135,6 +139,41 @@ test("rollupHeader returns a value distribution per signal, one bucket per value
       { value: "bug-fix", count: 1 },
       { value: "feature", count: 1 },
     ]);
+  });
+});
+
+test("collectVerdicts returns one verdict per judged session, excluding the unjudged", () => {
+  withStore((store) => {
+    judge(store, "a", [
+      signal("intent", "feature"),
+      signal("outcome", "accomplished-cleanly"),
+    ]);
+    seedConversation(store.db, "unjudged");
+
+    const verdicts = collectVerdicts(store.db);
+
+    expect(verdicts).toEqual([
+      {
+        sessionId: "a",
+        harness: "claude",
+        model: "claude-opus-4-8",
+        intent: "feature",
+        outcome: "accomplished-cleanly",
+        prose: "The agent did the work.",
+      },
+    ]);
+  });
+});
+
+test("collectVerdicts leaves intent and outcome null when the run abstained on them", () => {
+  withStore((store) => {
+    judge(store, "a", [signal("engagement", "engaged")]);
+
+    const [verdict] = collectVerdicts(store.db);
+
+    expect(verdict?.intent).toBeNull();
+    expect(verdict?.outcome).toBeNull();
+    expect(verdict?.prose).toBe("The agent did the work.");
   });
 });
 
