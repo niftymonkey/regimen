@@ -67,3 +67,19 @@ test("regimen assess --judge-via agent exits 2 and prints the emit/record usage"
   expect(stderr).toContain("--emit-prompt");
   expect(stderr).toContain("--record-verdict");
 });
+
+test("regimen assess --record-verdict on an interactive stdin fails fast with a pipe hint", async () => {
+  process.env.REGIMEN_DATA_DIR = tempDataDir();
+  // Simulate an interactive terminal (no piped input): the command must fail
+  // fast with a usage hint, mirroring promptNextBatch's non-TTY posture, rather
+  // than block forever waiting on stdin.
+  const savedIsTTY = process.stdin.isTTY;
+  (process.stdin as { isTTY: boolean }).isTTY = true;
+  try {
+    const { exit, stderr } = await run(["assess", "--record-verdict"]);
+    expect(exit).toBe(2);
+    expect(stderr).toContain("stdin");
+  } finally {
+    (process.stdin as { isTTY: boolean | undefined }).isTTY = savedIsTTY;
+  }
+});

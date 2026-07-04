@@ -615,6 +615,15 @@ async function assess(argv: ReadonlyArray<string>): Promise<number> {
   }
   // Tier C, back half: read the agent's verdict envelope from stdin and record.
   if (argv.includes("--record-verdict")) {
+    // An interactive stdin means nothing was piped: fail fast with a usage
+    // hint (mirroring promptNextBatch's non-TTY posture) rather than block
+    // forever waiting on input that is not coming.
+    if (process.stdin.isTTY) {
+      process.stderr.write(
+        "no verdict on stdin: pipe the verdict envelope in, e.g. `... | regimen assess --record-verdict`\n",
+      );
+      return 2;
+    }
     const input = await readStdin();
     return feedbackRecordVerdict({
       dataDir: dataDir(),
