@@ -170,16 +170,14 @@ test("emit-prompt prints the versioned envelope and writes no run", async () => 
   expect(envelope.system.length).toBeGreaterThan(0);
   expect(envelope.user).toContain("parser");
 
-  // No run was written: a subsequent assess-less digest read is still unjudged.
-  const after = await capture(() =>
-    recordVerdict({
-      dataDir,
-      session: SESSION,
-      input: verdictEnvelope({ promptVersion: "1999-01-01" }),
-    }),
-  );
-  // The mismatched record is rejected, proving emit alone stored nothing.
-  expect(after.exit).toBe(1);
+  // No run was written by emit-prompt: read the store directly and assert the
+  // session is still unjudged.
+  const store = openStore(join(dataDir, "feedback.db"));
+  try {
+    expect(readJudgmentDigest(store.db, SESSION).judged).toBe(false);
+  } finally {
+    store.close();
+  }
 });
 
 test("record-verdict validates and persists the agent verdict, stamped judge_backend=agent", async () => {
