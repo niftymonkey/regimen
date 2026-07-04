@@ -2,11 +2,12 @@
  * The verdict-rollup deterministic header, observed through rollupHeader.
  *
  * The header is the source of truth for ALL numbers in a rollup: the count of
- * judged conversations and their Outcome distribution come straight from SQL,
- * never from the synthesis model. Each test seeds judged conversations (via the
- * writer) and conversation rows (inserted directly, as the loader would), then
- * asserts the counts the header reports. The seeding mirrors judged-slice.test.ts,
- * the template for this judged read layer. Pure SQLite read: no Judge, no network.
+ * judged conversations and a per-signal value distribution come straight from
+ * SQL, never from the synthesis model. Each test seeds judged conversations (via
+ * the writer) and conversation rows (inserted directly, as the loader would),
+ * then asserts the counts the header reports. The seeding mirrors
+ * judged-slice.test.ts, the template for this judged read layer. Pure SQLite
+ * read: no Judge, no network.
  */
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -18,8 +19,8 @@ import {
   writeAssessment,
   type AssessmentRunIdentity,
 } from "../src/judged/writer.ts";
-import type { JudgeResult, OutcomeValue } from "../src/judged/types.ts";
-import { rollupHeader } from "../src/judged/rollup.ts";
+import type { JudgeResult, JudgedSignal } from "../src/judged/types.ts";
+import { rollupHeader, type SignalDistribution } from "../src/judged/rollup.ts";
 
 const ASSIGNMENT = "whole-conversation";
 
@@ -42,7 +43,7 @@ function seedConversation(db: Database, sessionId: string): void {
   ).run(sessionId, "2026-06-15T10:00:00.000Z", "2026-06-15T10:30:00.000Z");
 }
 
-function resultWithOutcome(outcome: OutcomeValue): JudgeResult {
+function resultWith(signals: ReadonlyArray<JudgedSignal>): JudgeResult {
   return {
     complete: true,
     provenance: {
@@ -50,16 +51,7 @@ function resultWithOutcome(outcome: OutcomeValue): JudgeResult {
       rubricVersion: "2026-06-15",
       promptVersion: "2026-06-15",
     },
-    signals: [
-      {
-        scope: "assignment",
-        assignmentId: ASSIGNMENT,
-        signalName: "outcome",
-        valueKind: "ordinal",
-        value: outcome,
-        anchors: [{ eventHash: "b".repeat(64) }],
-      },
-    ],
+    signals,
     narratives: [
       {
         scope: "conversation",
@@ -71,7 +63,28 @@ function resultWithOutcome(outcome: OutcomeValue): JudgeResult {
   };
 }
 
-function judge(store: Store, sessionId: string, outcome: OutcomeValue): void {
+function signal(
+  signalName: JudgedSignal["signalName"],
+  value: string,
+): JudgedSignal {
+  const scope = signalName === "outcome" ? "assignment" : "conversation";
+  return {
+    scope,
+    ...(scope === "assignment" ? { assignmentId: ASSIGNMENT } : {}),
+    signalName,
+    valueKind: signalName === "outcome" ? "ordinal" : "categorical",
+    // The read layer groups raw stored strings; seeding the derived-spectrum
+    // outcome values that the post-re-sweep writer stores needs a test-only cast.
+    value: value as JudgedSignal["value"],
+    anchors: [{ eventHash: "b".repeat(64) }],
+  };
+}
+
+function judge(
+  store: Store,
+  sessionId: string,
+  signals: ReadonlyArray<JudgedSignal>,
+): void {
   const run: AssessmentRunIdentity = {
     runId: `run-${sessionId}`,
     sessionId,
@@ -79,25 +92,65 @@ function judge(store: Store, sessionId: string, outcome: OutcomeValue): void {
     createdAt: "2026-06-15T10:00:00.000Z",
   };
   seedConversation(store.db, sessionId);
-  writeAssessment(store, run, resultWithOutcome(outcome));
+  writeAssessment(store, run, resultWith(signals));
 }
 
-test("rollupHeader counts judged verdicts by outcome, worst to best, excluding unjudged", () => {
+function distributionFor(
+  header: { distributions: ReadonlyArray<SignalDistribution> },
+  signalName: string,
+): SignalDistribution | undefined {
+  return header.distributions.find((d) => d.signalName === signalName);
+}
+
+test("rollupHeader counts judged verdicts and excludes unjudged conversations", () => {
   withStore((store) => {
-    judge(store, "a", "accomplished-cleanly");
-    judge(store, "b", "accomplished-cleanly");
-    judge(store, "c", "partial");
-    judge(store, "d", "abandoned");
+    judge(store, "a", [signal("outcome", "accomplished-cleanly")]);
+    judge(store, "b", [signal("outcome", "partial")]);
     // An unjudged conversation must not count toward the rollup.
     seedConversation(store.db, "unjudged");
 
+    expect(rollupHeader(store.db).totalJudged).toBe(2);
+  });
+});
+
+test("rollupHeader returns a value distribution per signal, one bucket per value", () => {
+  withStore((store) => {
+    judge(store, "a", [
+      signal("intent", "feature"),
+      signal("engagement", "engaged"),
+      signal("outcome", "accomplished-cleanly"),
+    ]);
+    judge(store, "b", [
+      signal("intent", "bug-fix"),
+      signal("engagement", "engaged"),
+      signal("outcome", "partial"),
+    ]);
+
     const header = rollupHeader(store.db);
 
-    expect(header.totalJudged).toBe(4);
-    expect(header.distribution).toEqual([
-      { outcome: "abandoned", count: 1 },
-      { outcome: "partial", count: 1 },
-      { outcome: "accomplished-cleanly", count: 2 },
+    expect(distributionFor(header, "engagement")?.buckets).toEqual([
+      { value: "engaged", count: 2 },
+    ]);
+    expect(distributionFor(header, "intent")?.buckets).toEqual([
+      { value: "bug-fix", count: 1 },
+      { value: "feature", count: 1 },
+    ]);
+  });
+});
+
+test("rollupHeader orders the outcome distribution worst to best", () => {
+  withStore((store) => {
+    judge(store, "a", [signal("outcome", "accomplished-cleanly")]);
+    judge(store, "b", [signal("outcome", "accomplished-cleanly")]);
+    judge(store, "c", [signal("outcome", "partial")]);
+    judge(store, "d", [signal("outcome", "not-accomplished")]);
+
+    const outcome = distributionFor(rollupHeader(store.db), "outcome");
+
+    expect(outcome?.buckets).toEqual([
+      { value: "not-accomplished", count: 1 },
+      { value: "partial", count: 1 },
+      { value: "accomplished-cleanly", count: 2 },
     ]);
   });
 });

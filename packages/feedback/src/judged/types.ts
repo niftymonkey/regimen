@@ -45,6 +45,22 @@ export type OutcomeValue =
   | "accomplished-cleanly";
 
 /**
+ * Accomplishment: done-ness only, rank-ordered low to high (ADR-0017). Owns
+ * whether the assignment's stated intent was reached, cause-free.
+ */
+export type AccomplishmentValue =
+  | "not-accomplished"
+  | "partial"
+  | "accomplished";
+
+/**
+ * Correction-cost: how much the engineer redirected, corrected, or repaired the
+ * AI's course, rank-ordered low to high (ADR-0017). Emitted only when the
+ * assignment was accomplished; abstains otherwise (the floor absorbs steering).
+ */
+export type CorrectionCostValue = "none" | "light" | "heavy";
+
+/**
  * Engagement: one value naming whether the conversation genuinely became a work
  * session on the assignment (categorical, conversation-scoped). It is orthogonal
  * to Outcome and separates the AI falling short on real work from a session that

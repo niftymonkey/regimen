@@ -48,6 +48,60 @@ test("openStore creates the events, quarantine, and schema_migrations tables", (
   });
 });
 
+test("openStore creates the conversation_setup_snapshot provenance table (v7)", () => {
+  withTempDir((dir) => {
+    const store = openStore(join(dir, "feedback.db"));
+    try {
+      const columns = store.db
+        .prepare("PRAGMA table_info(conversation_setup_snapshot)")
+        .all() as ReadonlyArray<{ name: string; notnull: number; pk: number }>;
+      const byName = new Map(columns.map((column) => [column.name, column]));
+      expect(byName.has("session_id")).toBe(true);
+      expect(byName.has("captured_at")).toBe(true);
+      expect(byName.has("practices")).toBe(true);
+      expect(byName.has("conventions")).toBe(true);
+      expect(byName.get("session_id")?.pk).toBe(1);
+      expect(byName.get("captured_at")?.notnull).toBe(1);
+      expect(byName.get("practices")?.notnull).toBe(1);
+      expect(byName.get("conventions")?.notnull).toBe(1);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test("conversation_setup_snapshot.session_id enforces a foreign key on conversations", () => {
+  withTempDir((dir) => {
+    const store = openStore(join(dir, "feedback.db"));
+    try {
+      expect(() =>
+        store.db
+          .prepare(
+            `INSERT INTO conversation_setup_snapshot (session_id, captured_at, practices, conventions)
+             VALUES (?, ?, ?, ?)`,
+          )
+          .run("session-orphan", "2026-05-21T12:00:00.000Z", "[]", "[]"),
+      ).toThrow();
+
+      store.insertEvent(baseEvent);
+      store.db
+        .prepare(
+          `INSERT INTO conversation_setup_snapshot (session_id, captured_at, practices, conventions)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(baseEvent.session_id, "2026-05-21T12:00:00.000Z", "[]", "[]");
+      const row = store.db
+        .prepare(
+          "SELECT session_id FROM conversation_setup_snapshot WHERE session_id = ?",
+        )
+        .get(baseEvent.session_id) as { session_id: string };
+      expect(row.session_id).toBe(baseEvent.session_id);
+    } finally {
+      store.close();
+    }
+  });
+});
+
 test("insertEvent persists every column required by the events schema", () => {
   withTempDir((dir) => {
     const store = openStore(join(dir, "feedback.db"));

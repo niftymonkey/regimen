@@ -179,6 +179,18 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
       ) WITHOUT ROWID;
     `,
   },
+  {
+    version: 7,
+    description: "conversation-time setup-provenance snapshot (ADR-0017)",
+    up: `
+      CREATE TABLE conversation_setup_snapshot (
+        session_id  TEXT PRIMARY KEY NOT NULL REFERENCES conversations(session_id),
+        captured_at TEXT NOT NULL,
+        practices   TEXT NOT NULL,
+        conventions TEXT NOT NULL
+      ) WITHOUT ROWID;
+    `,
+  },
 ];
 
 /** Result of an event insert. `inserted: false` means an identical hash already existed. */
