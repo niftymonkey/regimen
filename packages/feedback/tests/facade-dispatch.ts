@@ -17,6 +17,7 @@ import {
   list,
   purge,
   restart,
+  rollup,
   start,
   status,
   stop,
@@ -28,6 +29,7 @@ import {
   type SessionFilter,
 } from "../src/cli/index.ts";
 import type { SetupSource } from "../src/judged/setup.ts";
+import type { JudgeModelPort } from "../src/judged/port.ts";
 
 /** Optional injection a suite can pass through the dispatcher to a facade. */
 export interface DispatchOptions {
@@ -37,6 +39,12 @@ export interface DispatchOptions {
    * never reads the developer's real home through the live adapter default.
    */
   readonly setupSource?: SetupSource;
+  /**
+   * The synthesis model port to inject into the `rollup` facade. A suite passes
+   * a mock port so the rollup narrative is deterministic and the test makes no
+   * real model call.
+   */
+  readonly llm?: JudgeModelPort;
 }
 
 /** Read a `--flag value` pair from argv, returning the value or undefined. */
@@ -121,6 +129,18 @@ export async function dispatchFeedback(
         filter: listFilter(rest),
         asJson: hasFlag(rest, "--json"),
       });
+    case "rollup": {
+      const judgeModel = flagValue(rest, "--judge-model");
+      const judgeVia = flagValue(rest, "--judge-via");
+      return rollup({
+        dataDir,
+        filter: listFilter(rest),
+        asJson: hasFlag(rest, "--json"),
+        ...(judgeModel !== undefined ? { judgeModel } : {}),
+        ...(judgeVia === "cli" || judgeVia === "api" ? { judgeVia } : {}),
+        ...(options.llm !== undefined ? { llm: options.llm } : {}),
+      });
+    }
     case "install-daemon":
       return installDaemon({ dataDir, dryRun });
     case "uninstall-daemon":

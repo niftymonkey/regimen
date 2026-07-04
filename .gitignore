@@ -1,6 +1,3 @@
 node_modules/
 **/.claude/settings.local.json
 .env
-
-# Throwaway prototypes: never committed, deleted or absorbed once the real thing lands.
-prototypes/
