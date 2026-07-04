@@ -61,10 +61,7 @@ export async function synthesizeAudit(
       "a leverage-audit deep-dive needs a synthesis model, but none was provided",
     );
   }
-  const response = await llm.complete({
-    system: AUDIT_SYNTHESIS_SYSTEM,
-    user: renderReport(report, idle),
-  });
+  const response = await llm.complete(buildAuditSynthesisPrompt(report));
   return { narrative: response.text, modelConsulted: true };
 }
 
@@ -105,6 +102,26 @@ function renderReport(
     "Write the health summary plus one deep-dive on the practice that is not being honored, ending in a labeled, we-framed recommendation among: enforce it as a hard gate, revise its trigger so it fires, convert it to something you invoke by hand, or retire it.",
   );
   return lines.join("\n");
+}
+
+/** The system and user text an audit deep-dive synthesis call sends the model. */
+export interface AuditSynthesisPrompt {
+  readonly system: string;
+  readonly user: string;
+}
+
+/**
+ * The audit deep-dive synthesis prompt for one report. A pure function of
+ * `report` only (the idle levers are derived deterministically from it): no
+ * clock, no environment, no store or network access, so the same report
+ * always yields byte-identical text. Exported so an eval harness can build the
+ * exact prompt without also driving a {@link JudgeModelPort}.
+ */
+export function buildAuditSynthesisPrompt(
+  report: LeverageAuditReport,
+): AuditSynthesisPrompt {
+  const idle = report.levers.filter((lever) => lever.health === "idle");
+  return { system: AUDIT_SYNTHESIS_SYSTEM, user: renderReport(report, idle) };
 }
 
 /**

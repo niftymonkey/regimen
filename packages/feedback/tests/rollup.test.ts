@@ -10,6 +10,7 @@
  * read: no Judge, no network.
  */
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ import {
 } from "../src/judged/writer.ts";
 import type { JudgeResult, JudgedSignal } from "../src/judged/types.ts";
 import {
+  buildRollupPrompt,
   collectVerdicts,
   rollupHeader,
   rollupVerdicts,
@@ -343,6 +345,36 @@ test("the synthesis prompt passes the deterministic distributions and the sessio
   // Each verdict carries its session id so a narrative claim traces back.
   expect(user).toContain("sess-alpha");
   expect(user).toContain("boundaries were never stated");
+});
+
+test("buildRollupPrompt is pure: the same input yields byte-identical text across calls", () => {
+  const first = buildRollupPrompt({
+    header: SAMPLE_HEADER,
+    verdicts: SAMPLE_VERDICTS,
+  });
+  const second = buildRollupPrompt({
+    header: SAMPLE_HEADER,
+    verdicts: SAMPLE_VERDICTS,
+  });
+
+  expect(second).toEqual(first);
+});
+
+test("buildRollupPrompt is a stable hash of a fixed input, with no clock or environment leaking in", () => {
+  const prompt = buildRollupPrompt({
+    header: SAMPLE_HEADER,
+    verdicts: SAMPLE_VERDICTS,
+  });
+
+  const systemHash = createHash("sha256").update(prompt.system).digest("hex");
+  const userHash = createHash("sha256").update(prompt.user).digest("hex");
+
+  expect(systemHash).toBe(
+    "8a1eeda17de00eae2a5271522dd57b6391903e5b61814b0b3054d5db73aed1ac",
+  );
+  expect(userHash).toBe(
+    "dfa3f36b5e06c6f441581f9c02427e129583fb17d591126687fea2703cd52780",
+  );
 });
 
 const FIXED_NOW = (): number => Date.parse("2026-06-20T00:00:00.000Z");
