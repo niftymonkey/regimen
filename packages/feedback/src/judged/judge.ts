@@ -17,6 +17,7 @@ import type { EngineerSetup } from "./setup.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
   AccomplishmentValue,
+  AttributionValue,
   CorrectionCostValue,
   EngagementValue,
   IntentValue,
@@ -79,6 +80,16 @@ const VERIFICATION_VALUES: ReadonlySet<string> = new Set<VerificationValue>([
   "accepted-unverified",
   "over-verified",
   "nothing-to-verify",
+]);
+
+/** The closed Attribution vocabulary, the on-shortfall routing targets (ADR-0017). */
+const ATTRIBUTION_VALUES: ReadonlySet<string> = new Set<AttributionValue>([
+  "framing",
+  "conducting",
+  "verification",
+  "leverage",
+  "ai",
+  "environment",
 ]);
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
@@ -201,6 +212,7 @@ interface ParsedVerdict {
   readonly assessment?: ParsedClaim;
   readonly engagement?: ParsedClaim;
   readonly verification?: ParsedClaim;
+  readonly attribution?: ParsedClaim;
 }
 
 /**
@@ -361,6 +373,23 @@ function buildSignals(
         signalName: "verification",
         valueKind: "categorical",
         value: verdict.verification.value as VerificationValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
+    verdict.attribution !== undefined &&
+    typeof verdict.attribution.value === "string" &&
+    ATTRIBUTION_VALUES.has(verdict.attribution.value)
+  ) {
+    const anchors = resolveAnchors(verdict.attribution.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "attribution",
+        valueKind: "categorical",
+        value: verdict.attribution.value as AttributionValue,
         anchors,
       });
     }

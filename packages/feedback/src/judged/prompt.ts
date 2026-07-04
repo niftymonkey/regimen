@@ -32,6 +32,9 @@ const ENGAGEMENT_VOCAB = "engaged | not-engaged";
 const VERIFICATION_VOCAB =
   "verified | accepted-unverified | over-verified | nothing-to-verify";
 
+const ATTRIBUTION_VOCAB =
+  "framing | conducting | verification | leverage | ai | environment";
+
 /**
  * The rubric/instruction system prompt. Pins the closed vocabularies, the
  * prose-before-label order, the citable-id anchor rule, and the two explicit
@@ -67,6 +70,14 @@ You output exactly one JSON object with these keys, in this order:
    - accepted-unverified: emit only on POSITIVE evidence of the skip: a substantive AI change followed immediately by the engineer moving on with no visible read, run, or challenge. Anchor the two chunks that bracket the absent check (the AI change and the accept).
    - over-verified: the engineer checked far more than the change warranted (wasteful re-checking of a trivial or already-confirmed result).
    - nothing-to-verify: the conversation produced no AI change to check (a question answered, an exploration); anchor the no-change turns.
+7. "attribution": { "value": <one of: ${ATTRIBUTION_VOCAB}>, "anchors": [<chunk ids>] }
+   Emit this only when there is a shortfall (accomplishment below accomplished, or the work fell short of what it should have been); otherwise OMIT the key entirely. Name the single dominant cause, the one target the fix should route to. Do not list multiple causes; name the dominant one.
+   - framing: the goal, scope, or context was not stated clearly enough at the outset. Anchor the engineer's opening input.
+   - conducting: the work was run poorly in flight (decomposition, when to intervene, when to reset). Anchor the engineer's steering turns.
+   - verification: the AI's output was accepted without the check it needed. Anchor the accept.
+   - leverage: a missing, idle, or conflicting reusable lever (a skill or convention) caused the shortfall. Anchor where a lever should have applied.
+   - ai: the model itself produced the failing output; this is not the engineer's fault. Anchor the AI's failing output.
+   - environment: the tooling or harness failed; this is not the engineer's fault. Anchor the tool-failure or error chunk.
 
 Anchors: each "anchors" array cites the chunk ids (the numbers in [brackets] below) that justify the claim. Cite at least one id per claim, and cite only ids that appear in the conversation. Do not invent ids.
 

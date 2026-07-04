@@ -25,7 +25,8 @@ export type SignalName =
   | "correction-cost"
   | "outcome"
   | "engagement"
-  | "verification";
+  | "verification"
+  | "attribution";
 
 /**
  * The open value-kind tag (ADR-0008). `categorical` and `ordinal` are the live
@@ -81,6 +82,23 @@ export type VerificationValue =
   | "over-verified"
   | "nothing-to-verify";
 
+/**
+ * Attribution: the single dominant cause of a shortfall, categorical and
+ * conversation-scoped, emitted ON-SHORTFALL only (ADR-0017). It names the
+ * routing target so the fix goes to the category that can act; `ai` and
+ * `environment` are the blame-protection values (a well-run session flubbed by
+ * the model or the tooling is not the engineer's fault). Multi-cause is read by
+ * composing the always-on category signals that also sit at their poor floor, so
+ * no array value is needed.
+ */
+export type AttributionValue =
+  | "framing"
+  | "conducting"
+  | "verification"
+  | "leverage"
+  | "ai"
+  | "environment";
+
 /** Why a run did not finish clean. Absent on a complete run. */
 export type IncompleteReason =
   | "insufficient-evidence"
@@ -123,7 +141,8 @@ export interface JudgedSignal {
     | CorrectionCostValue
     | DerivedOutcomeValue
     | EngagementValue
-    | VerificationValue;
+    | VerificationValue
+    | AttributionValue;
   readonly anchors: ReadonlyArray<AnchorRef>;
 }
 

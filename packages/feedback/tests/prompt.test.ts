@@ -102,6 +102,25 @@ test("verification anchors accepted-unverified on positive evidence of the skip"
   expect(system).toContain("POSITIVE evidence of the skip");
 });
 
+test("the SYSTEM rubric elicits the attribution diagnostic with its closed vocabulary", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain('"attribution"');
+  expect(system).toContain(
+    "framing | conducting | verification | leverage | ai | environment",
+  );
+});
+
+test("attribution is on-shortfall only and names the single dominant cause", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("only when there is a shortfall");
+  expect(system).toContain("single dominant cause");
+});
+
+test("attribution carries the blame-protection values for the AI and the environment", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("not the engineer's fault");
+});
+
 test("injects a supplied convention's text and a practice's name when setup is present", () => {
   const prompt = buildJudgePrompt(CHUNKS, SETUP);
   const full = `${prompt.system}\n${prompt.user}`;
