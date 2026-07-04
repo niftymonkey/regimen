@@ -8,7 +8,7 @@
  */
 
 /** The rubric's version stamp (the date-stamped scheme of spec section 9.3). */
-export const RUBRIC_VERSION = "2026-06-29";
+export const RUBRIC_VERSION = "2026-07-04";
 
 /** The prompt template's version stamp (the same date-stamped scheme). */
-export const PROMPT_VERSION = "2026-06-29";
+export const PROMPT_VERSION = "2026-07-04";

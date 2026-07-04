@@ -16,12 +16,15 @@ import { buildJudgePrompt } from "./prompt.ts";
 import type { EngineerSetup } from "./setup.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import type {
+  AccomplishmentValue,
+  AttributionValue,
+  CorrectionCostValue,
   EngagementValue,
   IntentValue,
   JudgedNarrative,
   JudgedSignal,
   JudgeResult,
-  OutcomeValue,
+  VerificationValue,
 } from "./types.ts";
 
 export interface JudgeInput {
@@ -56,18 +59,37 @@ const INTENT_VALUES: ReadonlySet<string> = new Set<IntentValue>([
   "other",
 ]);
 
-/** The 4-value ordinal Outcome vocabulary, low to high (ADR-0008). */
-const OUTCOME_VALUES: ReadonlySet<string> = new Set<OutcomeValue>([
-  "abandoned",
-  "partial",
-  "accomplished-with-correction",
-  "accomplished-cleanly",
-]);
+/** The 3-value ordinal accomplishment vocabulary, low to high (ADR-0017). */
+const ACCOMPLISHMENT_VALUES: ReadonlySet<string> = new Set<AccomplishmentValue>(
+  ["not-accomplished", "partial", "accomplished"],
+);
+
+/** The 3-value ordinal correction-cost vocabulary, low to high (ADR-0017). */
+const CORRECTION_COST_VALUES: ReadonlySet<string> =
+  new Set<CorrectionCostValue>(["none", "light", "heavy"]);
 
 /** The closed Engagement vocabulary (Decision 5 of the judge-prompt design). */
 const ENGAGEMENT_VALUES: ReadonlySet<string> = new Set<EngagementValue>([
   "engaged",
   "not-engaged",
+]);
+
+/** The closed Verification vocabulary (ADR-0017). */
+const VERIFICATION_VALUES: ReadonlySet<string> = new Set<VerificationValue>([
+  "verified",
+  "accepted-unverified",
+  "over-verified",
+  "nothing-to-verify",
+]);
+
+/** The closed Attribution vocabulary, the on-shortfall routing targets (ADR-0017). */
+const ATTRIBUTION_VALUES: ReadonlySet<string> = new Set<AttributionValue>([
+  "framing",
+  "conducting",
+  "verification",
+  "leverage",
+  "ai",
+  "environment",
 ]);
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
@@ -185,9 +207,12 @@ interface ParsedClaim {
 
 interface ParsedVerdict {
   readonly intent?: ParsedClaim;
-  readonly outcome?: ParsedClaim;
+  readonly accomplishment?: ParsedClaim;
+  readonly "correction-cost"?: ParsedClaim;
   readonly assessment?: ParsedClaim;
   readonly engagement?: ParsedClaim;
+  readonly verification?: ParsedClaim;
+  readonly attribution?: ParsedClaim;
 }
 
 /**
@@ -212,21 +237,26 @@ function parseVerdict(text: string): ParsedVerdict | undefined {
 
 /**
  * Why a parsed verdict is structurally unusable, or undefined when it is valid
- * enough to assemble. The prose-before-Outcome rule (ADR-0008) is enforced
- * here: an Outcome present with no assessment prose is invalid, so the Judge
- * never constructs an Outcome that was not preceded by reasoning.
+ * enough to assemble. The prose-before-label rule (ADR-0008, ADR-0017) is
+ * enforced here for either co-equal Outcome axis: an accomplishment or a
+ * correction-cost present with no assessment prose is invalid, so the Judge
+ * never constructs a done-ness or steering label that was not preceded by
+ * reasoning.
  */
 function validityError(verdict: ParsedVerdict | undefined): string | undefined {
   if (verdict === undefined) {
     return "the response was not a JSON object";
   }
-  const hasOutcome =
-    verdict.outcome !== undefined && verdict.outcome.value !== undefined;
+  const hasJudgmentLabel =
+    (verdict.accomplishment !== undefined &&
+      verdict.accomplishment.value !== undefined) ||
+    (verdict["correction-cost"] !== undefined &&
+      verdict["correction-cost"].value !== undefined);
   const hasAssessment =
     verdict.assessment !== undefined &&
     typeof verdict.assessment.prose === "string";
-  if (hasOutcome && !hasAssessment) {
-    return "an Outcome was given without the required assessment prose, which must precede it";
+  if (hasJudgmentLabel && !hasAssessment) {
+    return "a judgment label was given without the required assessment prose, which must precede it";
   }
   return undefined;
 }
@@ -248,6 +278,27 @@ function resolveAnchors(
     if (chunk !== undefined) anchors.push(chunk.anchor);
   }
   return anchors;
+}
+
+/**
+ * Whether a verdict represents a shortfall (ADR-0017): the assignment fell short
+ * of accomplished, or a live-arc quality signal sits at its poor floor. Only
+ * `verification` of the live-arc quality signals is emitted at this taxonomy
+ * step, so its off-healthy reads (`accepted-unverified`, `over-verified`) are the
+ * process-side shortfall here; `framing` and `conducting` extend this predicate
+ * when they land. Attribution, the on-shortfall diagnostic, is emitted only on a
+ * shortfall; on a clean success it is dropped with no write so the store never
+ * persists a contradictory routing target.
+ */
+function isShortfall(verdict: ParsedVerdict): boolean {
+  const accomplishment = verdict.accomplishment?.value;
+  if (accomplishment === "partial" || accomplishment === "not-accomplished") {
+    return true;
+  }
+  const verification = verdict.verification?.value;
+  return (
+    verification === "accepted-unverified" || verification === "over-verified"
+  );
 }
 
 function buildSignals(
@@ -275,18 +326,40 @@ function buildSignals(
   }
 
   if (
-    verdict.outcome !== undefined &&
-    typeof verdict.outcome.value === "string" &&
-    OUTCOME_VALUES.has(verdict.outcome.value)
+    verdict.accomplishment !== undefined &&
+    typeof verdict.accomplishment.value === "string" &&
+    ACCOMPLISHMENT_VALUES.has(verdict.accomplishment.value)
   ) {
-    const anchors = resolveAnchors(verdict.outcome.anchors, chunkByLineSeq);
+    const anchors = resolveAnchors(
+      verdict.accomplishment.anchors,
+      chunkByLineSeq,
+    );
     if (anchors.length > 0) {
       signals.push({
         scope: "assignment",
         assignmentId: WHOLE_CONVERSATION_ASSIGNMENT,
-        signalName: "outcome",
+        signalName: "accomplishment",
         valueKind: "ordinal",
-        value: verdict.outcome.value as OutcomeValue,
+        value: verdict.accomplishment.value as AccomplishmentValue,
+        anchors,
+      });
+    }
+  }
+
+  const correctionCost = verdict["correction-cost"];
+  if (
+    correctionCost !== undefined &&
+    typeof correctionCost.value === "string" &&
+    CORRECTION_COST_VALUES.has(correctionCost.value)
+  ) {
+    const anchors = resolveAnchors(correctionCost.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "assignment",
+        assignmentId: WHOLE_CONVERSATION_ASSIGNMENT,
+        signalName: "correction-cost",
+        valueKind: "ordinal",
+        value: correctionCost.value as CorrectionCostValue,
         anchors,
       });
     }
@@ -304,6 +377,44 @@ function buildSignals(
         signalName: "engagement",
         valueKind: "categorical",
         value: verdict.engagement.value as EngagementValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
+    verdict.verification !== undefined &&
+    typeof verdict.verification.value === "string" &&
+    VERIFICATION_VALUES.has(verdict.verification.value)
+  ) {
+    const anchors = resolveAnchors(
+      verdict.verification.anchors,
+      chunkByLineSeq,
+    );
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "verification",
+        valueKind: "categorical",
+        value: verdict.verification.value as VerificationValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
+    isShortfall(verdict) &&
+    verdict.attribution !== undefined &&
+    typeof verdict.attribution.value === "string" &&
+    ATTRIBUTION_VALUES.has(verdict.attribution.value)
+  ) {
+    const anchors = resolveAnchors(verdict.attribution.anchors, chunkByLineSeq);
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "attribution",
+        valueKind: "categorical",
+        value: verdict.attribution.value as AttributionValue,
         anchors,
       });
     }

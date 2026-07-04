@@ -10,13 +10,23 @@
  * reader unchanged so the judged layer introduces no new id space.
  */
 import type { AnchorRef } from "../loader/reader-types.ts";
+import type { DerivedOutcomeValue } from "./outcome.ts";
 
 /**
- * The closed controlled vocabulary of signal names (ADR-0008). It grows by
- * adding a member; a new signal is a new member plus its prompt fragment and
- * parser, never an interface change.
+ * The closed controlled vocabulary of signal names (ADR-0008, amended by
+ * ADR-0017). It grows by adding a member; a new signal is a new member plus its
+ * prompt fragment and parser, never an interface change. `outcome` is no longer a
+ * judge-emitted primitive: it is the write-derived read-key the writer stores
+ * from the two axes `accomplishment` and `correction-cost`.
  */
-export type SignalName = "intent" | "outcome" | "engagement";
+export type SignalName =
+  | "intent"
+  | "accomplishment"
+  | "correction-cost"
+  | "outcome"
+  | "engagement"
+  | "verification"
+  | "attribution";
 
 /**
  * The open value-kind tag (ADR-0008). `categorical` and `ordinal` are the live
@@ -33,16 +43,6 @@ export type IntentValue =
   | "exploration"
   | "schema-change"
   | "other";
-
-/**
- * Outcome: one value, rank-ordered low to high. The order is load-bearing for
- * trending and comparison (ADR-0008).
- */
-export type OutcomeValue =
-  | "abandoned"
-  | "partial"
-  | "accomplished-with-correction"
-  | "accomplished-cleanly";
 
 /**
  * Accomplishment: done-ness only, rank-ordered low to high (ADR-0017). Owns
@@ -67,6 +67,37 @@ export type CorrectionCostValue = "none" | "light" | "heavy";
  * was never a real work session.
  */
 export type EngagementValue = "engaged" | "not-engaged";
+
+/**
+ * Verification: whether the engineer's own visible check of the AI's output
+ * happened, categorical and conversation-scoped (ADR-0017). Not an ordinal: both
+ * `accepted-unverified` (over-trust) and `over-verified` (wasteful under-trust)
+ * are off the healthy middle. Always-on in intent but abstain-when-unclear, so
+ * absence of a visible check is never read as no-check; `nothing-to-verify` is a
+ * stored value (a no-AI-change session) so the rollup can exclude it.
+ */
+export type VerificationValue =
+  | "verified"
+  | "accepted-unverified"
+  | "over-verified"
+  | "nothing-to-verify";
+
+/**
+ * Attribution: the single dominant cause of a shortfall, categorical and
+ * conversation-scoped, emitted ON-SHORTFALL only (ADR-0017). It names the
+ * routing target so the fix goes to the category that can act; `ai` and
+ * `environment` are the blame-protection values (a well-run session flubbed by
+ * the model or the tooling is not the engineer's fault). Multi-cause is read by
+ * composing the always-on category signals that also sit at their poor floor, so
+ * no array value is needed.
+ */
+export type AttributionValue =
+  | "framing"
+  | "conducting"
+  | "verification"
+  | "leverage"
+  | "ai"
+  | "environment";
 
 /** Why a run did not finish clean. Absent on a complete run. */
 export type IncompleteReason =
@@ -104,7 +135,14 @@ export interface JudgedSignal {
   readonly assignmentId?: string;
   readonly signalName: SignalName;
   readonly valueKind: ValueKind;
-  readonly value: IntentValue | OutcomeValue | EngagementValue;
+  readonly value:
+    | IntentValue
+    | AccomplishmentValue
+    | CorrectionCostValue
+    | DerivedOutcomeValue
+    | EngagementValue
+    | VerificationValue
+    | AttributionValue;
   readonly anchors: ReadonlyArray<AnchorRef>;
 }
 

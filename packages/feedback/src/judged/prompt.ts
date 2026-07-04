@@ -3,8 +3,9 @@
  * (S3 spec section 2d).
  *
  * The prompt is version-pinned and elicits, harness- and model-neutrally:
- * Intent (categorical, closed vocab), Outcome (the 4-value ordinal), and the
- * conversation assessment prose generated BEFORE the Outcome label. Each chunk
+ * Intent (categorical, closed vocab), the two Outcome axes accomplishment and
+ * correction-cost (ordinal, ADR-0017), and the conversation assessment prose
+ * generated BEFORE the accomplishment and correction-cost labels. Each chunk
  * is presented with its citable id (its lineSeq); the judge cites only those
  * ids, and the Judge maps an id back to the chunk's real AnchorRef, so the
  * model never has to echo a 64-char hash. The judge reads the engineer's
@@ -22,15 +23,24 @@ export interface JudgePrompt {
 const INTENT_VOCAB =
   "refactor | bug-fix | feature | test-writing | exploration | schema-change | other";
 
-const OUTCOME_VOCAB =
-  "abandoned < partial < accomplished-with-correction < accomplished-cleanly";
+const ACCOMPLISHMENT_VOCAB = "not-accomplished < partial < accomplished";
+
+const CORRECTION_COST_VOCAB = "none < light < heavy";
 
 const ENGAGEMENT_VOCAB = "engaged | not-engaged";
 
+const VERIFICATION_VOCAB =
+  "verified | accepted-unverified | over-verified | nothing-to-verify";
+
+const ATTRIBUTION_VOCAB =
+  "framing | conducting | verification | leverage | ai | environment";
+
 /**
  * The rubric/instruction system prompt. Pins the closed vocabularies, the
- * prose-before-Outcome order, the citable-id anchor rule, and the two explicit
- * non-goals (transcript length, software quality).
+ * prose-before-label order, the citable-id anchor rule, and the two explicit
+ * non-goals (transcript length, software quality). Outcome is split into the two
+ * axes `accomplishment` (done-ness) and `correction-cost` (steering); the derived
+ * Outcome read-key is computed at write time, never elicited (ADR-0017).
  */
 const SYSTEM = `You are Feedback's judge. You read one engineer-and-AI coding conversation and return a structured verdict. You judge how the work went, never whether the code is good.
 
@@ -38,18 +48,36 @@ You output exactly one JSON object with these keys, in this order:
 1. "intent": { "value": <one of: ${INTENT_VOCAB}>, "anchors": [<chunk ids>] }
    Name what the engineer was trying to do. Read the engineer's prompts primarily, the AI's actions secondarily. Intent names the engineer's purpose, not what code changed. Use "other" only when no listed value fits; never force a wrong fit.
 2. "assessment": { "prose": <a readable synthesis of how the conversation went>, "anchors": [<chunk ids>] }
-   Write this BEFORE deciding the Outcome, so your reasoning precedes the label.
-3. "outcome": { "value": <one of, low to high: ${OUTCOME_VOCAB}>, "anchors": [<chunk ids>] }
-   Score whether the AI accomplished the assignment and how much steering it took, judged from the engineer's inputs and the AI's actions only. Apply these per-label criteria:
-   - accomplished-cleanly: the assignment was accomplished and the AI followed the engineer's intent and stated conventions with little or no corrective steering.
-   - accomplished-with-correction: the assignment was accomplished, but only after the engineer corrected, redirected, or repaired the AI's course one or more times.
-   - partial: meaningful progress was made but the assignment was not accomplished; sub-goals remain open or the result does not satisfy the stated intent.
-   - abandoned: the assignment was dropped or left unresolved; no working result was reached and the engineer stopped without accomplishment.
+   Write this BEFORE deciding the accomplishment and correction-cost labels, so your reasoning precedes the labels.
+3. "accomplishment": { "value": <one of, low to high: ${ACCOMPLISHMENT_VOCAB}>, "anchors": [<chunk ids>] }
+   Score done-ness only, cause-free: whether the assignment's stated intent was reached, judged from the engineer's inputs and the AI's actions only. Apply these per-value criteria:
+   - not-accomplished: no working result toward the stated intent was reached.
+   - partial: meaningful progress was made but the intent was not met; sub-goals remain open or the result does not satisfy the intent.
+   - accomplished: the assignment's intent was met.
    Do NOT score on transcript length. Do NOT grade software quality.
-4. "engagement": { "value": <one of: ${ENGAGEMENT_VOCAB}>, "anchors": [<chunk ids>] }
-   Judge whether the conversation genuinely became a work session on the assignment. This is orthogonal to the Outcome: always decide it, whatever the Outcome was.
-   - engaged: the conversation genuinely became a work session on the assignment; the work was attempted in earnest.
-   - not-engaged: the conversation never really became a work session on the assignment (a throwaway question, an aborted start, an unrelated detour, a setup blip); non-accomplishment here is not the AI failing at a real task.
+4. "correction-cost": { "value": <one of, low to high: ${CORRECTION_COST_VOCAB}>, "anchors": [<chunk ids>] }
+   Emit this only when accomplishment is accomplished; otherwise OMIT the key entirely (the accomplishment floor already absorbs steering). Score how much the engineer redirected, corrected, or repaired the AI's course.
+   - none: the AI held the engineer's intent and stated conventions with no corrective steering.
+   - light: the engineer corrected the AI's course once or a small number of times.
+   - heavy: the engineer repeatedly redirected or repaired the AI's course.
+5. "engagement": { "value": <one of: ${ENGAGEMENT_VOCAB}>, "anchors": [<chunk ids>] }
+   Judge whether the conversation genuinely became a work session on the assignment. This is orthogonal to the accomplishment: always decide it, whatever the accomplishment was.
+   - engaged: the conversation genuinely became a work session on the assignment; the work was attempted in earnest. A real assignment derailed by tooling is engaged, not never-engaged.
+   - not-engaged: the conversation never really became a work session on the assignment (a throwaway question, an aborted start, an unrelated detour); non-accomplishment here is not the AI failing at a real task.
+6. "verification": { "value": <one of: ${VERIFICATION_VOCAB}>, "anchors": [<chunk ids>] }
+   Judge whether the engineer's OWN visible check of the AI's output happened. A check must be VISIBLE in the transcript (the engineer reading a diff, running the code, or challenging the result); a silent reader is transcript-identical to a blind accepter, so absence of a visible check is NOT read as no-check. When it is genuinely unclear whether a check happened, OMIT the key entirely (abstain) rather than guessing. A harness-automatic hook or test run is the environment, not the engineer's verifying act.
+   - verified: the engineer visibly checked the AI's substantive change before moving on.
+   - accepted-unverified: emit only on POSITIVE evidence of the skip: a substantive AI change followed immediately by the engineer moving on with no visible read, run, or challenge. Anchor the two chunks that bracket the absent check (the AI change and the accept).
+   - over-verified: the engineer checked far more than the change warranted (wasteful re-checking of a trivial or already-confirmed result).
+   - nothing-to-verify: the conversation produced no AI change to check (a question answered, an exploration); anchor the no-change turns.
+7. "attribution": { "value": <one of: ${ATTRIBUTION_VOCAB}>, "anchors": [<chunk ids>] }
+   Emit this only when there is a shortfall (accomplishment below accomplished, or the work fell short of what it should have been); otherwise OMIT the key entirely. Name the single dominant cause, the one target the fix should route to. Do not list multiple causes; name the dominant one.
+   - framing: the goal, scope, or context was not stated clearly enough at the outset. Anchor the engineer's opening input.
+   - conducting: the work was run poorly in flight (decomposition, when to intervene, when to reset). Anchor the engineer's steering turns.
+   - verification: the AI's output was accepted without the check it needed. Anchor the accept.
+   - leverage: a missing, idle, or conflicting reusable lever (a skill or convention) caused the shortfall. Anchor where a lever should have applied.
+   - ai: the model itself produced the failing output; this is not the engineer's fault. Anchor the AI's failing output.
+   - environment: the tooling or harness failed; this is not the engineer's fault. Anchor the tool-failure or error chunk.
 
 Anchors: each "anchors" array cites the chunk ids (the numbers in [brackets] below) that justify the claim. Cite at least one id per claim, and cite only ids that appear in the conversation. Do not invent ids.
 
@@ -61,10 +89,11 @@ const SYSTEM_CLOSER = "\n\nReturn only the JSON object, no prose around it.";
 /**
  * Added to the SYSTEM rubric only when the engineer's expected behaviors are
  * supplied: it tells the judge to weigh whether the stated conventions and
- * established practices were honored, and to use that as the factor separating
- * accomplished-cleanly from accomplished-with-correction.
+ * established practices were honored, and to fold that into correction-cost
+ * (unprompted adherence points to none; adherence only after steering points to
+ * light or heavy).
  */
-const ADHERENCE_INSTRUCTION = `Expected-behaviors adherence: the engineer's own expected behaviors are listed at the top of the conversation block below. Weigh whether the stated conventions and established practices were honored. Reflect this in the assessment prose, and treat it as a factor separating accomplished-cleanly (conventions and practices followed unprompted) from accomplished-with-correction (conventions met only after the engineer steered).`;
+const ADHERENCE_INSTRUCTION = `Expected-behaviors adherence: the engineer's own expected behaviors are listed at the top of the conversation block below. Weigh whether the stated conventions and established practices were honored. Reflect this in the assessment prose, and treat it as a factor in correction-cost: conventions and practices followed unprompted point to none, conventions met only after the engineer steered point to light or heavy.`;
 
 /**
  * Assemble the system rubric. With no setup it is the setup-blind baseline

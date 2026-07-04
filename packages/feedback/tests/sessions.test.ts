@@ -17,7 +17,8 @@ import {
   writeAssessment,
   type AssessmentRunIdentity,
 } from "../src/judged/writer.ts";
-import type { JudgeResult, OutcomeValue } from "../src/judged/types.ts";
+import type { JudgeResult } from "../src/judged/types.ts";
+import type { DerivedOutcomeValue } from "../src/judged/outcome.ts";
 import { listSessions } from "../src/sessions.ts";
 
 const NOW = () => Date.parse("2026-06-15T12:00:00.000Z");
@@ -92,7 +93,7 @@ function run(sessionId: string, runId: string): AssessmentRunIdentity {
 }
 
 /** A complete verdict carrying the given whole-conversation Outcome value. */
-function resultWithOutcome(outcome: OutcomeValue): JudgeResult {
+function resultWithOutcome(outcome: DerivedOutcomeValue): JudgeResult {
   return {
     complete: true,
     provenance: {

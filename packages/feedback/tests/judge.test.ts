@@ -56,17 +56,22 @@ function stubPort(
   };
 }
 
-/** A well-formed verdict citing chunk ids 0 and 1, prose before Outcome. */
+/**
+ * A well-formed verdict citing chunk ids 0 and 1, prose before the labels. It
+ * carries the accomplishment axis (accomplished) but omits correction-cost, so
+ * the signal count stays at two (intent + accomplishment); correction-cost is
+ * exercised in its own test.
+ */
 const WELL_FORMED = JSON.stringify({
   intent: { value: "test-writing", anchors: [0] },
   assessment: {
     prose: "The engineer asked for a parser test; the agent delivered it.",
     anchors: [0, 1],
   },
-  outcome: { value: "accomplished-cleanly", anchors: [1] },
+  accomplishment: { value: "accomplished", anchors: [1] },
 });
 
-test("a well-formed verdict parses to Intent, Outcome, and the assessment with provenance from response.model", async () => {
+test("a well-formed verdict parses to Intent, accomplishment, and the assessment with provenance from response.model", async () => {
   const port = stubPort(WELL_FORMED, "claude-opus-4-8");
   const result = await judgeConversation(
     { sessionId: SESSION, chunks: CHUNKS },
@@ -85,10 +90,13 @@ test("a well-formed verdict parses to Intent, Outcome, and the assessment with p
   // The cited chunk id 0 maps back to the real AnchorRef of chunk 0.
   expect(intent!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
 
-  const outcome = result.signals.find((s) => s.signalName === "outcome");
-  expect(outcome!.value).toBe("accomplished-cleanly");
-  expect(outcome!.valueKind).toBe("ordinal");
-  expect(outcome!.anchors).toEqual([{ eventHash: "b".repeat(64) }]);
+  const accomplishment = result.signals.find(
+    (s) => s.signalName === "accomplishment",
+  );
+  expect(accomplishment!.value).toBe("accomplished");
+  expect(accomplishment!.valueKind).toBe("ordinal");
+  expect(accomplishment!.scope).toBe("assignment");
+  expect(accomplishment!.anchors).toEqual([{ eventHash: "b".repeat(64) }]);
 
   expect(result.narratives.length).toBe(1);
   expect(result.narratives[0]!.narrativeType).toBe("assessment");
@@ -110,8 +118,51 @@ const WITH_ENGAGEMENT = JSON.stringify({
     prose: "The engineer asked for a parser test; the agent delivered it.",
     anchors: [0, 1],
   },
-  outcome: { value: "accomplished-cleanly", anchors: [1] },
+  accomplishment: { value: "accomplished", anchors: [1] },
   engagement: { value: "engaged", anchors: [0] },
+});
+
+/** A well-formed accomplished verdict that also carries the correction-cost axis. */
+const WITH_CORRECTION_COST = JSON.stringify({
+  intent: { value: "test-writing", anchors: [0] },
+  assessment: {
+    prose: "The engineer asked for a parser test; the agent delivered it.",
+    anchors: [0, 1],
+  },
+  accomplishment: { value: "accomplished", anchors: [1] },
+  "correction-cost": { value: "light", anchors: [0] },
+});
+
+test("a well-formed verdict yields a correction-cost signal (ordinal, assignment-scoped)", async () => {
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(WITH_CORRECTION_COST) },
+  );
+  const cost = result.signals.find((s) => s.signalName === "correction-cost");
+  expect(cost).toBeDefined();
+  expect(cost!.value).toBe("light");
+  expect(cost!.valueKind).toBe("ordinal");
+  expect(cost!.scope).toBe("assignment");
+  expect(cost!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
+});
+
+test("an out-of-vocab correction-cost value is rejected; the signal is absent", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    "correction-cost": { value: "some", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "correction-cost"),
+  ).toBeUndefined();
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
 });
 
 test("a well-formed verdict yields an engagement signal (categorical, conversation-scoped)", async () => {
@@ -128,11 +179,138 @@ test("a well-formed verdict yields an engagement signal (categorical, conversati
   expect(engagement!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
 });
 
+test("a well-formed verdict yields a verification signal (categorical, conversation-scoped)", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    verification: { value: "accepted-unverified", anchors: [0, 1] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  const verification = result.signals.find(
+    (s) => s.signalName === "verification",
+  );
+  expect(verification).toBeDefined();
+  expect(verification!.value).toBe("accepted-unverified");
+  expect(verification!.valueKind).toBe("categorical");
+  expect(verification!.scope).toBe("conversation");
+  expect(verification!.anchors).toEqual([
+    { eventHash: "a".repeat(64) },
+    { eventHash: "b".repeat(64) },
+  ]);
+});
+
+test("an out-of-vocab verification value is rejected; the signal is absent", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    verification: { value: "double-checked", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "verification"),
+  ).toBeUndefined();
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
+});
+
+test("a well-formed shortfall verdict yields an attribution signal (categorical, conversation-scoped)", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "partial", anchors: [1] },
+    attribution: { value: "framing", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  const attribution = result.signals.find(
+    (s) => s.signalName === "attribution",
+  );
+  expect(attribution).toBeDefined();
+  expect(attribution!.value).toBe("framing");
+  expect(attribution!.valueKind).toBe("categorical");
+  expect(attribution!.scope).toBe("conversation");
+  expect(attribution!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
+});
+
+test("attribution is dropped when the verdict is not a shortfall (accomplished, no poor process signal)", async () => {
+  // Attribution is the on-shortfall diagnostic (ADR-0017): a clean success must
+  // not persist a routing target, so the parser drops it with no write.
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    attribution: { value: "framing", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "attribution"),
+  ).toBeUndefined();
+  // The clean-success signals are unaffected (the gate is attribution-only).
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
+});
+
+test("attribution is kept on a verification-only shortfall (accomplished but accepted-unverified)", async () => {
+  // Shortfall is broader than done-ness (ADR-0017): a live-arc quality signal at
+  // its poor floor is a shortfall too, so an accomplished session whose
+  // verification is accepted-unverified still carries a routing target.
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    verification: { value: "accepted-unverified", anchors: [0, 1] },
+    attribution: { value: "verification", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  const attribution = result.signals.find(
+    (s) => s.signalName === "attribution",
+  );
+  expect(attribution).toBeDefined();
+  expect(attribution!.value).toBe("verification");
+});
+
+test("an out-of-vocab attribution value is rejected; the signal is absent", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "partial", anchors: [1] },
+    attribution: { value: "user-error", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "attribution"),
+  ).toBeUndefined();
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
+});
+
 test("an out-of-vocab engagement value is rejected; the signal is absent", async () => {
   const text = JSON.stringify({
     intent: { value: "test-writing", anchors: [0] },
     assessment: { prose: "ok", anchors: [0] },
-    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
     engagement: { value: "half-engaged", anchors: [0] },
   });
   const result = await judgeConversation(
@@ -144,14 +322,16 @@ test("an out-of-vocab engagement value is rejected; the signal is absent", async
   ).toBeUndefined();
   // The other signals are unaffected (abstention is per-signal).
   expect(result.signals.find((s) => s.signalName === "intent")).toBeDefined();
-  expect(result.signals.find((s) => s.signalName === "outcome")).toBeDefined();
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
 });
 
 test("an engagement value with no resolvable anchors abstains", async () => {
   const text = JSON.stringify({
     intent: { value: "test-writing", anchors: [0] },
     assessment: { prose: "ok", anchors: [0] },
-    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
     // Engagement cites only id 99 (not in the set): zero resolvable anchors -> absent.
     engagement: { value: "engaged", anchors: [99] },
   });
@@ -177,9 +357,11 @@ test("the prompt the Judge builds enumerates each chunk with its citable id and 
   expect(request!.user).toContain("add a test for the parser");
   expect(request!.user).toContain("[1]");
   expect(request!.user).toContain("Done, the parser test passes.");
-  // The closed vocabularies and the prose-before-Outcome rule are pinned.
+  // The closed vocabularies and the prose-before-label rule are pinned.
   expect(request!.system).toContain("test-writing");
-  expect(request!.system).toContain("accomplished-cleanly");
+  expect(request!.system).toContain(
+    "not-accomplished < partial < accomplished",
+  );
   expect(request!.system).toContain("BEFORE");
   // Software quality and transcript length are explicit non-goals.
   expect(request!.system).toContain("software quality");
@@ -189,7 +371,7 @@ test("an out-of-vocab Intent is rejected, not coerced to other; the signal is ab
   const text = JSON.stringify({
     intent: { value: "documentation", anchors: [0] },
     assessment: { prose: "ok", anchors: [0] },
-    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
   });
   const result = await judgeConversation(
     { sessionId: SESSION, chunks: CHUNKS },
@@ -197,22 +379,24 @@ test("an out-of-vocab Intent is rejected, not coerced to other; the signal is ab
   );
   const intent = result.signals.find((s) => s.signalName === "intent");
   expect(intent).toBeUndefined();
-  // The Outcome still validates, so it is present (absence is per-signal).
-  expect(result.signals.find((s) => s.signalName === "outcome")).toBeDefined();
+  // The accomplishment still validates, so it is present (absence is per-signal).
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
 });
 
-test("an Outcome outside the four ranked values is rejected; the signal is absent", async () => {
+test("an accomplishment outside the ordinal values is rejected; the signal is absent", async () => {
   const text = JSON.stringify({
     intent: { value: "test-writing", anchors: [0] },
     assessment: { prose: "ok", anchors: [0] },
-    outcome: { value: "great-success", anchors: [1] },
+    accomplishment: { value: "great-success", anchors: [1] },
   });
   const result = await judgeConversation(
     { sessionId: SESSION, chunks: CHUNKS },
     { llm: stubPort(text) },
   );
   expect(
-    result.signals.find((s) => s.signalName === "outcome"),
+    result.signals.find((s) => s.signalName === "accomplishment"),
   ).toBeUndefined();
   expect(result.signals.find((s) => s.signalName === "intent")).toBeDefined();
 });
@@ -222,8 +406,8 @@ test("a cited anchor not in the chunk set is dropped; a claim left with zero anc
     // Intent cites id 0 (valid) and id 99 (not in the set): id 0 survives.
     intent: { value: "test-writing", anchors: [99, 0] },
     assessment: { prose: "ok", anchors: [0] },
-    // Outcome cites only id 99 (not in the set): zero resolvable anchors -> absent.
-    outcome: { value: "accomplished-cleanly", anchors: [99] },
+    // Accomplishment cites only id 99 (not in the set): zero resolvable anchors -> absent.
+    accomplishment: { value: "accomplished", anchors: [99] },
   });
   const result = await judgeConversation(
     { sessionId: SESSION, chunks: CHUNKS },
@@ -232,7 +416,7 @@ test("a cited anchor not in the chunk set is dropped; a claim left with zero anc
   const intent = result.signals.find((s) => s.signalName === "intent");
   expect(intent!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
   expect(
-    result.signals.find((s) => s.signalName === "outcome"),
+    result.signals.find((s) => s.signalName === "accomplishment"),
   ).toBeUndefined();
 });
 
@@ -295,12 +479,12 @@ test("a thrown port yields complete=false with llm-unavailable", async () => {
   expect(result.signals.length).toBe(0);
 });
 
-test("reasoning before Outcome is enforced: an Outcome with no assessment is not constructed", async () => {
-  // A verdict with a valid Outcome but no assessment prose: invalid by the
-  // prose-before-Outcome rule, so it drives the retry and then abstains.
+test("reasoning before the labels is enforced: an accomplishment with no assessment is not constructed", async () => {
+  // A verdict with a valid accomplishment but no assessment prose: invalid by the
+  // prose-before-label rule, so it drives the retry and then abstains.
   const noAssessment = JSON.stringify({
     intent: { value: "test-writing", anchors: [0] },
-    outcome: { value: "accomplished-cleanly", anchors: [1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
   });
   const port = scriptedPort([noAssessment]);
   const result = await judgeConversation(
@@ -309,9 +493,29 @@ test("reasoning before Outcome is enforced: an Outcome with no assessment is not
   );
   expect(result.complete).toBe(false);
   expect(result.incompleteReason).toBe("llm-unparseable");
-  // No Outcome is constructed when the required assessment is absent.
+  // No accomplishment is constructed when the required assessment is absent.
   expect(
-    result.signals.find((s) => s.signalName === "outcome"),
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeUndefined();
+});
+
+test("reasoning before the labels is enforced for correction-cost: a correction-cost with no assessment is not constructed", async () => {
+  // correction-cost is the co-equal second Outcome axis (ADR-0017), so the
+  // prose-before-label rule gates it exactly as it gates accomplishment: a
+  // correction-cost with no assessment prose drives the retry and then abstains.
+  const noAssessment = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    "correction-cost": { value: "light", anchors: [0] },
+  });
+  const port = scriptedPort([noAssessment]);
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: port, retryBudget: 1 },
+  );
+  expect(result.complete).toBe(false);
+  expect(result.incompleteReason).toBe("llm-unparseable");
+  expect(
+    result.signals.find((s) => s.signalName === "correction-cost"),
   ).toBeUndefined();
 });
 
@@ -320,10 +524,10 @@ test("a parseable verdict that grounds no signal is an insufficient-evidence run
   const thin = JSON.stringify({
     intent: { anchors: [0] },
     assessment: {
-      prose: "Too little happened to judge intent or outcome.",
+      prose: "Too little happened to judge intent or accomplishment.",
       anchors: [0],
     },
-    outcome: { anchors: [1] },
+    accomplishment: { anchors: [1] },
   });
   const result = await judgeConversation(
     { sessionId: SESSION, chunks: CHUNKS },
