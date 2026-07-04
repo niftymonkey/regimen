@@ -243,6 +243,50 @@ test("a well-formed shortfall verdict yields an attribution signal (categorical,
   expect(attribution!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
 });
 
+test("attribution is dropped when the verdict is not a shortfall (accomplished, no poor process signal)", async () => {
+  // Attribution is the on-shortfall diagnostic (ADR-0017): a clean success must
+  // not persist a routing target, so the parser drops it with no write.
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    attribution: { value: "framing", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "attribution"),
+  ).toBeUndefined();
+  // The clean-success signals are unaffected (the gate is attribution-only).
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
+});
+
+test("attribution is kept on a verification-only shortfall (accomplished but accepted-unverified)", async () => {
+  // Shortfall is broader than done-ness (ADR-0017): a live-arc quality signal at
+  // its poor floor is a shortfall too, so an accomplished session whose
+  // verification is accepted-unverified still carries a routing target.
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    verification: { value: "accepted-unverified", anchors: [0, 1] },
+    attribution: { value: "verification", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  const attribution = result.signals.find(
+    (s) => s.signalName === "attribution",
+  );
+  expect(attribution).toBeDefined();
+  expect(attribution!.value).toBe("verification");
+});
+
 test("an out-of-vocab attribution value is rejected; the signal is absent", async () => {
   const text = JSON.stringify({
     intent: { value: "test-writing", anchors: [0] },
@@ -452,6 +496,26 @@ test("reasoning before the labels is enforced: an accomplishment with no assessm
   // No accomplishment is constructed when the required assessment is absent.
   expect(
     result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeUndefined();
+});
+
+test("reasoning before the labels is enforced for correction-cost: a correction-cost with no assessment is not constructed", async () => {
+  // correction-cost is the co-equal second Outcome axis (ADR-0017), so the
+  // prose-before-label rule gates it exactly as it gates accomplishment: a
+  // correction-cost with no assessment prose drives the retry and then abstains.
+  const noAssessment = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    "correction-cost": { value: "light", anchors: [0] },
+  });
+  const port = scriptedPort([noAssessment]);
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: port, retryBudget: 1 },
+  );
+  expect(result.complete).toBe(false);
+  expect(result.incompleteReason).toBe("llm-unparseable");
+  expect(
+    result.signals.find((s) => s.signalName === "correction-cost"),
   ).toBeUndefined();
 });
 

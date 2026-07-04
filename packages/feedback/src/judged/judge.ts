@@ -238,22 +238,25 @@ function parseVerdict(text: string): ParsedVerdict | undefined {
 /**
  * Why a parsed verdict is structurally unusable, or undefined when it is valid
  * enough to assemble. The prose-before-label rule (ADR-0008, ADR-0017) is
- * enforced here: an accomplishment present with no assessment prose is invalid,
- * so the Judge never constructs a done-ness label that was not preceded by
+ * enforced here for either co-equal Outcome axis: an accomplishment or a
+ * correction-cost present with no assessment prose is invalid, so the Judge
+ * never constructs a done-ness or steering label that was not preceded by
  * reasoning.
  */
 function validityError(verdict: ParsedVerdict | undefined): string | undefined {
   if (verdict === undefined) {
     return "the response was not a JSON object";
   }
-  const hasAccomplishment =
-    verdict.accomplishment !== undefined &&
-    verdict.accomplishment.value !== undefined;
+  const hasJudgmentLabel =
+    (verdict.accomplishment !== undefined &&
+      verdict.accomplishment.value !== undefined) ||
+    (verdict["correction-cost"] !== undefined &&
+      verdict["correction-cost"].value !== undefined);
   const hasAssessment =
     verdict.assessment !== undefined &&
     typeof verdict.assessment.prose === "string";
-  if (hasAccomplishment && !hasAssessment) {
-    return "an accomplishment was given without the required assessment prose, which must precede it";
+  if (hasJudgmentLabel && !hasAssessment) {
+    return "a judgment label was given without the required assessment prose, which must precede it";
   }
   return undefined;
 }
@@ -275,6 +278,27 @@ function resolveAnchors(
     if (chunk !== undefined) anchors.push(chunk.anchor);
   }
   return anchors;
+}
+
+/**
+ * Whether a verdict represents a shortfall (ADR-0017): the assignment fell short
+ * of accomplished, or a live-arc quality signal sits at its poor floor. Only
+ * `verification` of the live-arc quality signals is emitted at this taxonomy
+ * step, so its off-healthy reads (`accepted-unverified`, `over-verified`) are the
+ * process-side shortfall here; `framing` and `conducting` extend this predicate
+ * when they land. Attribution, the on-shortfall diagnostic, is emitted only on a
+ * shortfall; on a clean success it is dropped with no write so the store never
+ * persists a contradictory routing target.
+ */
+function isShortfall(verdict: ParsedVerdict): boolean {
+  const accomplishment = verdict.accomplishment?.value;
+  if (accomplishment === "partial" || accomplishment === "not-accomplished") {
+    return true;
+  }
+  const verification = verdict.verification?.value;
+  return (
+    verification === "accepted-unverified" || verification === "over-verified"
+  );
 }
 
 function buildSignals(
@@ -379,6 +403,7 @@ function buildSignals(
   }
 
   if (
+    isShortfall(verdict) &&
     verdict.attribution !== undefined &&
     typeof verdict.attribution.value === "string" &&
     ATTRIBUTION_VALUES.has(verdict.attribution.value)
