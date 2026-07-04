@@ -300,3 +300,56 @@ export async function synthesizeRollup(
     promptVersion: ROLLUP_PROMPT_VERSION,
   };
 }
+
+/**
+ * The verdict-rollup's JSON contract, the cross-conversation twin of a
+ * JudgmentDigest. `header` is the deterministic source of truth for every number
+ * and is rendered verbatim; `synthesis` is the model's interpretation, or null
+ * when the corpus is empty. `filter` echoes what was rolled up so a consumer
+ * knows the slice.
+ */
+export interface VerdictRollup {
+  readonly schemaVersion: 1;
+  readonly generatedAt: string;
+  readonly header: RollupHeader;
+  readonly synthesis: RollupSynthesis | null;
+  readonly filter: SessionFilter;
+}
+
+/** The orchestrator's config: the filter to roll up, the model seam, the clock. */
+export interface RollupConfig {
+  readonly filter?: SessionFilter;
+  readonly llm: JudgeModelPort;
+  /** Injectable clock: resolves the relative time window and stamps generatedAt. */
+  readonly now?: () => number;
+}
+
+/**
+ * Roll up the judged verdicts matching the filter into a header plus a
+ * synthesized narrative. Computes the deterministic header, collects the
+ * verdicts, and synthesizes over both. An empty corpus short-circuits to a
+ * header-only digest with `synthesis: null` and makes NO model call, so a rollup
+ * over zero judged conversations is free and never errors (mirroring the sweep's
+ * nothing-to-judge path). The header is always the source of truth for numbers;
+ * the synthesis never recomputes them.
+ */
+export async function rollupVerdicts(
+  db: Database,
+  config: RollupConfig,
+): Promise<VerdictRollup> {
+  const now = config.now ?? Date.now;
+  const filter = config.filter ?? {};
+  const header = rollupHeader(db, filter, now);
+  const generatedAt = new Date(now()).toISOString();
+
+  if (header.totalJudged === 0) {
+    return { schemaVersion: 1, generatedAt, header, synthesis: null, filter };
+  }
+
+  const verdicts = collectVerdicts(db, filter, now);
+  const synthesis = await synthesizeRollup(
+    { header, verdicts },
+    { llm: config.llm },
+  );
+  return { schemaVersion: 1, generatedAt, header, synthesis, filter };
+}

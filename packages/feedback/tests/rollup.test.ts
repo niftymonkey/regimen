@@ -23,6 +23,7 @@ import type { JudgeResult, JudgedSignal } from "../src/judged/types.ts";
 import {
   collectVerdicts,
   rollupHeader,
+  rollupVerdicts,
   ROLLUP_PROMPT_VERSION,
   synthesizeRollup,
   type RollupHeader,
@@ -41,6 +42,19 @@ function withStore(fn: (store: Store) => void): void {
   const store = openStore(join(dir, "feedback.db"));
   try {
     fn(store);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function withStoreAsync(
+  fn: (store: Store) => Promise<void>,
+): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "regimen-rollup-"));
+  const store = openStore(join(dir, "feedback.db"));
+  try {
+    await fn(store);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });
@@ -329,4 +343,47 @@ test("the synthesis prompt passes the deterministic distributions and the sessio
   // Each verdict carries its session id so a narrative claim traces back.
   expect(user).toContain("sess-alpha");
   expect(user).toContain("boundaries were never stated");
+});
+
+const FIXED_NOW = (): number => Date.parse("2026-06-20T00:00:00.000Z");
+
+test("rollupVerdicts composes the deterministic header with the synthesized narrative", async () => {
+  await withStoreAsync(async (store) => {
+    judge(store, "a", [signal("outcome", "accomplished-cleanly")]);
+    judge(store, "b", [signal("outcome", "partial")]);
+    const { port } = capturingPort("The week went fine.", "judge-x");
+
+    const rollup = await rollupVerdicts(store.db, {
+      llm: port,
+      now: FIXED_NOW,
+    });
+
+    expect(rollup.schemaVersion).toBe(1);
+    expect(rollup.generatedAt).toBe("2026-06-20T00:00:00.000Z");
+    expect(rollup.header.totalJudged).toBe(2);
+    expect(rollup.synthesis?.prose).toBe("The week went fine.");
+    expect(rollup.synthesis?.judgeModel).toBe("judge-x");
+    expect(rollup.filter).toEqual({});
+  });
+});
+
+test("rollupVerdicts over an empty corpus returns synthesis null and never calls the model", async () => {
+  await withStoreAsync(async (store) => {
+    // A port that throws if reached: a passing empty-corpus rollup proves the
+    // short-circuit returns before any model call, so a zero-judged rollup is free.
+    const throwingPort = {
+      complete(): Promise<never> {
+        throw new Error("the model must not be called over an empty corpus");
+      },
+    };
+    seedConversation(store.db, "unjudged");
+
+    const rollup = await rollupVerdicts(store.db, {
+      llm: throwingPort,
+      now: FIXED_NOW,
+    });
+
+    expect(rollup.header.totalJudged).toBe(0);
+    expect(rollup.synthesis).toBeNull();
+  });
 });
