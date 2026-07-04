@@ -22,7 +22,7 @@ import { readJudgmentDigest, type JudgmentDigest } from "./digest.ts";
 import { judgeConversation } from "./judge.ts";
 import type { JudgeModelPort } from "./port.ts";
 import type { EngineerSetup, SetupSource } from "./setup.ts";
-import type { JudgeResult } from "./types.ts";
+import type { JudgeBackend, JudgeResult } from "./types.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
 import { writeAssessment } from "./writer.ts";
 
@@ -44,6 +44,13 @@ export interface AssessOptions {
    * binds the live adapter; tests inject a stub.
    */
   readonly setupSource?: SetupSource;
+  /**
+   * The backend tag the resolver built for `llm`, threaded onto provenance so
+   * the stored run records which backend judged (judge-backends decision 4).
+   * Never self-reported: the CLI passes the resolver's tag. Absent on the
+   * pre-backends default.
+   */
+  readonly judgeBackend?: JudgeBackend;
   /** The run id to mint; omit for a generated one. */
   readonly runId?: string;
   /** Injectable clock for deterministic created_at and generatedAt. */
@@ -127,6 +134,9 @@ export async function assessConversation(
             judgeModel: "none",
             rubricVersion: RUBRIC_VERSION,
             promptVersion: PROMPT_VERSION,
+            ...(options.judgeBackend === undefined
+              ? {}
+              : { judgeBackend: options.judgeBackend }),
           },
           signals: [],
           narratives: [],
@@ -134,7 +144,14 @@ export async function assessConversation(
         }
       : await judgeConversation(
           { sessionId, chunks: read.content },
-          { llm, now, setup },
+          {
+            llm,
+            now,
+            setup,
+            ...(options.judgeBackend === undefined
+              ? {}
+              : { judgeBackend: options.judgeBackend }),
+          },
         );
 
   writeAssessment(

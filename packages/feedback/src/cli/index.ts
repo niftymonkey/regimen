@@ -65,7 +65,7 @@ import {
 } from "../sessions.ts";
 import { openStore } from "../store.ts";
 import { assessConversation } from "../judged/assess.ts";
-import { resolveDefaultJudgeModel } from "../judged/anthropic-adapter.ts";
+import { resolveJudgeModel } from "../judged/resolve.ts";
 import { createLiveSetupSource } from "../judged/live-setup-source.ts";
 import type { SetupSource } from "../judged/setup.ts";
 import {
@@ -618,7 +618,7 @@ export async function assess(options: {
   // explicit invocation against a named transcript is the consent (spec 9.6).
   const store = openStore(join(dir, "feedback.db"));
   try {
-    const llm = resolveDefaultJudgeModel({
+    const resolved = resolveJudgeModel({
       ...(judgeModel === undefined ? {} : { model: judgeModel }),
       ...(judgeVia === undefined ? {} : { judgeVia }),
     });
@@ -631,7 +631,8 @@ export async function assess(options: {
       harness,
       sessionsDir,
       sessionId,
-      llm,
+      llm: resolved.port,
+      judgeBackend: resolved.backend,
       setupSource,
     });
     process.stdout.write(`${JSON.stringify(digest)}\n`);
@@ -698,9 +699,9 @@ export async function assessAll(options: {
       return 0;
     }
 
-    let llm;
+    let resolved;
     try {
-      llm = resolveDefaultJudgeModel({
+      resolved = resolveJudgeModel({
         ...(options.judgeModel === undefined
           ? {}
           : { model: options.judgeModel }),
@@ -730,7 +731,8 @@ export async function assessAll(options: {
           harness: session.harness as Harness,
           sessionsDir,
           sessionId: session.sessionId,
-          llm,
+          llm: resolved.port,
+          judgeBackend: resolved.backend,
           setupSource,
         });
         const outcome = digest.judged

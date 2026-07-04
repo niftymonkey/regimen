@@ -11,11 +11,11 @@
  */
 import type { ContentChunk } from "../loader/reader-types.ts";
 import type { JudgeModelPort } from "./port.ts";
-import { resolveDefaultJudgeModel } from "./anthropic-adapter.ts";
+import { resolveJudgeModel } from "./resolve.ts";
 import { buildJudgePrompt } from "./prompt.ts";
 import type { EngineerSetup } from "./setup.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
-import type { JudgeResult } from "./types.ts";
+import type { JudgeBackend, JudgeResult } from "./types.ts";
 import { assembleVerdict } from "./verdict.ts";
 
 export interface JudgeInput {
@@ -35,6 +35,13 @@ export interface JudgeConfig {
    * absent the prompt is byte-identical to the setup-blind baseline.
    */
   readonly setup?: EngineerSetup;
+  /**
+   * The backend the resolved port runs (api or cli), stamped onto every
+   * provenance this pass writes so a mixed-backend corpus is sliceable and
+   * honest (judge-backends design decision 4). Never self-reported: the caller
+   * passes the tag the resolver built. Absent on the pre-backends default.
+   */
+  readonly judgeBackend?: JudgeBackend;
 }
 
 const DEFAULT_RETRY_BUDGET = 2;
@@ -62,7 +69,7 @@ export async function judgeConversation(
   // The single injected seam (spec section 3): omit config.llm and the
   // production default adapter over the engineer's configured Claude is
   // resolved from the environment; tests inject a deterministic stub.
-  const llm = config.llm ?? resolveDefaultJudgeModel();
+  const llm = config.llm ?? resolveJudgeModel().port;
   const rubricVersion = config.rubricVersion ?? RUBRIC_VERSION;
   const promptVersion = config.promptVersion ?? PROMPT_VERSION;
   const retryBudget = config.retryBudget ?? DEFAULT_RETRY_BUDGET;
@@ -81,7 +88,7 @@ export async function judgeConversation(
       });
     } catch {
       return failed(
-        { judgeModel: lastModel, rubricVersion, promptVersion },
+        provenanceOf(lastModel, rubricVersion, promptVersion, config),
         "llm-unavailable",
       );
     }
@@ -93,11 +100,12 @@ export async function judgeConversation(
       continue;
     }
 
-    const provenance = {
-      judgeModel: response.model,
+    const provenance = provenanceOf(
+      response.model,
       rubricVersion,
       promptVersion,
-    };
+      config,
+    );
 
     // The verdict parsed, but no signal grounded on the conversation: the run
     // is honestly incomplete with the signals absent, never a fabricated value
@@ -121,9 +129,26 @@ export async function judgeConversation(
   }
 
   return failed(
-    { judgeModel: lastModel, rubricVersion, promptVersion },
+    provenanceOf(lastModel, rubricVersion, promptVersion, config),
     "llm-unparseable",
   );
+}
+
+/** Build the run provenance, carrying the backend tag when the caller passed one. */
+function provenanceOf(
+  judgeModel: string,
+  rubricVersion: string,
+  promptVersion: string,
+  config: JudgeConfig,
+): JudgeResult["provenance"] {
+  return {
+    judgeModel,
+    rubricVersion,
+    promptVersion,
+    ...(config.judgeBackend === undefined
+      ? {}
+      : { judgeBackend: config.judgeBackend }),
+  };
 }
 
 /** Append the prior parse error to the user prompt so the model can repair. */
