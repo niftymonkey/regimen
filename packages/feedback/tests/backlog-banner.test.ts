@@ -8,7 +8,7 @@
  * returns. The clock is injected so the day boundary is deterministic.
  */
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "../src/store.ts";
@@ -105,9 +105,16 @@ test("a corrupt store file degrades to silence rather than throwing", () => {
   }
 });
 
-test("a malformed cap-state record degrades to silence rather than throwing", () => {
+test("a malformed cap-state record self-heals: the banner shows and the record is rewritten valid", () => {
   withBacklog(3, (dataDir) => {
-    writeFileSync(join(dataDir, "backlog-banner.json"), "{ not json");
-    expect(backlogBanner({ dataDir, now: DAY_ONE })).toBeNull();
+    const path = join(dataDir, "backlog-banner.json");
+    writeFileSync(path, "{ not json");
+    expect(backlogBanner({ dataDir, now: DAY_ONE })).not.toBeNull();
+    const record = JSON.parse(readFileSync(path, "utf8")) as {
+      date: string;
+      shows: number;
+    };
+    expect(record.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(record.shows).toBe(1);
   });
 });
