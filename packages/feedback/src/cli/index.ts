@@ -774,6 +774,11 @@ export async function assessAll(options: {
  * (printing an empty result and exiting 0), and renders either a compact table
  * with a one-line count footer or, under `--json`, the full SessionSummary array
  * the in-session agent consumes. No LLM, no judgment, no synthesis.
+ *
+ * A session whose model is still null (Copilot and Gemini hook payloads carry
+ * no model field, unlike Claude and Codex) is backfilled from its transcript at
+ * render time, per session, before printing: {@link backfillTranscriptModel}.
+ * This is a display-time read, not a store write, so `list` stays readonly.
  */
 export function list(options: {
   dataDir: string;
@@ -798,10 +803,59 @@ export function list(options: {
     }
   }
 
+  sessions = sessions.map((session) => {
+    if (session.model !== null) return session;
+    const model = backfillTranscriptModel(session, process.env);
+    return model === undefined ? session : { ...session, model };
+  });
+
   process.stdout.write(
     asJson ? `${JSON.stringify(sessions)}\n` : formatSessionTable(sessions),
   );
   return 0;
+}
+
+/**
+ * The model carried by `session`'s own transcript, read live through the same
+ * resolver+reader pair `assessConversation` uses, or undefined when no model is
+ * discoverable (an unsupported/unresolvable harness, no transcript on disk, or a
+ * transcript that itself carries no model). Never throws: a harness a `list`
+ * caller has no config-home env var for, or a session with no transcript yet, is
+ * routine, not an error, so this stays best-effort rather than fail-closed like
+ * `assessConversation`'s own transcript lookup.
+ */
+function backfillTranscriptModel(
+  session: SessionSummary,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  let location: HarnessLocation;
+  try {
+    location = resolveHarnessLocation(session.harness, env);
+  } catch {
+    return undefined;
+  }
+  const located = location.support.resolver.locate({
+    sessionsDir: location.sessionsDir,
+    sessionId: session.sessionId,
+  });
+  if (located === null) return undefined;
+
+  let content: string;
+  try {
+    content = readFileSync(located.path, "utf8");
+  } catch {
+    return undefined;
+  }
+
+  const read = location.support.reader.read(content, {
+    complete: !located.open,
+  });
+  for (const event of read.events) {
+    if (event.model !== undefined && event.model.length > 0) {
+      return event.model;
+    }
+  }
+  return undefined;
 }
 
 /** The list-table columns, in render order, each a (header, cell) projection. */
