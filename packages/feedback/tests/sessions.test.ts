@@ -19,7 +19,11 @@ import {
 } from "../src/judged/writer.ts";
 import type { JudgeResult } from "../src/judged/types.ts";
 import type { DerivedOutcomeValue } from "../src/judged/outcome.ts";
-import { listSessions, resolveSessionId } from "../src/sessions.ts";
+import {
+  countUnassessed,
+  listSessions,
+  resolveSessionId,
+} from "../src/sessions.ts";
 
 const NOW = () => Date.parse("2026-06-15T12:00:00.000Z");
 const ASSIGNMENT = "whole-conversation";
@@ -506,5 +510,55 @@ test("resolveSessionId given a full id resolves it directly, even if it also pre
       ok: true,
       sessionId: "37ef64a7-1111-2222-3333-444455556666",
     });
+  });
+});
+
+test("countUnassessed counts only conversations with no assessment narrative", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "judged",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    writeAssessment(
+      store,
+      run("judged", "run-j"),
+      resultWithOutcome("accomplished-cleanly"),
+    );
+    seedSession(store.db, {
+      sessionId: "unjudged-a",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-14T10:00:00.000Z",
+      lastEventAt: "2026-06-14T10:30:00.000Z",
+    });
+    seedSession(store.db, {
+      sessionId: "unjudged-b",
+      harness: "gemini",
+      model: "gemini-2.5",
+      firstEventAt: "2026-06-13T10:00:00.000Z",
+      lastEventAt: "2026-06-13T10:30:00.000Z",
+    });
+    expect(countUnassessed(store.db)).toBe(2);
+  });
+});
+
+test("countUnassessed is zero when every conversation is assessed", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "only",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    writeAssessment(
+      store,
+      run("only", "run-only"),
+      resultWithOutcome("accomplished-cleanly"),
+    );
+    expect(countUnassessed(store.db)).toBe(0);
   });
 });

@@ -644,3 +644,23 @@ test("feedback status reports the last event timestamp and the buffer backlog", 
     expect(stdout).toContain("1024");
   });
 });
+
+test("feedback status reports how many conversations await assessment", async () => {
+  await withDataDir(async (dataDir) => {
+    const store = openStore(join(dataDir, "feedback.db"));
+    for (const id of ["conv-a", "conv-b"]) {
+      store.db
+        .prepare(
+          `INSERT INTO conversations
+             (session_id, harness, model, first_event_at, last_event_at)
+           VALUES (?, 'claude', 'claude-opus-4-8', ?, ?)`,
+        )
+        .run(id, "2026-05-21T12:00:00.000Z", "2026-05-21T12:30:00.000Z");
+    }
+    store.close();
+
+    const { exit, stdout } = await runDir(["status"], dataDir);
+    expect(exit).toBe(0);
+    expect(stdout).toContain("awaiting assessment: 2");
+  });
+});

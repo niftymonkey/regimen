@@ -144,6 +144,26 @@ export function listSessions(
   return rows.map(toSummary);
 }
 
+/**
+ * How many conversations are captured but not yet assessed: the count of
+ * conversation rows with no `assessment` narrative, mirroring exactly the
+ * `judged` definition {@link listSessions} uses. Pure SQLite read; the backlog
+ * banner and `status` both read it so the two never drift on what "unassessed"
+ * means.
+ */
+export function countUnassessed(db: Database): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+         FROM conversations c
+         LEFT JOIN narrative n
+           ON n.session_id = c.session_id AND n.narrative_type = 'assessment'
+        WHERE n.session_id IS NULL`,
+    )
+    .get() as { n: number };
+  return row.n;
+}
+
 interface SessionRow {
   session_id: string;
   harness: string;

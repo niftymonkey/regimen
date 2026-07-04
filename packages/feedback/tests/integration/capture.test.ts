@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setEnabled } from "../../src/enabled-flag.ts";
+import { openStore } from "../../src/store.ts";
 
 const HOOK = join(import.meta.dir, "..", "..", "hooks", "capture.ts");
 
@@ -13,6 +14,28 @@ const claudePreToolUse = {
   tool_use_id: "toolu_abc123",
   tool_input: {},
 };
+
+const claudeSessionStart = {
+  hook_event_name: "SessionStart",
+  session_id: "claude-test-7f3a",
+  cwd: "/repo",
+  source: "startup",
+};
+
+/** Seed the store with `n` unassessed conversations so the banner has a backlog. */
+function seedBacklog(dataDir: string, n: number): void {
+  const store = openStore(join(dataDir, "feedback.db"));
+  for (let i = 0; i < n; i++) {
+    store.db
+      .prepare(
+        `INSERT INTO conversations
+           (session_id, harness, model, first_event_at, last_event_at)
+         VALUES (?, 'claude', 'claude-opus-4-8', ?, ?)`,
+      )
+      .run(`sess-${i}`, "2026-07-04T08:00:00.000Z", "2026-07-04T08:30:00.000Z");
+  }
+  store.close();
+}
 
 async function runHook(
   payload: unknown,
@@ -77,6 +100,36 @@ test("the hook envelopes payloads with no v1 mapping (the loader decides what to
       readFileSync(currentPath, "utf8").trim(),
     ) as Record<string, unknown>;
     expect(envelope.payload).toEqual(notification);
+  });
+});
+
+test("on SessionStart the hook emits the backlog banner to stdout for context injection", async () => {
+  await withDataDir(async (dataDir) => {
+    setEnabled(dataDir);
+    seedBacklog(dataDir, 3);
+    const { exit, stdout } = await runHook(claudeSessionStart, dataDir);
+    expect(exit).toBe(0);
+    expect(stdout).toContain("3 conversations awaiting assessment");
+  });
+});
+
+test("the banner is a SessionStart-only surface: other events stay stdout-silent", async () => {
+  await withDataDir(async (dataDir) => {
+    setEnabled(dataDir);
+    seedBacklog(dataDir, 3);
+    const { exit, stdout } = await runHook(claudePreToolUse, dataDir);
+    expect(exit).toBe(0);
+    expect(stdout).toBe("");
+  });
+});
+
+test("with no backlog, SessionStart stays stdout-silent", async () => {
+  await withDataDir(async (dataDir) => {
+    setEnabled(dataDir);
+    seedBacklog(dataDir, 0);
+    const { exit, stdout } = await runHook(claudeSessionStart, dataDir);
+    expect(exit).toBe(0);
+    expect(stdout).toBe("");
   });
 });
 
