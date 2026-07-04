@@ -179,6 +179,49 @@ test("a well-formed verdict yields an engagement signal (categorical, conversati
   expect(engagement!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
 });
 
+test("a well-formed verdict yields a verification signal (categorical, conversation-scoped)", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    verification: { value: "accepted-unverified", anchors: [0, 1] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  const verification = result.signals.find(
+    (s) => s.signalName === "verification",
+  );
+  expect(verification).toBeDefined();
+  expect(verification!.value).toBe("accepted-unverified");
+  expect(verification!.valueKind).toBe("categorical");
+  expect(verification!.scope).toBe("conversation");
+  expect(verification!.anchors).toEqual([
+    { eventHash: "a".repeat(64) },
+    { eventHash: "b".repeat(64) },
+  ]);
+});
+
+test("an out-of-vocab verification value is rejected; the signal is absent", async () => {
+  const text = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    verification: { value: "double-checked", anchors: [0] },
+  });
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: stubPort(text) },
+  );
+  expect(
+    result.signals.find((s) => s.signalName === "verification"),
+  ).toBeUndefined();
+  expect(
+    result.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeDefined();
+});
+
 test("an out-of-vocab engagement value is rejected; the signal is absent", async () => {
   const text = JSON.stringify({
     intent: { value: "test-writing", anchors: [0] },

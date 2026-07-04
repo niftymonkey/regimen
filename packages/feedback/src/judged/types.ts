@@ -24,7 +24,8 @@ export type SignalName =
   | "accomplishment"
   | "correction-cost"
   | "outcome"
-  | "engagement";
+  | "engagement"
+  | "verification";
 
 /**
  * The open value-kind tag (ADR-0008). `categorical` and `ordinal` are the live
@@ -65,6 +66,20 @@ export type CorrectionCostValue = "none" | "light" | "heavy";
  * was never a real work session.
  */
 export type EngagementValue = "engaged" | "not-engaged";
+
+/**
+ * Verification: whether the engineer's own visible check of the AI's output
+ * happened, categorical and conversation-scoped (ADR-0017). Not an ordinal: both
+ * `accepted-unverified` (over-trust) and `over-verified` (wasteful under-trust)
+ * are off the healthy middle. Always-on in intent but abstain-when-unclear, so
+ * absence of a visible check is never read as no-check; `nothing-to-verify` is a
+ * stored value (a no-AI-change session) so the rollup can exclude it.
+ */
+export type VerificationValue =
+  | "verified"
+  | "accepted-unverified"
+  | "over-verified"
+  | "nothing-to-verify";
 
 /** Why a run did not finish clean. Absent on a complete run. */
 export type IncompleteReason =
@@ -107,7 +122,8 @@ export interface JudgedSignal {
     | AccomplishmentValue
     | CorrectionCostValue
     | DerivedOutcomeValue
-    | EngagementValue;
+    | EngagementValue
+    | VerificationValue;
   readonly anchors: ReadonlyArray<AnchorRef>;
 }
 

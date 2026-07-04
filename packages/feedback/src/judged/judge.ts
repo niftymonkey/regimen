@@ -23,6 +23,7 @@ import type {
   JudgedNarrative,
   JudgedSignal,
   JudgeResult,
+  VerificationValue,
 } from "./types.ts";
 
 export interface JudgeInput {
@@ -70,6 +71,14 @@ const CORRECTION_COST_VALUES: ReadonlySet<string> =
 const ENGAGEMENT_VALUES: ReadonlySet<string> = new Set<EngagementValue>([
   "engaged",
   "not-engaged",
+]);
+
+/** The closed Verification vocabulary (ADR-0017). */
+const VERIFICATION_VALUES: ReadonlySet<string> = new Set<VerificationValue>([
+  "verified",
+  "accepted-unverified",
+  "over-verified",
+  "nothing-to-verify",
 ]);
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
@@ -191,6 +200,7 @@ interface ParsedVerdict {
   readonly "correction-cost"?: ParsedClaim;
   readonly assessment?: ParsedClaim;
   readonly engagement?: ParsedClaim;
+  readonly verification?: ParsedClaim;
 }
 
 /**
@@ -331,6 +341,26 @@ function buildSignals(
         signalName: "engagement",
         valueKind: "categorical",
         value: verdict.engagement.value as EngagementValue,
+        anchors,
+      });
+    }
+  }
+
+  if (
+    verdict.verification !== undefined &&
+    typeof verdict.verification.value === "string" &&
+    VERIFICATION_VALUES.has(verdict.verification.value)
+  ) {
+    const anchors = resolveAnchors(
+      verdict.verification.anchors,
+      chunkByLineSeq,
+    );
+    if (anchors.length > 0) {
+      signals.push({
+        scope: "conversation",
+        signalName: "verification",
+        valueKind: "categorical",
+        value: verdict.verification.value as VerificationValue,
         anchors,
       });
     }

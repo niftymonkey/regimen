@@ -83,6 +83,25 @@ test("the not-engaged definition drops the setup-blip phrasing (ADR-0017 wording
   expect(system).not.toContain("setup blip");
 });
 
+test("the SYSTEM rubric elicits the verification signal with its closed vocabulary", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain('"verification"');
+  expect(system).toContain(
+    "verified | accepted-unverified | over-verified | nothing-to-verify",
+  );
+});
+
+test("verification is visible-check-only and abstains when unclear", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("visible");
+  expect(system).toContain("OMIT the key");
+});
+
+test("verification anchors accepted-unverified on positive evidence of the skip", () => {
+  const { system } = buildJudgePrompt(CHUNKS);
+  expect(system).toContain("POSITIVE evidence of the skip");
+});
+
 test("injects a supplied convention's text and a practice's name when setup is present", () => {
   const prompt = buildJudgePrompt(CHUNKS, SETUP);
   const full = `${prompt.system}\n${prompt.user}`;

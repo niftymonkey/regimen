@@ -29,6 +29,9 @@ const CORRECTION_COST_VOCAB = "none < light < heavy";
 
 const ENGAGEMENT_VOCAB = "engaged | not-engaged";
 
+const VERIFICATION_VOCAB =
+  "verified | accepted-unverified | over-verified | nothing-to-verify";
+
 /**
  * The rubric/instruction system prompt. Pins the closed vocabularies, the
  * prose-before-label order, the citable-id anchor rule, and the two explicit
@@ -58,6 +61,12 @@ You output exactly one JSON object with these keys, in this order:
    Judge whether the conversation genuinely became a work session on the assignment. This is orthogonal to the accomplishment: always decide it, whatever the accomplishment was.
    - engaged: the conversation genuinely became a work session on the assignment; the work was attempted in earnest. A real assignment derailed by tooling is engaged, not never-engaged.
    - not-engaged: the conversation never really became a work session on the assignment (a throwaway question, an aborted start, an unrelated detour); non-accomplishment here is not the AI failing at a real task.
+6. "verification": { "value": <one of: ${VERIFICATION_VOCAB}>, "anchors": [<chunk ids>] }
+   Judge whether the engineer's OWN visible check of the AI's output happened. A check must be VISIBLE in the transcript (the engineer reading a diff, running the code, or challenging the result); a silent reader is transcript-identical to a blind accepter, so absence of a visible check is NOT read as no-check. When it is genuinely unclear whether a check happened, OMIT the key entirely (abstain) rather than guessing. A harness-automatic hook or test run is the environment, not the engineer's verifying act.
+   - verified: the engineer visibly checked the AI's substantive change before moving on.
+   - accepted-unverified: emit only on POSITIVE evidence of the skip: a substantive AI change followed immediately by the engineer moving on with no visible read, run, or challenge. Anchor the two chunks that bracket the absent check (the AI change and the accept).
+   - over-verified: the engineer checked far more than the change warranted (wasteful re-checking of a trivial or already-confirmed result).
+   - nothing-to-verify: the conversation produced no AI change to check (a question answered, an exploration); anchor the no-change turns.
 
 Anchors: each "anchors" array cites the chunk ids (the numbers in [brackets] below) that justify the claim. Cite at least one id per claim, and cite only ids that appear in the conversation. Do not invent ids.
 
