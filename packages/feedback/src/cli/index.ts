@@ -569,47 +569,13 @@ export async function assess(options: {
   setupSource?: SetupSource;
 }): Promise<number> {
   const { dataDir: dir } = options;
-  // Resolve the harness first, then drive everything (config home, sessions dir,
-  // resolver, reader) from its registry entry. The harness comes from the
-  // environment (REGIMEN_HARNESS or a CLI-set marker), not a flag; with neither
-  // present the command fails closed rather than guessing one.
-  let harness;
-  try {
-    harness = resolveHarnessFromEnvironment(process.env);
-  } catch (err) {
-    process.stderr.write(`${(err as Error).message}\n`);
-    return 1;
-  }
-  if (harness === undefined) {
-    process.stderr.write(`${NO_HARNESS}\n`);
-    return 1;
-  }
-  // Config home is the contract's env-var override when set, else a default under
-  // the user's home; a set override stands in for an unset HOME so assess can run
-  // wherever the harness home is pinned by its own env var.
-  let location;
-  try {
-    location = resolveHarnessLocation(harness, process.env);
-  } catch (err) {
-    process.stderr.write(`${(err as Error).message}\n`);
-    return 1;
-  }
-  const { support, harnessHome, sessionsDir } = location;
-
-  let sessionId: string | null = options.session ?? null;
-  if (sessionId === null) {
-    sessionId = support.resolver.resolveCurrent({
-      dataDir: dir,
-      harnessHome,
-      cwd: process.cwd(),
-    });
-    if (sessionId === null) {
-      process.stderr.write(
-        `could not resolve the current ${harness} session id\n`,
-      );
-      return 1;
-    }
-  }
+  // One resolution path for every single-session judging surface: assess, the
+  // tier C emit, and the tier C record all resolve the harness, its location,
+  // and the session id through {@link resolveAssessTarget}, so the fail-closed
+  // messages cannot drift apart.
+  const target = resolveAssessTarget(options.session, dir);
+  if (target === null) return 1;
+  const { harness, sessionsDir, sessionId } = target;
 
   // The judge LLM is the engineer's configured Claude, resolved from env at
   // runtime (the judgeModel option overrides the model). Resolving it inside
