@@ -73,6 +73,12 @@ import {
 import { resolveJudgeModel } from "../judged/resolve.ts";
 import { createLiveSetupSource } from "../judged/live-setup-source.ts";
 import type { SetupSource } from "../judged/setup.ts";
+import type { JudgeModelPort } from "../judged/port.ts";
+import {
+  rollupHeader,
+  rollupVerdicts,
+  type VerdictRollup,
+} from "../judged/rollup.ts";
 import {
   runSweep,
   selectSessionsToJudge,
@@ -872,6 +878,110 @@ export async function recordVerdict(options: {
   } finally {
     store.close();
   }
+}
+
+/**
+ * `regimen rollup`: read across the persisted per-conversation verdicts matching
+ * `filter` and answer how work is going, what keeps recurring, and what to do,
+ * as a colleague-voiced narrative over a deterministic header of numbers (the
+ * SQL-vs-model split: the header owns every count, the model only interprets).
+ * Opens the store read-only (the rollup writes nothing). An empty slice (no
+ * store, or no judged conversations matching the filter) short-circuits to a
+ * header-only rollup with no synthesis and resolves NO judge backend, so a rollup
+ * over zero judged conversations is free and needs no configured judge (mirroring
+ * the sweep's nothing-to-judge path). Otherwise it resolves the synthesis backend
+ * exactly as `assess` does (sharing `--judge-model` and `--judge-via`, including
+ * the Bedrock no-key CLI path) and prints the VerdictRollup as JSON under
+ * `--json` or as the rendered narrative-over-numbers view. `llm` is an injected
+ * test seam; production resolves the backend.
+ */
+export async function rollup(options: {
+  dataDir: string;
+  filter: SessionFilter;
+  asJson: boolean;
+  judgeModel?: string;
+  judgeVia?: "cli" | "api";
+  llm?: JudgeModelPort;
+}): Promise<number> {
+  const { dataDir: dir, filter, asJson } = options;
+  const now = Date.now;
+  const storePath = join(dir, "feedback.db");
+  if (!existsSync(storePath)) {
+    printRollup(emptyRollup(filter, now), asJson);
+    return 0;
+  }
+  const db = new Database(storePath, { readonly: true });
+  try {
+    // An empty slice short-circuits before backend resolution, so an empty
+    // rollup succeeds without a configured judge (the sweep's symmetry).
+    if (rollupHeader(db, filter, now).totalJudged === 0) {
+      printRollup(emptyRollup(filter, now), asJson);
+      return 0;
+    }
+    let port = options.llm;
+    if (port === undefined) {
+      port = resolveJudgeModel({
+        ...(options.judgeModel === undefined
+          ? {}
+          : { model: options.judgeModel }),
+        ...(options.judgeVia === undefined
+          ? {}
+          : { judgeVia: options.judgeVia }),
+      }).port;
+    }
+    const result = await rollupVerdicts(db, { filter, llm: port, now });
+    printRollup(result, asJson);
+    return 0;
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    return 1;
+  } finally {
+    db.close();
+  }
+}
+
+/** The header-only rollup for an empty slice: no synthesis, no model call. */
+function emptyRollup(filter: SessionFilter, now: () => number): VerdictRollup {
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date(now()).toISOString(),
+    header: { totalJudged: 0, distributions: [] },
+    synthesis: null,
+    filter,
+  };
+}
+
+/**
+ * Print a VerdictRollup: the full JSON under `--json` for a skill to consume, or
+ * the rendered human view. The human view leads with the synthesis narrative
+ * (colleague voice) and prints the deterministic header numbers beneath it,
+ * always from the header fields and never re-derived from the prose, so the true
+ * counts stand regardless of what the narrative says. An empty slice says so
+ * plainly.
+ */
+function printRollup(rollup: VerdictRollup, asJson: boolean): void {
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify(rollup)}\n`);
+    return;
+  }
+  process.stdout.write(formatRollup(rollup));
+}
+
+/** Render a VerdictRollup as the narrative-over-numbers human view. */
+function formatRollup(rollup: VerdictRollup): string {
+  if (rollup.synthesis === null) {
+    return "No assessed conversations in this slice yet; nothing to roll up.\n";
+  }
+  const numbers = [
+    `judged conversations: ${rollup.header.totalJudged}`,
+    ...rollup.header.distributions.map((dist) => {
+      const buckets = dist.buckets
+        .map((bucket) => `${bucket.value} ${bucket.count}`)
+        .join(", ");
+      return `  ${dist.signalName}: ${buckets}`;
+    }),
+  ].join("\n");
+  return `${rollup.synthesis.prose}\n\nThe numbers behind this:\n${numbers}\n`;
 }
 
 /**

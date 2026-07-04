@@ -44,6 +44,7 @@ import {
   installScope as feedbackInstallScope,
   list as feedbackList,
   restart as feedbackRestart,
+  rollup as feedbackRollup,
   type SessionFilter,
   start as feedbackStart,
   status as feedbackStatus,
@@ -692,6 +693,35 @@ function status(): number {
   return feedbackStatus({ dataDir: dir });
 }
 
+/**
+ * Dispatch `regimen rollup` to the feedback rollup facade: a READ across the
+ * persisted verdicts (how work is going, recurring patterns, remedies), not the
+ * write sweep that produces them, so it sits with the read-and-judge primitives.
+ * It parses the same `list` filter set plus the shared judge-backend flags and
+ * `--json`. The synthesis backend is resolved exactly as `assess` does, so the
+ * flags carry through unchanged; an empty slice needs no configured judge.
+ */
+function rollup(argv: ReadonlyArray<string>): Promise<number> {
+  const filter: SessionFilter = {
+    ...optionalFilter(argv, "--harness", "harness"),
+    ...optionalFilter(argv, "--model", "model"),
+    ...optionalFilter(argv, "--since", "since"),
+    ...optionalFilter(argv, "--until", "until"),
+    ...optionalFilter(argv, "--outcome", "outcome"),
+  };
+  const judgeModel = flagValue(argv, "--judge-model");
+  const judgeViaRaw = flagValue(argv, "--judge-via");
+  const judgeVia =
+    judgeViaRaw === "cli" || judgeViaRaw === "api" ? judgeViaRaw : undefined;
+  return feedbackRollup({
+    dataDir: dataDir(),
+    filter,
+    asJson: argv.includes("--json"),
+    ...(judgeModel === undefined ? {} : { judgeModel }),
+    ...(judgeVia === undefined ? {} : { judgeVia }),
+  });
+}
+
 /** Dispatch `regimen list` to the feedback list facade. */
 function list(argv: ReadonlyArray<string>): number {
   const filter: SessionFilter = {
@@ -727,6 +757,7 @@ Read & judge:
   assess --all [filters] [--batch <n>] [--force]   judge many sessions in one sweep (paid; batched, resumable)
   assess --emit-prompt                   print the judge prompt for the current agent to judge (no paid call)
   assess --record-verdict                read the agent's verdict from stdin and record it
+  rollup [filters] [--json]              read across judged sessions: how it is going, patterns, remedies (paid LLM synthesis)
   list [--harness <h>] [--since <when>] [--json]   enumerate captured sessions
 
 Flags:
@@ -773,6 +804,8 @@ export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
       return assess(argv);
     case "evidence":
       return evidence(argv);
+    case "rollup":
+      return rollup(argv);
     case "list":
       return list(argv);
     default:
