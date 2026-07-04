@@ -21,6 +21,8 @@ The command resolves the current session itself from your working directory, exa
 
 Unlike `regimen evidence`, this command makes a network call to the judge model and writes the verdict to the local store.
 
+If it instead exits with "no judge backend is configured", this machine has no separate judge model set up. You can still get a verdict: the current agent judges the conversation itself. Go to "Judging with the current agent" below.
+
 ### 2. Handle the outcome
 
 - **`regimen: command not found`**: Regimen is not installed on this machine. Tell the engineer, and stop; there is nothing to assess.
@@ -50,6 +52,32 @@ The verdict is ALREADY the judge's interpretation, so act on it rather than re-d
 - An `abandoned` or `partial` Outcome on an open conversation is a prompt to reconsider the approach before sinking more in.
 
 If the engineer asked, report the verdict concisely: Intent, Outcome, and the gist of the assessment. Otherwise, fold any course-correction the verdict implies into your next move, and carry on.
+
+## Judging with the current agent (no separate key)
+
+When no judge model is configured, Regimen hands you the exact prompt and records the verdict you produce. This works on every setup, because the one model that is always available is the one running this conversation.
+
+Do the actual judging in a CLEAN SUB-AGENT wherever your harness can spawn one. The conversation being judged should not judge itself: a fresh sub-agent that reads only the handed-over transcript gives an honest read, where the same context that did the work would flatter it. If you cannot spawn a sub-agent, still judge, but say plainly that the verdict is a self-assessment so the reader can weigh it.
+
+1. Get the prompt. Run this in the current conversation so it resolves the right session:
+
+```bash
+regimen assess --emit-prompt
+```
+
+It prints one JSON object with `system`, `user`, `promptVersion`, and `rubricVersion`. No model is called and nothing is written yet.
+
+2. Judge. Hand the `system` and `user` text to the sub-agent as its whole instruction and input. It reads the conversation projection in `user` fresh, not from any memory of the work, writes its reasoning first, and only then chooses the labels that reasoning supports. It returns exactly the one JSON verdict object the prompt asks for.
+
+3. Record it. Back in the current conversation, wrap that verdict in an envelope carrying the two versions from step 1 and your own model id, and pipe it in:
+
+```bash
+echo '{"sessionId":"<from step 1>","promptVersion":"<from step 1>","rubricVersion":"<from step 1>","judgeModel":"<your model id>","verdict":<the verdict object>}' | regimen assess --record-verdict
+```
+
+It re-checks the verdict against the real conversation and prints the same digest `regimen assess` would. Read it back the same curated way as step 3 above.
+
+4. If it exits non-zero, the verdict was rejected and nothing was written: the message says why (a citation that points nowhere, a label with no reasoning before it, or a prompt that has since changed). Fix that one thing and try again, at most twice. If it still will not record, stop and report that the verdict could not be grounded, rather than leaning on an ungrounded one.
 
 ## Notes
 

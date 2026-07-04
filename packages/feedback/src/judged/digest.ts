@@ -11,7 +11,12 @@
 import type { Database } from "bun:sqlite";
 import type { AnchorRef } from "../loader/reader-types.ts";
 import { sessionHarnessModel } from "./slice.ts";
-import type { JudgeProvenance, SignalName, ValueKind } from "./types.ts";
+import type {
+  JudgeBackend,
+  JudgeProvenance,
+  SignalName,
+  ValueKind,
+} from "./types.ts";
 
 export type JudgmentDigest = UnjudgedDigest | JudgedDigest;
 
@@ -112,6 +117,7 @@ interface RunRow {
   rubric_version: string;
   prompt_version: string;
   judge_model: string;
+  judge_backend: string | null;
   complete: number;
 }
 
@@ -147,7 +153,7 @@ export function readJudgmentDigest(
 ): JudgmentDigest {
   const latest = db
     .prepare(
-      `SELECT run_id, rubric_version, prompt_version, judge_model, complete
+      `SELECT run_id, rubric_version, prompt_version, judge_model, judge_backend, complete
          FROM assessment_run WHERE session_id = ?
          ORDER BY created_at DESC, run_id DESC LIMIT 1`,
     )
@@ -209,6 +215,9 @@ export function readJudgmentDigest(
       judgeModel: latest.judge_model,
       rubricVersion: latest.rubric_version,
       promptVersion: latest.prompt_version,
+      ...(latest.judge_backend === null
+        ? {}
+        : { judgeBackend: latest.judge_backend as JudgeBackend }),
     },
     assessment,
     outcome,

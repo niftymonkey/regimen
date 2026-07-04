@@ -1,15 +1,13 @@
 /**
- * The production Anthropic adapter (anthropicJudgeModel) and resolveDefaultJudgeModel
- * (S3, spec section 3). Built last and tested thinnest: the adapter maps one
- * JudgeModelRequest to one /v1/messages POST and reads response.model back, with
- * `fetch` mocked at the boundary so the suite makes ZERO network calls. The real
- * Anthropic round-trip is a separate manual validation, never part of the build.
+ * The production Anthropic adapter (anthropicJudgeModel) (S3, spec section 3).
+ * Tested thinnest: the adapter maps one JudgeModelRequest to one /v1/messages
+ * POST and reads response.model back, with `fetch` mocked at the boundary so the
+ * suite makes ZERO network calls. Backend selection now lives in resolve.ts
+ * (resolve.test.ts); the real Anthropic round-trip is a separate manual
+ * validation, never part of the build.
  */
 import { expect, test } from "bun:test";
-import {
-  anthropicJudgeModel,
-  resolveDefaultJudgeModel,
-} from "../src/judged/anthropic-adapter.ts";
+import { anthropicJudgeModel } from "../src/judged/anthropic-adapter.ts";
 
 /** A captured request the mock fetch recorded. */
 interface CapturedRequest {
@@ -149,110 +147,4 @@ test("the adapter throws on a non-2xx response so the Judge sees a transport fai
   });
 
   await expect(llm.complete({ system: "s", user: "u" })).rejects.toThrow();
-});
-
-test("resolveDefaultJudgeModel reads the key from env and defaults the model and base URL", async () => {
-  const captured: CapturedRequest[] = [];
-  const llm = resolveDefaultJudgeModel({
-    env: { ANTHROPIC_API_KEY: "sk-ant-env" },
-    fetch: mockFetch(captured, ANTHROPIC_RESPONSE),
-  });
-
-  await llm.complete({ system: "s", user: "u" });
-
-  const call = captured[0]!;
-  expect(call.url).toBe("https://api.anthropic.com/v1/messages");
-  const headers = call.init.headers as Record<string, string>;
-  expect(headers["x-api-key"]).toBe("sk-ant-env");
-  const sent = JSON.parse(call.init.body as string);
-  expect(sent.model).toBe("claude-opus-4-8");
-});
-
-test("resolveDefaultJudgeModel honors the model override and an env base URL", async () => {
-  const captured: CapturedRequest[] = [];
-  const llm = resolveDefaultJudgeModel({
-    env: {
-      ANTHROPIC_API_KEY: "sk-ant-env",
-      ANTHROPIC_BASE_URL: "https://proxy.example",
-    },
-    model: "claude-sonnet-4-6",
-    fetch: mockFetch(captured, ANTHROPIC_RESPONSE),
-  });
-
-  await llm.complete({ system: "s", user: "u" });
-
-  const call = captured[0]!;
-  expect(call.url).toBe("https://proxy.example/v1/messages");
-  const sent = JSON.parse(call.init.body as string);
-  expect(sent.model).toBe("claude-sonnet-4-6");
-});
-
-test("resolveDefaultJudgeModel falls back to the claude CLI adapter when the key is absent but claude is on PATH", async () => {
-  const captured: { args: ReadonlyArray<string>; input: string }[] = [];
-  const llm = resolveDefaultJudgeModel({
-    env: {},
-    claudeOnPath: () => true,
-    run: (args, input) => {
-      captured.push({ args, input });
-      return Promise.resolve({
-        stdout: JSON.stringify({
-          subtype: "success",
-          is_error: false,
-          result: "{}",
-          modelUsage: { "claude-haiku-4-5-20251001": {} },
-        }),
-        stderr: "",
-        exitCode: 0,
-      });
-    },
-  });
-
-  const response = await llm.complete({ system: "s", user: "u" });
-  expect(response.model).toBe("claude-haiku-4-5-20251001");
-  expect(captured).toHaveLength(1);
-  expect(captured[0]!.args).toContain("--print");
-  expect(captured[0]!.args).toContain("--output-format");
-  // No --judge-model was passed, so the CLI path omits --model entirely.
-  expect(captured[0]!.args).not.toContain("--model");
-});
-
-test("resolveDefaultJudgeModel throws when ANTHROPIC_API_KEY is absent and claude is not on PATH", () => {
-  expect(() =>
-    resolveDefaultJudgeModel({ env: {}, claudeOnPath: () => false }),
-  ).toThrow(/ANTHROPIC_API_KEY/);
-});
-
-test("judgeVia 'cli' uses the CLI adapter even when a key is present", async () => {
-  const captured: { args: ReadonlyArray<string>; input: string }[] = [];
-  const llm = resolveDefaultJudgeModel({
-    env: { ANTHROPIC_API_KEY: "sk-ant-env" },
-    judgeVia: "cli",
-    run: (args, input) => {
-      captured.push({ args, input });
-      return Promise.resolve({
-        stdout: JSON.stringify({
-          subtype: "success",
-          is_error: false,
-          result: "{}",
-          modelUsage: { "claude-haiku-4-5-20251001": {} },
-        }),
-        stderr: "",
-        exitCode: 0,
-      });
-    },
-  });
-
-  await llm.complete({ system: "s", user: "u" });
-  expect(captured).toHaveLength(1);
-  expect(captured[0]!.args).toContain("--print");
-});
-
-test("judgeVia 'api' without a key throws ANTHROPIC_API_KEY even when claude is on PATH", () => {
-  expect(() =>
-    resolveDefaultJudgeModel({
-      env: {},
-      judgeVia: "api",
-      claudeOnPath: () => true,
-    }),
-  ).toThrow(/ANTHROPIC_API_KEY/);
 });

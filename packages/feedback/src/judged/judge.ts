@@ -3,33 +3,20 @@
  *
  * A narrow interface over a body that hides prompt construction (grounded in
  * docs/feedback-surfacing.md), the LLM round-trip behind the JudgeModelPort
- * seam, output parsing, closed-vocabulary enforcement, enumerated-chunk-id
- * anchor citation with membership validation, bounded retry, and fail-closed
- * assembly. It returns a pure JudgeResult the orchestrator maps one-to-one onto
- * the ADR-0008 rows; the Judge writes no SQLite and makes no network call of
- * its own (that lives behind the port).
+ * seam, bounded retry, and fail-closed assembly. The parse, closed-vocabulary
+ * enforcement, enumerated-chunk-id anchor citation with membership validation,
+ * and signal/narrative assembly now live in the shared `verdict.ts` pipeline, so
+ * the tier C agent recorder runs the identical body. The Judge writes no SQLite
+ * and makes no network call of its own (that lives behind the port).
  */
-import type { AnchorRef, ContentChunk } from "../loader/reader-types.ts";
+import type { ContentChunk } from "../loader/reader-types.ts";
 import type { JudgeModelPort } from "./port.ts";
-import { resolveDefaultJudgeModel } from "./anthropic-adapter.ts";
+import { resolveJudgeModel } from "./resolve.ts";
 import { buildJudgePrompt } from "./prompt.ts";
 import type { EngineerSetup } from "./setup.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
-import type {
-  AccomplishmentValue,
-  AttributionValue,
-  ConductingValue,
-  ConventionAdherenceValue,
-  CorrectionCostValue,
-  EffortValue,
-  EngagementValue,
-  FramingValue,
-  IntentValue,
-  JudgedNarrative,
-  JudgedSignal,
-  JudgeResult,
-  VerificationValue,
-} from "./types.ts";
+import type { JudgeBackend, JudgeResult } from "./types.ts";
+import { assembleVerdict } from "./verdict.ts";
 
 export interface JudgeInput {
   readonly sessionId: string;
@@ -48,84 +35,16 @@ export interface JudgeConfig {
    * absent the prompt is byte-identical to the setup-blind baseline.
    */
   readonly setup?: EngineerSetup;
+  /**
+   * The backend the resolved port runs (api or cli), stamped onto every
+   * provenance this pass writes so a mixed-backend corpus is sliceable and
+   * honest (judge-backends design decision 4). Never self-reported: the caller
+   * passes the tag the resolver built. Absent on the pre-backends default.
+   */
+  readonly judgeBackend?: JudgeBackend;
 }
 
 const DEFAULT_RETRY_BUDGET = 2;
-
-/** The closed Intent vocabulary (ADR-0008). `other` is the escape. */
-const INTENT_VALUES: ReadonlySet<string> = new Set<IntentValue>([
-  "refactor",
-  "bug-fix",
-  "feature",
-  "test-writing",
-  "exploration",
-  "schema-change",
-  "other",
-]);
-
-/** The 3-value ordinal accomplishment vocabulary, low to high (ADR-0017). */
-const ACCOMPLISHMENT_VALUES: ReadonlySet<string> = new Set<AccomplishmentValue>(
-  ["not-accomplished", "partial", "accomplished"],
-);
-
-/** The 3-value ordinal correction-cost vocabulary, low to high (ADR-0017). */
-const CORRECTION_COST_VALUES: ReadonlySet<string> =
-  new Set<CorrectionCostValue>(["none", "light", "heavy"]);
-
-/** The closed Engagement vocabulary (Decision 5 of the judge-prompt design). */
-const ENGAGEMENT_VALUES: ReadonlySet<string> = new Set<EngagementValue>([
-  "engaged",
-  "not-engaged",
-]);
-
-/** The 3-value ordinal framing vocabulary, low to high (ADR-0017). */
-const FRAMING_VALUES: ReadonlySet<string> = new Set<FramingValue>([
-  "underspecified",
-  "adequate",
-  "clear",
-]);
-
-/** The 3-value ordinal conducting vocabulary, low to high (ADR-0017). */
-const CONDUCTING_VALUES: ReadonlySet<string> = new Set<ConductingValue>([
-  "poorly-conducted",
-  "adequately-conducted",
-  "well-conducted",
-]);
-
-/** The 3-value ordinal effort vocabulary, low to high (ADR-0017). */
-const EFFORT_VALUES: ReadonlySet<string> = new Set<EffortValue>([
-  "low",
-  "moderate",
-  "high",
-]);
-
-/** The closed Verification vocabulary (ADR-0017). */
-const VERIFICATION_VALUES: ReadonlySet<string> = new Set<VerificationValue>([
-  "verified",
-  "accepted-unverified",
-  "over-verified",
-  "nothing-to-verify",
-]);
-
-/** The closed Attribution vocabulary, the on-shortfall routing targets (ADR-0017). */
-const ATTRIBUTION_VALUES: ReadonlySet<string> = new Set<AttributionValue>([
-  "framing",
-  "conducting",
-  "verification",
-  "leverage",
-  "ai",
-  "environment",
-]);
-
-/** The closed convention-adherence vocabulary (ADR-0017). */
-const CONVENTION_ADHERENCE_VALUES: ReadonlySet<string> =
-  new Set<ConventionAdherenceValue>([
-    "followed",
-    "partially-followed",
-    "violated",
-  ]);
-
-const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
 
 /**
  * Judge one conversation. Resolves to a JudgeResult in every degraded case
@@ -150,7 +69,7 @@ export async function judgeConversation(
   // The single injected seam (spec section 3): omit config.llm and the
   // production default adapter over the engineer's configured Claude is
   // resolved from the environment; tests inject a deterministic stub.
-  const llm = config.llm ?? resolveDefaultJudgeModel();
+  const llm = config.llm ?? resolveJudgeModel().port;
   const rubricVersion = config.rubricVersion ?? RUBRIC_VERSION;
   const promptVersion = config.promptVersion ?? PROMPT_VERSION;
   const retryBudget = config.retryBudget ?? DEFAULT_RETRY_BUDGET;
@@ -169,47 +88,67 @@ export async function judgeConversation(
       });
     } catch {
       return failed(
-        { judgeModel: lastModel, rubricVersion, promptVersion },
+        provenanceOf(lastModel, rubricVersion, promptVersion, config),
         "llm-unavailable",
       );
     }
     lastModel = response.model;
 
-    const verdict = parseVerdict(response.text);
-    const invalidity = validityError(verdict);
-    if (invalidity !== undefined || verdict === undefined) {
-      parseError = invalidity ?? "the response was not a JSON object";
+    const outcome = assembleVerdict(response.text, input.chunks);
+    if (!outcome.ok) {
+      parseError = outcome.reason;
       continue;
     }
 
-    const provenance = {
-      judgeModel: response.model,
+    const provenance = provenanceOf(
+      response.model,
       rubricVersion,
       promptVersion,
-    };
-    const signals = buildSignals(verdict, input.chunks);
-    const narratives = buildNarratives(verdict, input.chunks);
+      config,
+    );
 
     // The verdict parsed, but no signal grounded on the conversation: the run
     // is honestly incomplete with the signals absent, never a fabricated value
     // (spec section 5). Any honest narrative the judge could still write stands.
-    if (signals.length === 0) {
+    if (outcome.signals.length === 0) {
       return {
         complete: false,
         provenance,
-        signals,
-        narratives,
+        signals: outcome.signals,
+        narratives: outcome.narratives,
         incompleteReason: "insufficient-evidence",
       };
     }
 
-    return { complete: true, provenance, signals, narratives };
+    return {
+      complete: true,
+      provenance,
+      signals: outcome.signals,
+      narratives: outcome.narratives,
+    };
   }
 
   return failed(
-    { judgeModel: lastModel, rubricVersion, promptVersion },
+    provenanceOf(lastModel, rubricVersion, promptVersion, config),
     "llm-unparseable",
   );
+}
+
+/** Build the run provenance, carrying the backend tag when the caller passed one. */
+function provenanceOf(
+  judgeModel: string,
+  rubricVersion: string,
+  promptVersion: string,
+  config: JudgeConfig,
+): JudgeResult["provenance"] {
+  return {
+    judgeModel,
+    rubricVersion,
+    promptVersion,
+    ...(config.judgeBackend === undefined
+      ? {}
+      : { judgeBackend: config.judgeBackend }),
+  };
 }
 
 /** Append the prior parse error to the user prompt so the model can repair. */
@@ -230,329 +169,4 @@ function failed(
     narratives: [],
     incompleteReason: reason,
   };
-}
-
-interface ParsedClaim {
-  readonly value?: unknown;
-  readonly prose?: unknown;
-  readonly anchors?: unknown;
-}
-
-interface ParsedVerdict {
-  readonly intent?: ParsedClaim;
-  readonly accomplishment?: ParsedClaim;
-  readonly "correction-cost"?: ParsedClaim;
-  readonly assessment?: ParsedClaim;
-  readonly engagement?: ParsedClaim;
-  readonly framing?: ParsedClaim;
-  readonly conducting?: ParsedClaim;
-  readonly verification?: ParsedClaim;
-  readonly effort?: ParsedClaim;
-  readonly attribution?: ParsedClaim;
-  readonly "convention-adherence"?: ParsedClaim;
-}
-
-/**
- * Parse the model's raw text into the loosely-typed verdict shape, tolerating
- * prose around the JSON object by extracting the outermost braces. Returns
- * undefined when no JSON object can be recovered.
- */
-function parseVerdict(text: string): ParsedVerdict | undefined {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end <= start) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return undefined;
-  }
-  return typeof parsed === "object" && parsed !== null
-    ? (parsed as ParsedVerdict)
-    : undefined;
-}
-
-/**
- * Why a parsed verdict is structurally unusable, or undefined when it is valid
- * enough to assemble. The prose-before-label rule (ADR-0008, ADR-0017) is
- * enforced here for either co-equal Outcome axis: an accomplishment or a
- * correction-cost present with no assessment prose is invalid, so the Judge
- * never constructs a done-ness or steering label that was not preceded by
- * reasoning.
- */
-function validityError(verdict: ParsedVerdict | undefined): string | undefined {
-  if (verdict === undefined) {
-    return "the response was not a JSON object";
-  }
-  const hasJudgmentLabel =
-    (verdict.accomplishment !== undefined &&
-      verdict.accomplishment.value !== undefined) ||
-    (verdict["correction-cost"] !== undefined &&
-      verdict["correction-cost"].value !== undefined);
-  const hasAssessment =
-    verdict.assessment !== undefined &&
-    typeof verdict.assessment.prose === "string";
-  if (hasJudgmentLabel && !hasAssessment) {
-    return "a judgment label was given without the required assessment prose, which must precede it";
-  }
-  return undefined;
-}
-
-/**
- * Resolve a claim's cited chunk ids to the real AnchorRefs of those chunks,
- * keeping only ids that map to a chunk in the set (the membership check). The
- * cited id is the chunk's lineSeq, which the prompt enumerated.
- */
-function resolveAnchors(
-  cited: unknown,
-  chunkByLineSeq: ReadonlyMap<number, ContentChunk>,
-): AnchorRef[] {
-  if (!Array.isArray(cited)) return [];
-  const anchors: AnchorRef[] = [];
-  for (const id of cited) {
-    if (typeof id !== "number") continue;
-    const chunk = chunkByLineSeq.get(id);
-    if (chunk !== undefined) anchors.push(chunk.anchor);
-  }
-  return anchors;
-}
-
-/**
- * Whether a verdict represents a shortfall (ADR-0017): the assignment fell short
- * of accomplished, or a live-arc quality signal sits at its poor floor. The
- * live-arc quality signals are `framing`, `conducting`, and `verification`; each
- * at its poor floor (`framing=underspecified`, `conducting=poorly-conducted`,
- * `verification` off the healthy middle at `accepted-unverified`/`over-verified`)
- * is a process-side shortfall even on an accomplished assignment. `effort` and
- * `convention-adherence` are not live-arc quality signals (cost and the leverage
- * convention half), so a high `effort` or a `violated` convention is not a
- * shortfall on its own. Attribution, the on-shortfall diagnostic, is emitted only
- * on a shortfall; on a clean success it is dropped with no write so the store
- * never persists a contradictory routing target.
- */
-function isShortfall(verdict: ParsedVerdict): boolean {
-  const accomplishment = verdict.accomplishment?.value;
-  if (accomplishment === "partial" || accomplishment === "not-accomplished") {
-    return true;
-  }
-  if (verdict.framing?.value === "underspecified") return true;
-  if (verdict.conducting?.value === "poorly-conducted") return true;
-  const verification = verdict.verification?.value;
-  return (
-    verification === "accepted-unverified" || verification === "over-verified"
-  );
-}
-
-function buildSignals(
-  verdict: ParsedVerdict,
-  chunks: ReadonlyArray<ContentChunk>,
-): JudgedSignal[] {
-  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
-  const signals: JudgedSignal[] = [];
-
-  if (
-    verdict.intent !== undefined &&
-    typeof verdict.intent.value === "string" &&
-    INTENT_VALUES.has(verdict.intent.value)
-  ) {
-    const anchors = resolveAnchors(verdict.intent.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "intent",
-        valueKind: "categorical",
-        value: verdict.intent.value as IntentValue,
-        anchors,
-      });
-    }
-  }
-
-  if (
-    verdict.accomplishment !== undefined &&
-    typeof verdict.accomplishment.value === "string" &&
-    ACCOMPLISHMENT_VALUES.has(verdict.accomplishment.value)
-  ) {
-    const anchors = resolveAnchors(
-      verdict.accomplishment.anchors,
-      chunkByLineSeq,
-    );
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "assignment",
-        assignmentId: WHOLE_CONVERSATION_ASSIGNMENT,
-        signalName: "accomplishment",
-        valueKind: "ordinal",
-        value: verdict.accomplishment.value as AccomplishmentValue,
-        anchors,
-      });
-    }
-  }
-
-  const correctionCost = verdict["correction-cost"];
-  if (
-    correctionCost !== undefined &&
-    typeof correctionCost.value === "string" &&
-    CORRECTION_COST_VALUES.has(correctionCost.value)
-  ) {
-    const anchors = resolveAnchors(correctionCost.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "assignment",
-        assignmentId: WHOLE_CONVERSATION_ASSIGNMENT,
-        signalName: "correction-cost",
-        valueKind: "ordinal",
-        value: correctionCost.value as CorrectionCostValue,
-        anchors,
-      });
-    }
-  }
-
-  if (
-    verdict.engagement !== undefined &&
-    typeof verdict.engagement.value === "string" &&
-    ENGAGEMENT_VALUES.has(verdict.engagement.value)
-  ) {
-    const anchors = resolveAnchors(verdict.engagement.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "engagement",
-        valueKind: "categorical",
-        value: verdict.engagement.value as EngagementValue,
-        anchors,
-      });
-    }
-  }
-
-  if (
-    verdict.framing !== undefined &&
-    typeof verdict.framing.value === "string" &&
-    FRAMING_VALUES.has(verdict.framing.value)
-  ) {
-    const anchors = resolveAnchors(verdict.framing.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "framing",
-        valueKind: "ordinal",
-        value: verdict.framing.value as FramingValue,
-        anchors,
-      });
-    }
-  }
-
-  if (
-    verdict.conducting !== undefined &&
-    typeof verdict.conducting.value === "string" &&
-    CONDUCTING_VALUES.has(verdict.conducting.value)
-  ) {
-    const anchors = resolveAnchors(verdict.conducting.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "conducting",
-        valueKind: "ordinal",
-        value: verdict.conducting.value as ConductingValue,
-        anchors,
-      });
-    }
-  }
-
-  if (
-    verdict.verification !== undefined &&
-    typeof verdict.verification.value === "string" &&
-    VERIFICATION_VALUES.has(verdict.verification.value)
-  ) {
-    const anchors = resolveAnchors(
-      verdict.verification.anchors,
-      chunkByLineSeq,
-    );
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "verification",
-        valueKind: "categorical",
-        value: verdict.verification.value as VerificationValue,
-        anchors,
-      });
-    }
-  }
-
-  if (
-    verdict.effort !== undefined &&
-    typeof verdict.effort.value === "string" &&
-    EFFORT_VALUES.has(verdict.effort.value)
-  ) {
-    const anchors = resolveAnchors(verdict.effort.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "effort",
-        valueKind: "ordinal",
-        value: verdict.effort.value as EffortValue,
-        anchors,
-      });
-    }
-  }
-
-  if (
-    isShortfall(verdict) &&
-    verdict.attribution !== undefined &&
-    typeof verdict.attribution.value === "string" &&
-    ATTRIBUTION_VALUES.has(verdict.attribution.value)
-  ) {
-    const anchors = resolveAnchors(verdict.attribution.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "attribution",
-        valueKind: "categorical",
-        value: verdict.attribution.value as AttributionValue,
-        anchors,
-      });
-    }
-  }
-
-  const conventionAdherence = verdict["convention-adherence"];
-  if (
-    conventionAdherence !== undefined &&
-    typeof conventionAdherence.value === "string" &&
-    CONVENTION_ADHERENCE_VALUES.has(conventionAdherence.value)
-  ) {
-    const anchors = resolveAnchors(conventionAdherence.anchors, chunkByLineSeq);
-    if (anchors.length > 0) {
-      signals.push({
-        scope: "conversation",
-        signalName: "convention-adherence",
-        valueKind: "categorical",
-        value: conventionAdherence.value as ConventionAdherenceValue,
-        anchors,
-      });
-    }
-  }
-
-  return signals;
-}
-
-function buildNarratives(
-  verdict: ParsedVerdict,
-  chunks: ReadonlyArray<ContentChunk>,
-): JudgedNarrative[] {
-  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
-  if (
-    verdict.assessment === undefined ||
-    typeof verdict.assessment.prose !== "string"
-  ) {
-    return [];
-  }
-  const anchors = resolveAnchors(verdict.assessment.anchors, chunkByLineSeq);
-  if (anchors.length === 0) return [];
-  return [
-    {
-      scope: "conversation",
-      narrativeType: "assessment",
-      prose: verdict.assessment.prose,
-      anchors,
-    },
-  ];
 }

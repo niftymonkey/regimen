@@ -191,6 +191,14 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
       ) WITHOUT ROWID;
     `,
   },
+  {
+    version: 8,
+    description:
+      "assessment_run.judge_backend provenance dimension (ADR-0008, judge-backends)",
+    up: `
+      ALTER TABLE assessment_run ADD COLUMN judge_backend TEXT;
+    `,
+  },
 ];
 
 /** Result of an event insert. `inserted: false` means an identical hash already existed. */

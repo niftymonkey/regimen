@@ -36,6 +36,8 @@ import {
   assess as feedbackAssess,
   assessAll as feedbackAssessAll,
   type BatchDecision,
+  emitPrompt as feedbackEmitPrompt,
+  recordVerdict as feedbackRecordVerdict,
   evidence as feedbackEvidence,
   install as feedbackInstall,
   installableHarnesses as feedbackInstallableHarnesses,
@@ -572,19 +574,72 @@ export function promptNextBatch(): Promise<BatchDecision> {
   });
 }
 
+/** The two-step usage the direct `--judge-via agent` invocation prints (exit 2). */
+const AGENT_USAGE =
+  "`--judge-via agent` names a two-step flow, not a backend to run here: `regimen assess --emit-prompt` prints the prompt for the current agent to judge, then pipe the verdict to `regimen assess --record-verdict`. The regimen-judgment skill drives this.\n";
+
+/** Read all of stdin as UTF-8 text, for the record-verdict envelope. */
+async function readStdin(): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Uint8Array);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 /**
- * Dispatch `regimen assess`. With `--all` it runs the bulk sweep facade over the
- * `list` filters (skip already-judged unless `--force`), in `--batch` batches,
- * pausing for the interactive {@link promptNextBatch}; otherwise it judges the
- * single current (or `--session`) conversation. The judge flags are shared.
+ * Dispatch `regimen assess`. The tier C flags route first: `--emit-prompt` prints
+ * the versioned judge prompt for the current agent to judge (no paid call);
+ * `--record-verdict` reads the agent's verdict from stdin and persists it; a bare
+ * `--judge-via agent` names that two-step flow and exits 2. With `--all` it runs
+ * the bulk sweep facade over the `list` filters (skip already-judged unless
+ * `--force`), in `--batch` batches, pausing for the interactive
+ * {@link promptNextBatch}; otherwise it judges the single current (or
+ * `--session`) conversation. The judge flags are shared.
  */
-function assess(argv: ReadonlyArray<string>): Promise<number> {
+async function assess(argv: ReadonlyArray<string>): Promise<number> {
   const judgeModel = flagValue(argv, "--judge-model");
   // --judge-via forces the judge backend; only the two known values pass
   // through, an unknown value falls through to the facade's auto-selection.
   const judgeViaRaw = flagValue(argv, "--judge-via");
   const judgeVia =
     judgeViaRaw === "cli" || judgeViaRaw === "api" ? judgeViaRaw : undefined;
+  const session = flagValue(argv, "--session");
+
+  // Tier C, front half: emit the versioned prompt, write no run, no paid call.
+  if (argv.includes("--emit-prompt")) {
+    return feedbackEmitPrompt({
+      dataDir: dataDir(),
+      ...(session === undefined ? {} : { session }),
+    });
+  }
+  // Tier C, back half: read the agent's verdict envelope from stdin and record.
+  if (argv.includes("--record-verdict")) {
+    // An interactive stdin means nothing was piped: fail fast with a usage
+    // hint (mirroring promptNextBatch's non-TTY posture) rather than block
+    // forever waiting on input that is not coming.
+    if (process.stdin.isTTY) {
+      process.stderr.write(
+        "no verdict on stdin: pipe the verdict envelope in, e.g. `... | regimen assess --record-verdict`\n",
+      );
+      return 2;
+    }
+    const input = await readStdin();
+    return feedbackRecordVerdict({
+      dataDir: dataDir(),
+      input,
+      ...(session === undefined ? {} : { session }),
+    });
+  }
+  // `agent` is not an in-process backend the resolver can return (the process
+  // cannot await its own calling agent): it names the two-step emit/record flow,
+  // so used directly it prints the usage and exits 2, distinct from a completed
+  // judgment (0) and a recorder rejection (1).
+  if (judgeViaRaw === "agent") {
+    process.stderr.write(AGENT_USAGE);
+    return 2;
+  }
+
   if (argv.includes("--all")) {
     const filter: SessionFilter = {
       ...optionalFilter(argv, "--harness", "harness"),
@@ -603,7 +658,6 @@ function assess(argv: ReadonlyArray<string>): Promise<number> {
       decideNextBatch: promptNextBatch,
     });
   }
-  const session = flagValue(argv, "--session");
   return feedbackAssess({
     dataDir: dataDir(),
     ...(session === undefined ? {} : { session }),
@@ -671,6 +725,8 @@ Read & judge:
   evidence                               quantitative digest of the current session (free, deterministic)
   assess                                 judged verdict of the current session (paid LLM call, writes a verdict)
   assess --all [filters] [--batch <n>] [--force]   judge many sessions in one sweep (paid; batched, resumable)
+  assess --emit-prompt                   print the judge prompt for the current agent to judge (no paid call)
+  assess --record-verdict                read the agent's verdict from stdin and record it
   list [--harness <h>] [--since <when>] [--json]   enumerate captured sessions
 
 Flags:
@@ -679,6 +735,8 @@ Flags:
   --all                           assess: judge every matching session, not just the current one
   --batch <n>                     assess --all: sessions per batch before the continue/all/quit prompt (default 10)
   --force                         assess --all: re-judge sessions already judged
+  --judge-via <api|cli|agent>     assess: force the judge backend (agent = the emit/record flow)
+  --judge-model <id>              assess: override the judge model
 
 The harness is auto-detected per invocation, or set REGIMEN_HARNESS.
 `;
