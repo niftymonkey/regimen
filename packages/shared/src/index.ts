@@ -8,7 +8,13 @@
  */
 export { HARNESSES, asHarness, type Harness } from "./harness.ts";
 export { traceIdFor } from "./trace.ts";
-export { resolveDataDir, dataDir, bufferDir } from "./data-dir.ts";
+export {
+  resolveDataDir,
+  dataDir,
+  bufferDir,
+  resolveConfigDir,
+  configDir,
+} from "./data-dir.ts";
 export {
   HARNESS_CONTRACTS,
   harnessContract,

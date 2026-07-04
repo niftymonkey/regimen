@@ -52,6 +52,8 @@ Installing Regimen is one clone and one command. Regimen brings the observabilit
 
 Everything Regimen captures stays in a local store on your machine. The key above is only for the judgment step's LLM call, to your own model provider, never to Regimen.
 
+Rather than export `ANTHROPIC_API_KEY` or the `REGIMEN_JUDGE_*` family in your shell profile, you can set them once in `~/.config/regimen/env` (`KEY=value` lines, `#` comments allowed), a file Regimen loads on every run. See `plans/judge-backends-design.md` for the full `REGIMEN_JUDGE_*` family.
+
 ### Clone and install
 
 ```bash

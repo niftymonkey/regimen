@@ -31,7 +31,12 @@
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { dataDir, resolveHarnessFromEnvironment } from "@regimen/shared";
+import {
+  configDir,
+  dataDir,
+  resolveHarnessFromEnvironment,
+} from "@regimen/shared";
+import { loadEnvFile } from "./env-file.ts";
 import {
   assess as feedbackAssess,
   assessAll as feedbackAssessAll,
@@ -863,6 +868,12 @@ enumerate captured sessions
  * returns 0 without opening a store, resolving a judge, or spending anything.
  */
 export function runCli(argv: ReadonlyArray<string>): number | Promise<number> {
+  try {
+    loadEnvFile(configDir());
+  } catch {
+    // A config file must never break the CLI; an unresolvable config dir
+    // (e.g. no HOME/APPDATA in the environment) is a silent no-op here too.
+  }
   const command = argv[0];
   if (command === undefined) {
     process.stderr.write(usage());
