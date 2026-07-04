@@ -112,6 +112,61 @@ test("the --judge-model flag wins over REGIMEN_JUDGE_MODEL", async () => {
   expect(sent.model).toBe("flag-model");
 });
 
+test("REGIMEN_JUDGE_BASE_URL plus REGIMEN_JUDGE_MODEL with no key selects the keyless openai-compat backend", async () => {
+  const captured: CapturedRequest[] = [];
+  const resolved = resolveJudgeModel({
+    env: {
+      REGIMEN_JUDGE_BASE_URL: "http://localhost:11434/v1",
+      REGIMEN_JUDGE_MODEL: "llama3",
+    },
+    fetch: mockFetch(captured, CHAT_RESPONSE),
+  });
+  expect(resolved.backend).toBe("api");
+
+  await resolved.port.complete({ system: "s", user: "u" });
+  const call = captured[0]!;
+  expect(call.url).toBe("http://localhost:11434/v1/chat/completions");
+  // Keyless: no Authorization header is sent to the local endpoint.
+  const headers = call.init.headers as Record<string, string>;
+  expect(headers["authorization"]).toBeUndefined();
+  const sent = JSON.parse(call.init.body as string);
+  expect(sent.model).toBe("llama3");
+});
+
+test("the keyless deliberate REGIMEN_JUDGE_* configuration outranks an ambient ANTHROPIC_API_KEY", async () => {
+  const captured: CapturedRequest[] = [];
+  const resolved = resolveJudgeModel({
+    env: {
+      REGIMEN_JUDGE_BASE_URL: "http://localhost:11434/v1",
+      REGIMEN_JUDGE_MODEL: "llama3",
+      ANTHROPIC_API_KEY: "sk-ant",
+    },
+    fetch: mockFetch(captured, CHAT_RESPONSE),
+  });
+  await resolved.port.complete({ system: "s", user: "u" });
+  expect(captured[0]!.url).toBe("http://localhost:11434/v1/chat/completions");
+});
+
+test("REGIMEN_JUDGE_BASE_URL set with no model named throws the actionable model error", () => {
+  expect(() =>
+    resolveJudgeModel({
+      env: { REGIMEN_JUDGE_BASE_URL: "http://localhost:11434/v1" },
+    }),
+  ).toThrow(/REGIMEN_JUDGE_MODEL/);
+});
+
+test("the --judge-model flag satisfies the keyless base-url configuration", async () => {
+  const captured: CapturedRequest[] = [];
+  const resolved = resolveJudgeModel({
+    env: { REGIMEN_JUDGE_BASE_URL: "http://localhost:11434/v1" },
+    model: "flag-model",
+    fetch: mockFetch(captured, CHAT_RESPONSE),
+  });
+  await resolved.port.complete({ system: "s", user: "u" });
+  const sent = JSON.parse(captured[0]!.init.body as string);
+  expect(sent.model).toBe("flag-model");
+});
+
 test("ANTHROPIC_API_KEY (no REGIMEN_JUDGE_API_KEY) selects the anthropic backend, tagged api", async () => {
   const captured: CapturedRequest[] = [];
   const resolved = resolveJudgeModel({

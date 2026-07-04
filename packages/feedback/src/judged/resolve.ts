@@ -8,10 +8,10 @@
  * self-reported). Lifted out of anthropic-adapter.ts, where it was a locality
  * lie: it names three adapters, not one.
  *
- * Precedence for auto-selection (no --judge-via): a deliberate
- * REGIMEN_JUDGE_API_KEY (the generic backend) outranks an ambient
- * ANTHROPIC_API_KEY (often set for other tooling), which outranks the local
- * `claude` CLI. With none available it throws an actionable error naming all
+ * Precedence for auto-selection (no --judge-via): any deliberate
+ * REGIMEN_JUDGE_* configuration (a key, or a keyless base URL such as a local
+ * Ollama, selecting the generic backend) outranks an ambient ANTHROPIC_API_KEY
+ * (often set for other tooling), which outranks the local `claude` CLI. With none available it throws an actionable error naming all
  * three remedies plus the zero-key agent path. `--judge-via` forces a backend;
  * the `--judge-model` flag wins over env on the model.
  */
@@ -80,18 +80,26 @@ export function resolveJudgeModel(
   const env = options.env ?? process.env;
   const regimenKey = nonEmpty(env.REGIMEN_JUDGE_API_KEY);
   const anthropicKey = nonEmpty(env.ANTHROPIC_API_KEY);
+  // Deliberate generic-backend configuration: a key, or a keyless endpoint
+  // (base URL, e.g. a local Ollama or LM Studio). Either is the engineer saying
+  // "judge with this", so it outranks the ambient Anthropic key. A model alone
+  // is not a backend selection: it stays the model override for whichever
+  // backend the rest of the environment selects.
+  const genericConfigured =
+    regimenKey !== undefined ||
+    nonEmpty(env.REGIMEN_JUDGE_BASE_URL) !== undefined;
   const claudeOnPath =
     options.claudeOnPath ??
     (() => Bun.which("claude", { PATH: env.PATH ?? "" }) !== null);
 
   if (options.judgeVia === "cli") return cliBackend(options, env);
   if (options.judgeVia === "api") {
-    return regimenKey !== undefined
+    return genericConfigured
       ? genericBackend(options, env, regimenKey)
       : anthropicBackend(options, env, anthropicKey);
   }
 
-  if (regimenKey !== undefined) return genericBackend(options, env, regimenKey);
+  if (genericConfigured) return genericBackend(options, env, regimenKey);
   if (anthropicKey !== undefined) {
     return anthropicBackend(options, env, anthropicKey);
   }
@@ -99,16 +107,21 @@ export function resolveJudgeModel(
   throw new Error(NO_BACKEND_ERROR);
 }
 
-/** The generic OpenAI-compatible backend; the model is required (no universal default). */
+/**
+ * The generic OpenAI-compatible backend; the model is required (no universal
+ * default). The key is optional: a keyless endpoint (REGIMEN_JUDGE_BASE_URL
+ * without REGIMEN_JUDGE_API_KEY, e.g. a local Ollama) is first-class and the
+ * adapter sends no Authorization header.
+ */
 function genericBackend(
   options: ResolveJudgeModelOptions,
   env: Record<string, string | undefined>,
-  apiKey: string,
+  apiKey: string | undefined,
 ): ResolvedJudge {
   const model = options.model ?? nonEmpty(env.REGIMEN_JUDGE_MODEL);
   if (model === undefined) {
     throw new Error(
-      `REGIMEN_JUDGE_API_KEY is set but no judge model is named; set REGIMEN_JUDGE_MODEL (e.g. a free OpenRouter model like "${FREE_MODEL_EXAMPLE}") or pass --judge-model`,
+      `the judge endpoint is configured (REGIMEN_JUDGE_API_KEY or REGIMEN_JUDGE_BASE_URL) but no judge model is named; set REGIMEN_JUDGE_MODEL (e.g. a free OpenRouter model like "${FREE_MODEL_EXAMPLE}") or pass --judge-model`,
     );
   }
   const baseUrl =
@@ -116,7 +129,7 @@ function genericBackend(
   return {
     backend: "api",
     port: openAiCompatJudgeModel({
-      apiKey,
+      ...(apiKey === undefined ? {} : { apiKey }),
       model,
       baseUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
