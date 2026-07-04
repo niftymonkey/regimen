@@ -59,6 +59,7 @@ import {
 import { clearEnabled, isEnabled, setEnabled } from "../enabled-flag.ts";
 import { readEvidenceDigest, unknownDigest } from "../evidence.ts";
 import {
+  countUnassessed,
   listSessions,
   resolveSessionId,
   type SessionFilter,
@@ -1728,6 +1729,7 @@ interface Status {
   daemon: "not_running" | { pid: number; alive: boolean };
   lastEvent: string | null;
   backlogBytes: number;
+  unassessed: number;
 }
 
 function readStatus(dir: string): Status {
@@ -1748,6 +1750,7 @@ function readStatus(dir: string): Status {
   }
 
   let lastEvent: string | null = null;
+  let unassessed = 0;
   const storePath = join(dir, "feedback.db");
   if (existsSync(storePath)) {
     const db = new Database(storePath, { readonly: true });
@@ -1756,6 +1759,7 @@ function readStatus(dir: string): Status {
         .prepare("SELECT MAX(timestamp) AS t FROM events")
         .get() as { t: string | null } | null;
       lastEvent = row?.t ?? null;
+      unassessed = countUnassessed(db);
     } finally {
       db.close();
     }
@@ -1769,7 +1773,13 @@ function readStatus(dir: string): Status {
     }
   }
 
-  return { enabled: isEnabled(dir), daemon, lastEvent, backlogBytes };
+  return {
+    enabled: isEnabled(dir),
+    daemon,
+    lastEvent,
+    backlogBytes,
+    unassessed,
+  };
 }
 
 function formatStatus(s: Status): string {
@@ -1790,6 +1800,7 @@ function formatStatus(s: Status): string {
     `daemon: ${daemonLine}`,
     `last event: ${lastEventLine}`,
     `backlog: ${backlogLine}`,
+    `awaiting assessment: ${s.unassessed} conversations`,
     "",
   ].join("\n");
 }
