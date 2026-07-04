@@ -17,6 +17,7 @@ import type { ContentChunk } from "../loader/reader-types.ts";
 import type { HarnessSupport } from "../harness/support.ts";
 import type { Store } from "../store.ts";
 import type { EngineerSetup, SetupSource } from "./setup.ts";
+import { writeSetupSnapshot } from "./setup-snapshot.ts";
 
 export interface PrepareConversationOptions {
   /** The harness support bundle (resolver + reader) resolved by the caller. */
@@ -83,10 +84,21 @@ export function prepareConversation(
     store.insertEvent(event);
   }
 
-  const setup =
-    read.content.length > 0
-      ? resolveSetup(options.setupSource, read.events, now)
-      : undefined;
+  let setup: EngineerSetup | undefined;
+  if (read.content.length > 0) {
+    const asOf = conversationAsOf(read.events, now);
+    setup = resolveSetup(options.setupSource, read.events, asOf);
+    // The persisted, time-anchored echo of the setup the judge just reasoned
+    // against (section 3.2 of the taxonomy redesign): written only when a
+    // setup actually resolved, so a setup-blind pass (no source injected, or
+    // the source discovers nothing) leaves no row. Shared here so both assess
+    // and the emit half of the agent seam get the write exactly once, since
+    // both compose this same front half; the record half deliberately injects
+    // no setup source and so never reaches this branch.
+    if (setup !== undefined) {
+      writeSetupSnapshot(store, sessionId, asOf.toISOString(), setup);
+    }
+  }
 
   return { content: read.content, events: read.events, setup };
 }
@@ -103,12 +115,12 @@ export function prepareConversation(
 function resolveSetup(
   source: SetupSource | undefined,
   events: ReadonlyArray<RegimenEvent>,
-  now: () => Date,
+  asOf: Date,
 ): EngineerSetup | undefined {
   if (source === undefined) return undefined;
   return source.resolve({
     cwd: conversationCwd(events),
-    asOf: conversationAsOf(events, now),
+    asOf,
   });
 }
 
