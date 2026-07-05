@@ -14,7 +14,7 @@ Write-Output "ExecutionPolicy: $(Get-ExecutionPolicy)"
 
 Write-Output ""
 Write-Output "=== tools on PATH ==="
-foreach ($t in 'bun', 'git', 'node', 'npm', 'npx', 'jq', 'claude', 'codex', 'copilot', 'gemini', 'schtasks') {
+foreach ($t in 'bun', 'git', 'node', 'npm', 'npx', 'claude', 'codex', 'copilot', 'gemini', 'schtasks') {
   $c = Get-Command $t -ErrorAction SilentlyContinue
   if ($c) { Write-Output ("{0,-9}: {1}" -f $t, $c.Source) }
   else { Write-Output ("{0,-9}: NOT FOUND" -f $t) }

@@ -6,22 +6,43 @@ AI's value in software engineering is conditional, not intrinsic. What separates
 
 Today that process runs on feel. You carry impressions of whether a session went well, why, and whether a change helped, none of it grounded in data. Regimen turns the feel into data: observability for your AI-assisted engineering, portable across any agent CLI and any model.
 
-## Feedback at the center, two levers in response
+The job it is hired for: tell me how well my AI work is actually going, why, and whether the changes I make to improve it are working, so I stop leaving value on the table and stop guessing.
 
-**Feedback** is the center: the observability that turns the feel into data. It observes how the work actually went and surfaces, plainly and comparably, where the interaction is strong and where it is weak. The question it answers about each thing you asked for: did the agent do what you wanted, and how much correction did that take? It measures the conversation, never your code, and never renders a verdict on you. What it surfaces is specific and grounded in what actually happened, never vague coaching like "get better at prompting."
+## The four things it helps you improve
 
-> **Your captured conversations stay on your machine.** This is telemetry on your own conversations, for you, kept in a local store. Regimen collects nothing and sends none of it anywhere. This is not a no-network promise: the judgment step calls an LLM at the same model provider you already use, and the optional Guidance skill search hits a public directory. Neither carries your captured data, and neither goes to Regimen.
+Every one of these is something you control.
+
+1. **How you set the work up.** Whether a session dragged because the goal, scope, or context was not clear up front, and how to state it more clearly next time, or a bit of setup that front-loads that clarity for you.
+2. **How you run it.** Whether you are decomposing, delegating, and knowing when to step in or reset, versus letting a run spiral, micromanaging it, or drowning your own context. And when the same thing keeps happening, something that runs that kind of work the right way for you.
+3. **How you check what comes back.** Whether you actually verified the AI's output or waved it through. This is the one you cannot see in yourself, because you cannot notice a check you never made. And where the check can be mechanized, something that runs it for you before you accept.
+4. **The durable setup you build around all of it** (your skills, rules, hooks). Whether it is being used, working, missing, stale, fighting itself, or costing more than it saves. And if you are just starting: what setup to adopt that you did not know existed.
+
+You can ask this about the conversation you're in or the trend across many, and check whether it holds across model and harness. When something goes worse than it should have, Regimen tells you why, your setup, the AI, or your tooling, so you fix the right thing. It surfaces the pattern, names the kind of fix, and offers to help you build it, but it never makes the move. You decide, you act.
+
+## Your data stays on your machine
+
+Your telemetry stays in a local store on your machine. Nothing goes to a Regimen server, there is none. The one exception is assessment: to judge your work, the captured data for the conversations being assessed is sent to the same LLM you are already using.
+
+## How it works: Feedback, and two levers
+
+**Feedback** is the center: the observability that turns the feel into data. It observes how the work actually went and surfaces, plainly and comparably, where the interaction is strong and where it is weak. The question it answers about each thing you asked for: did the agent do what you wanted, and how much correction did that take? What it surfaces is specific and grounded in what actually happened, never vague coaching like "get better at prompting."
 
 In response to what Feedback shows, you reach for one of two levers:
 
-- **Guidance** offers the agent something to work with: a skill to follow, a line in `CLAUDE.md` or `AGENTS.md`, an MCP server or CLI it can use. It asks.
-- **Enforcement** makes an outcome deterministic, taking the choice away from the model: a hook or gate, a permission boundary, a CI or pre-merge check, a sandbox, schema-constrained output. It compels.
+- **Guidance** offers the agent something to work with: a skill to follow, a line in `CLAUDE.md` or `AGENTS.md`, an MCP server or CLI it can use. It **ASKS** the agent to work a particular way.
+- **Enforcement** makes an outcome deterministic, taking the choice away from the model: a hook or gate, a permission boundary, a CI or pre-merge check, a sandbox, schema-constrained output. It **COMPELS**, so the outcome does not depend on the model.
 
-The levers are categories of response, not a catalog Regimen ships. Their contents are yours, drawn from what your own Feedback surfaces and often specific to you and your harness. Regimen ships almost none of it; its real work is to read what happened, point you at the specific move worth making in either category, and show whether it helped.
+The levers are categories of response, not a catalog Regimen ships. Their contents are yours, drawn from what your own Feedback surfaces and often specific to you and your harness. Regimen ships almost none of it; its real work is to read what happened, point you at the specific move worth making, and show whether it helped.
 
-## The loop: see, act, validate
+## The loop, in practice
 
-You run this loop in conversation with your agent, at whatever scale fits: the conversation you're in, or the trend across all of them.
+You never open a dashboard. You ask your agent a plain question, in whatever tool you happen to be in, and it does the reading for you.
+
+> **You:** how have my sessions gone this week?
+>
+> **Agent:** Pretty good week: 23 conversations, two thirds got where they were going. The catch is four of the finished ones needed heavy correction, and they share a shape: refactors where the goal was stated but the boundaries were not. Want me to draft a short standing note that pins the do-not-touch surface before any refactor starts? You choose whether to install it.
+
+It goes like this. You ask how things are going, and the agent reads what actually happened and tells you the pattern in plain terms, not a score. If something is worth fixing, it comes back as an offer: a quick steer for the session you're in, or a lasting change, a skill or a gate, that holds for every conversation after. You decide, it acts with you. Then it follows up on its own, so whether the change worked never depends on you remembering to ask again.
 
 ```mermaid
 flowchart LR 
@@ -35,60 +56,46 @@ flowchart LR
     Lever ==>|"shapes every conversation after"| Conv
 ```
 
-- **See.** You ask how things are going, about the conversation you're in or the trend across many, and your agent reads Feedback (the evidence and the judged read) and tells you the pattern.
-- **Act.** You respond however the pattern warrants: a quick steer to the work you're in, or a lever (a skill that asks, a gate that compels) that holds for every conversation after. Both are on the table at either scale; spotting something once in a long session is reason enough to build something lasting.
-- **Validate.** You ask again later, and Feedback shows whether it moved, whether you're checking this session or the trend.
+## Works with
+
+Regimen works with Claude Code, Codex, Copilot, and Gemini, and captures across all of them into one local store. It runs on Linux, macOS, and native Windows.
 
 ## Install
 
-Installing Regimen is one clone and one command. Regimen brings the observability; the skills and gates are yours to bring or build.
-
-*Where this is today: per-conversation reads (evidence and judgment) and the slice-able history are live; the over-time synthesis and Regimen's own suggestions of what to build next are still being built.*
-
 ### Prerequisites (only if missing)
 
-- Bun: `curl -fsSL https://bun.sh/install | bash`
-- `ANTHROPIC_API_KEY` exported, for the `regimen-judgment` skill
-
-Everything Regimen captures stays in a local store on your machine. The key above is only for the judgment step's LLM call, to your own model provider, never to Regimen.
-
-Rather than export `ANTHROPIC_API_KEY` or the `REGIMEN_JUDGE_*` family in your shell profile, you can set them once in `~/.config/regimen/env` (`KEY=value` lines, `#` comments allowed), a file Regimen loads on every run. See `plans/judge-backends-design.md` for the full `REGIMEN_JUDGE_*` family.
+- [Bun](https://bun.com/docs/installation)
 
 ### Clone and install
+
+**macOS / Linux**
 
 ```bash
 git clone https://github.com/niftymonkey/regimen.git
 cd regimen && ./install.sh
 ```
 
-`./install.sh` installs workspace dependencies, runs `regimen install`, and links the `regimen` command (`bun link`) so it becomes a permanent bare command. After that first run, `regimen` works from anywhere: `regimen status` shows what is installed, `regimen update` re-resolves after the clone moves or upgrades, `regimen install` adds another harness, and `regimen uninstall` removes it.
+**Windows (PowerShell)**
 
-### Guidance skills
+```powershell
+git clone https://github.com/niftymonkey/regimen.git
+cd regimen; .\install.ps1
+```
 
-Skills are one of the most common forms of Guidance, and the one with a quick install path. They come from wherever suits you: the built-ins your harness already ships, collections you install with the [`skills`](https://github.com/vercel-labs/skills) CLI, or ones you build yourself with the LLM's help. Regimen ships none of them. What it adds is the read from Feedback that points you at which skill is worth building or finding next.
+Two Windows notes. If your agent CLIs run inside WSL, install there with `./install.sh` instead; use `install.ps1` only when the CLIs run natively in Windows. If PowerShell blocks the script ("running scripts is disabled"), run it as `powershell -ExecutionPolicy Bypass -File .\install.ps1`. If capture later does not fire, `check-windows-env.ps1` is a read-only check of whether your environment is set up for it.
 
-A few examples of what a Guidance skill can be:
-
-From `mattpocock/skills`:
-- `domain-modeling`: pin down a project's domain language and the decisions behind it.
-- `prototype`: a throwaway build to flesh out a design before you commit.
-- `tdd`: drive features and fixes test-first.
-
-From `niftymonkey/skills`:
-- `architect-deep`: sketch a module's architecture with deep-module thinking before any code.
-- `externalize`: continuously write hard-won context to a handoff file so it survives a full context window.
-- `work-router`: decide whether a unit of work stays in the conversation or routes off-thread. Its own design called for "an automated feedback store," the gap Regimen fills.
-
-Browse a collection with `npx skills@latest add <owner>/skills --list` and take what fits.
+The installer installs workspace dependencies, runs `regimen install`, and links the `regimen` command (`bun link`) so it becomes a permanent bare command. After that first run, `regimen` works from anywhere: `regimen status` shows what is installed, `regimen update` re-resolves after the clone moves or upgrades, `regimen install` adds another harness, and `regimen uninstall` removes it.
 
 ### Verify
 
 ```bash
-regimen status         # version, installed harnesses, and daemon health
-regimen daemon status  # daemon running, recent last event
-regimen evidence       # read your current session's evidence back
+regimen status   # installed version and harnesses, plus daemon health
 ```
 
 ## Learn more
 
 See [`PRD.md`](PRD.md) for what Regimen does and for whom, [`ARCHITECTURE.md`](ARCHITECTURE.md) for how it is structured, [`docs/plan.md`](docs/plan.md) for the implementation phases, and [`docs/adr/`](docs/adr/) for the decisions behind it.
+
+## License
+
+Regimen is licensed under the Apache License 2.0. See [`LICENSE`](LICENSE).

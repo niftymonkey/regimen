@@ -2,15 +2,14 @@
 # Thin bootstrap for the Regimen installer on Windows, the PowerShell twin of
 # install.sh. No logic lives here: it installs workspace dependencies, then hands
 # off to `regimen install`, the unified orchestrator (the @regimen/cli package)
-# that dispatches to each instrument's install logic in-process (capture first,
-# then the gates) and self-links the `regimen` bin so it becomes a bare command
-# after the first run. Any flags pass straight through, for example:
+# that dispatches to each pillar's install logic in-process (capture first, then
+# the enforcement and guidance operator skills) and self-links the `regimen` bin
+# so it becomes a bare command after the first run. Any flags pass straight
+# through, for example:
 #
 #   .\install.ps1                                          install for the env-resolved harness
 #   .\install.ps1 --harnesses claude --harnesses codex     several harnesses (repeat the flag)
 #   .\install.ps1 --all                                    every harness
-#   .\install.ps1 --no-gates                               capture only, no enforcement gates
-#   .\install.ps1 --gate rm-rf                             only the cross-platform rm-rf gate
 #   .\install.ps1 --dry-run                                preview every step, change nothing
 #
 # Run it from inside the clone. For Gemini's per-workspace install, use the bare
