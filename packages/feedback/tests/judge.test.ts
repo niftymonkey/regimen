@@ -651,15 +651,21 @@ test("a cited anchor not in the chunk set is dropped; a claim left with zero anc
 function scriptedPort(
   texts: string[],
   model = "claude-opus-4-8",
-): JudgeModelPort & { calls: () => number } {
+): JudgeModelPort & {
+  calls: () => number;
+  lastRequest: () => JudgeModelRequest | undefined;
+} {
   let i = 0;
+  let last: JudgeModelRequest | undefined;
   return {
-    complete(): Promise<JudgeModelResponse> {
+    complete(request: JudgeModelRequest): Promise<JudgeModelResponse> {
+      last = request;
       const text = texts[Math.min(i, texts.length - 1)]!;
       i += 1;
       return Promise.resolve({ text, model });
     },
     calls: () => i,
+    lastRequest: () => last,
   };
 }
 
@@ -762,6 +768,98 @@ test("a parseable verdict that grounds no signal is an insufficient-evidence run
   expect(result.signals.length).toBe(0);
   // The honest narrative may still stand when the judge can say something.
   expect(result.narratives.length).toBe(1);
+});
+
+/** A well-formed verdict whose assessment cites only a missing id (99). Its
+ * signals still resolve, so the run would be complete; only the narrative is
+ * under-anchored, driving the anchor repair-retry. */
+const UNDER_ANCHORED_ASSESSMENT = JSON.stringify({
+  intent: { value: "test-writing", anchors: [0] },
+  assessment: {
+    prose: "The engineer asked; the agent delivered.",
+    anchors: [99],
+  },
+  accomplishment: { value: "accomplished", anchors: [1] },
+});
+
+/** A verdict where every valued signal cites only a missing id (99): all signals
+ * drop, so absent a repair the run is insufficient-evidence. The assessment is
+ * well-anchored so the narrative stands. */
+const UNDER_ANCHORED_SIGNALS = JSON.stringify({
+  intent: { value: "test-writing", anchors: [99] },
+  assessment: {
+    prose: "The engineer asked; the agent delivered.",
+    anchors: [0],
+  },
+  accomplishment: { value: "accomplished", anchors: [99] },
+});
+
+test("a fully-anchored verdict is accepted on the first call with no anchor repair-retry", async () => {
+  const port = scriptedPort([WELL_FORMED]);
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: port, retryBudget: 2 },
+  );
+  expect(port.calls()).toBe(1);
+  expect(result.complete).toBe(true);
+});
+
+test("an under-anchored assessment drives one repair-retry that recovers the anchors", async () => {
+  const port = scriptedPort([UNDER_ANCHORED_ASSESSMENT, WELL_FORMED]);
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: port, retryBudget: 2 },
+  );
+  // One initial call plus one anchor repair; the second response's anchors stuck.
+  expect(port.calls()).toBe(2);
+  expect(result.complete).toBe(true);
+  expect(result.narratives).toHaveLength(1);
+  expect(result.narratives[0]!.anchors).toEqual([
+    { eventHash: "a".repeat(64) },
+    { eventHash: "b".repeat(64) },
+  ]);
+});
+
+test("the anchor repair message tells the model its cited ids missed and to cite only real ids", async () => {
+  const port = scriptedPort([UNDER_ANCHORED_ASSESSMENT, WELL_FORMED]);
+  await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: port, retryBudget: 2 },
+  );
+  const secondUser = port.lastRequest()!.user;
+  expect(secondUser).toContain("assessment");
+  expect(secondUser.toLowerCase()).toContain("cite only");
+});
+
+test("under-anchored anchors that stay bad after the one retry fall back to graceful degradation, keeping the prose", async () => {
+  const port = scriptedPort([
+    UNDER_ANCHORED_ASSESSMENT,
+    UNDER_ANCHORED_ASSESSMENT,
+  ]);
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: port, retryBudget: 2 },
+  );
+  // Exactly one extra call: the anchor repair does not loop.
+  expect(port.calls()).toBe(2);
+  // The signals still resolved, so the run is complete; the prose is kept with
+  // an empty anchor array rather than discarded.
+  expect(result.complete).toBe(true);
+  expect(result.narratives).toHaveLength(1);
+  expect(result.narratives[0]!.prose).toContain("the agent delivered");
+  expect(result.narratives[0]!.anchors).toEqual([]);
+});
+
+test("all-signals-under-anchored drives a repair-retry that rescues the run from insufficient-evidence", async () => {
+  const port = scriptedPort([UNDER_ANCHORED_SIGNALS, WELL_FORMED]);
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: port, retryBudget: 2 },
+  );
+  expect(port.calls()).toBe(2);
+  expect(result.complete).toBe(true);
+  expect(result.incompleteReason).toBeUndefined();
+  expect(result.signals.length).toBe(2);
 });
 
 test("omitting config.llm resolves the default judge adapter (no network here)", async () => {

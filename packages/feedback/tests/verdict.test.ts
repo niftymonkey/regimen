@@ -31,6 +31,17 @@ const CHUNKS: ContentChunk[] = [
   }),
 ];
 
+/** A five-chunk conversation (ids 0..4) for the forgiving-resolution tests,
+ * which need room around a real id to exercise range expansion and near-miss
+ * snapping without colliding with the two-chunk CHUNKS fixture. */
+const FIVE_CHUNKS: ContentChunk[] = [
+  chunk(0, "human_prompt", "zero", { eventHash: "0".repeat(64) }),
+  chunk(1, "assistant_answer", "one", { eventHash: "1".repeat(64) }),
+  chunk(2, "human_prompt", "two", { eventHash: "2".repeat(64) }),
+  chunk(3, "assistant_answer", "three", { eventHash: "3".repeat(64) }),
+  chunk(4, "human_prompt", "four", { eventHash: "4".repeat(64) }),
+];
+
 const WELL_FORMED = JSON.stringify({
   intent: { value: "test-writing", anchors: [0] },
   assessment: {
@@ -58,6 +69,57 @@ test("a well-formed raw verdict assembles into anchored signals and the narrativ
   expect(outcome.narratives[0]!.narrativeType).toBe("assessment");
 });
 
+test("a fully-anchored verdict reports no under-anchored fields", () => {
+  const outcome = assembleVerdict(WELL_FORMED, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).toEqual([]);
+});
+
+test("a verdict whose assessment cites only missing ids reports assessment as under-anchored", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "The agent shipped it.", anchors: [99] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).toContain("assessment");
+});
+
+test("a verdict whose valued signal cites only missing ids reports that signal as under-anchored", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    // accomplishment is a valid value but every cited id misses.
+    accomplishment: { value: "accomplished", anchors: [99] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).toContain("accomplishment");
+  // The under-anchored signal is still dropped from the assembled signals.
+  expect(
+    outcome.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeUndefined();
+});
+
+test("attribution under-anchored on a non-shortfall is not reported (it would not be emitted anyway)", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    // Not a shortfall, so attribution is dropped regardless of anchors; a retry
+    // would not recover it, so it must not be reported as under-anchored.
+    attribution: { value: "framing", anchors: [99] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).not.toContain("attribution");
+});
+
 test("anchor ids emitted as numeric strings resolve to their chunks (model formatting variance)", () => {
   // Some judge models (observed: a Claude model through the OpenAI-compat
   // endpoint) emit the cited chunk ids as JSON strings ("3") rather than
@@ -81,6 +143,112 @@ test("anchor ids emitted as numeric strings resolve to their chunks (model forma
   expect(outcome.narratives).toHaveLength(1);
 });
 
+test("a hyphenated range string expands to every valid chunk id it spans", () => {
+  // A weak judge model that cites a span as "1-3" instead of [1, 2, 3] should
+  // resolve to all three chunks rather than losing the whole citation.
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: ["1-3"] },
+    assessment: { prose: "spanning citation", anchors: ["1-3"] },
+    accomplishment: { value: "accomplished", anchors: [4] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([
+    { eventHash: "1".repeat(64) },
+    { eventHash: "2".repeat(64) },
+    { eventHash: "3".repeat(64) },
+  ]);
+});
+
+test("a reversed range string still expands to the ids it spans", () => {
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: ["3-1"] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([
+    { eventHash: "1".repeat(64) },
+    { eventHash: "2".repeat(64) },
+    { eventHash: "3".repeat(64) },
+  ]);
+});
+
+test("a near-miss id just past the end snaps to the nearest real chunk id", () => {
+  // The highest real id is 4; a model citing 5 (off-by-one past the end) snaps to
+  // chunk 4 rather than dropping the citation.
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: [5] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([{ eventHash: "4".repeat(64) }]);
+});
+
+test("an id beyond the snap window is dropped, not snapped", () => {
+  // 4 is the highest real id; 99 is far outside the small window, so it drops
+  // rather than snapping to chunk 4.
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: [99] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(
+    outcome.signals.find((s) => s.signalName === "intent"),
+  ).toBeUndefined();
+});
+
+test("obvious non-id junk in the anchor list is ignored without discarding the whole field", () => {
+  const raw = JSON.stringify({
+    intent: {
+      value: "test-writing",
+      anchors: ["not-an-id", 2, null, "chunk-2"],
+    },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([{ eventHash: "2".repeat(64) }]);
+});
+
+test("a bare (non-array) numeric-string anchor resolves as a single id", () => {
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: "2" },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([{ eventHash: "2".repeat(64) }]);
+});
+
+test("overlapping citations resolve to a chunk only once (deduplicated)", () => {
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: ["1-2", 2] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([
+    { eventHash: "1".repeat(64) },
+    { eventHash: "2".repeat(64) },
+  ]);
+});
+
 test("non-JSON raw text is rejected with the not-a-JSON-object reason", () => {
   const outcome = assembleVerdict("no json here", CHUNKS);
   expect(outcome.ok).toBe(false);
@@ -96,7 +264,7 @@ test("a judgment label with no assessment prose is rejected (prose must precede 
   expect(outcome.reason).toContain("assessment prose");
 });
 
-test("a valid verdict whose every claim cites an out-of-set id assembles to zero signals", () => {
+test("a valid verdict whose every claim cites an out-of-set id assembles to zero signals but keeps the under-anchored narrative", () => {
   const raw = JSON.stringify({
     intent: { value: "feature", anchors: [99] },
     assessment: { prose: "unanchorable", anchors: [99] },
@@ -105,6 +273,48 @@ test("a valid verdict whose every claim cites an out-of-set id assembles to zero
   expect(outcome.ok).toBe(true);
   if (!outcome.ok) return;
   expect(outcome.signals).toHaveLength(0);
+  // The prose is valid, so the narrative survives with an empty anchor array
+  // (under-anchored, not fabricated) rather than being silently discarded.
+  expect(outcome.narratives).toHaveLength(1);
+  expect(outcome.narratives[0]!.anchors).toEqual([]);
+});
+
+test("prose with only unresolved anchors keeps the narrative with an empty anchor array (under-anchored, not fabricated)", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "The agent shipped the feature.", anchors: [99] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.narratives).toHaveLength(1);
+  expect(outcome.narratives[0]!.prose).toBe("The agent shipped the feature.");
+  expect(outcome.narratives[0]!.anchors).toEqual([]);
+});
+
+test("prose with a mix of resolved and unresolved anchors keeps only the resolved ones", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "Some of these anchors are real.", anchors: [99, 1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.narratives).toHaveLength(1);
+  expect(outcome.narratives[0]!.anchors).toEqual([
+    { eventHash: "b".repeat(64) },
+  ]);
+});
+
+test("no assessment prose yields no narrative", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
   expect(outcome.narratives).toHaveLength(0);
 });
 

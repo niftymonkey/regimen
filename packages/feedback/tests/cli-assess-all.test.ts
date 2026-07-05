@@ -545,6 +545,41 @@ test("assessAll prints a per-conversation progress line carrying the outcome", a
   }
 });
 
+test("assessAll's done line breaks the judged total into complete, signals-only, and incomplete", async () => {
+  const dataDir = tempDir("regimen-sweep-cli-");
+  const codexHome = tempDir("regimen-sweep-home-");
+  const dbPath = join(dataDir, "feedback.db");
+  seedConversation(dbPath, {
+    sessionId: SESSION,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  seedRollout(codexHome, SESSION);
+  const mock = startMockAnthropic();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  process.env.CODEX_HOME = codexHome;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  const stdout = captureStdout();
+  try {
+    await assessAll({
+      dataDir,
+      filter: {},
+      force: false,
+      batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    const out = stdout.read();
+    // The clean mock verdict carries signals and an assessment narrative, so it
+    // lands in the complete bucket and the honest breakdown says so.
+    expect(out).toContain(
+      "done: judged 1 (complete 1, signals-only 0, incomplete 0)",
+    );
+  } finally {
+    mock.stop();
+  }
+});
+
 test("assessAll with no judge backend exits 1 with a clear error and no rejection", async () => {
   const dataDir = tempDir("regimen-sweep-cli-");
   const codexHome = tempDir("regimen-sweep-home-");

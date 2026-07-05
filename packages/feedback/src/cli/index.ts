@@ -100,6 +100,7 @@ import {
   runSweep,
   selectSessionsToJudge,
   type BatchDecision,
+  type SweepOutcome,
 } from "../judged/sweep.ts";
 import {
   planInstall,
@@ -692,7 +693,9 @@ export async function assessAll(options: {
     // Nothing to judge: report the empty run and skip judge-backend resolution,
     // so an all-judged sweep succeeds without a configured judge.
     if (toJudge === 0) {
-      process.stdout.write(`done: judged 0, failed 0, skipped 0\n`);
+      process.stdout.write(
+        `done: judged 0 (complete 0, signals-only 0, incomplete 0), failed 0, skipped 0\n`,
+      );
       return 0;
     }
 
@@ -715,7 +718,7 @@ export async function assessAll(options: {
     // cwd through resolve); a test injects a stub instead.
     const setupSource = options.setupSource ?? createLiveSetupSource();
     let index = 0;
-    const judge = async (session: SessionSummary): Promise<void> => {
+    const judge = async (session: SessionSummary): Promise<SweepOutcome> => {
       index++;
       const label = `[${index}/${toJudge}] ${session.harness} ${session.sessionId}`;
       try {
@@ -732,10 +735,22 @@ export async function assessAll(options: {
           judgeBackend: resolved.backend,
           setupSource,
         });
-        const outcome = digest.judged
-          ? (digest.outcome?.value ?? "incomplete")
-          : "unjudged";
-        process.stdout.write(`${label} -> ${outcome}\n`);
+        // Classify how the run finished so the sweep summary can distinguish a
+        // fully-persisted verdict from a thinner one. A complete run with an
+        // assessment narrative is the full verdict; a complete run with no
+        // narrative persisted only signals; anything not complete is incomplete.
+        const sweepOutcome: SweepOutcome =
+          digest.judged && digest.complete
+            ? digest.assessment !== null
+              ? "complete"
+              : "signals-only"
+            : "incomplete";
+        const shown =
+          digest.judged && digest.complete
+            ? (digest.outcome?.value ?? sweepOutcome)
+            : "incomplete";
+        process.stdout.write(`${label} -> ${shown}\n`);
+        return sweepOutcome;
       } catch (caught) {
         // Mark the failure inline so progress numbering stays contiguous, then
         // re-throw so the engine records it for the end-summary detail.
@@ -752,7 +767,7 @@ export async function assessAll(options: {
       now,
     });
     process.stdout.write(
-      `done: judged ${summary.judged.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
+      `done: judged ${summary.judged.length} (complete ${summary.complete.length}, signals-only ${summary.signalsOnly.length}, incomplete ${summary.incomplete.length}), failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
     );
     for (const failure of summary.failed) {
       process.stdout.write(
