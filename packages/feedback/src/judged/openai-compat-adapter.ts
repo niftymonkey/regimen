@@ -37,8 +37,19 @@ export interface OpenAiCompatJudgeModelOptions {
   readonly fetch?: typeof fetch;
 }
 
-/** A sane output cap for one whole-conversation verdict (one JSON object). */
-const MAX_TOKENS = 4096;
+/**
+ * The output cap for one whole-conversation verdict. Sized for a reasoning
+ * backend: a thinking model (via OpenRouter, or Anthropic's own OpenAI-compat
+ * endpoint) spends completion tokens on internal reasoning that never reaches
+ * message.content before emitting the verdict JSON, and that reasoning grows
+ * with transcript length. A cap sized for the JSON alone (the ~4k the
+ * Anthropic-native adapter uses, where thinking is off) truncated the verdict
+ * mid-object on the longest sessions (finish_reason=length), failing the parse;
+ * this leaves headroom for reasoning plus the JSON. Only tokens actually
+ * generated are billed, so the higher ceiling costs nothing on a session that
+ * finishes early.
+ */
+const MAX_TOKENS = 16384;
 
 /**
  * The default request deadline. A stalled endpoint (a real failure mode for the
