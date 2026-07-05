@@ -55,10 +55,14 @@ const MAX_TOKENS = 16384;
  * The default request deadline. A stalled endpoint (a real failure mode for the
  * local keyless backends this adapter targets) must fail the port call, which
  * the Judge maps to an honest llm-unavailable run, rather than wedge the process
- * indefinitely. One whole-conversation verdict from a slow free-tier or local
- * model can legitimately take tens of seconds, so the bound is conservative.
+ * indefinitely. A reasoning backend (a thinking model, or Anthropic's own
+ * OpenAI-compat endpoint) legitimately runs past a minute on a long
+ * conversation: it spends the raised completion budget on internal reasoning
+ * before emitting the verdict (measured ~70s for one whole-conversation verdict,
+ * and longer on the longest transcripts), so the bound is minutes, not seconds,
+ * while still failing a genuinely dead endpoint.
  */
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 /** One choice of a chat-completions response. */
 interface ChatCompletionChoice {
