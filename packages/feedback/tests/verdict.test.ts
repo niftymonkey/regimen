@@ -58,6 +58,57 @@ test("a well-formed raw verdict assembles into anchored signals and the narrativ
   expect(outcome.narratives[0]!.narrativeType).toBe("assessment");
 });
 
+test("a fully-anchored verdict reports no under-anchored fields", () => {
+  const outcome = assembleVerdict(WELL_FORMED, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).toEqual([]);
+});
+
+test("a verdict whose assessment cites only missing ids reports assessment as under-anchored", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "The agent shipped it.", anchors: [99] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).toContain("assessment");
+});
+
+test("a verdict whose valued signal cites only missing ids reports that signal as under-anchored", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    // accomplishment is a valid value but every cited id misses.
+    accomplishment: { value: "accomplished", anchors: [99] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).toContain("accomplishment");
+  // The under-anchored signal is still dropped from the assembled signals.
+  expect(
+    outcome.signals.find((s) => s.signalName === "accomplishment"),
+  ).toBeUndefined();
+});
+
+test("attribution under-anchored on a non-shortfall is not reported (it would not be emitted anyway)", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "ok", anchors: [0] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    // Not a shortfall, so attribution is dropped regardless of anchors; a retry
+    // would not recover it, so it must not be reported as under-anchored.
+    attribution: { value: "framing", anchors: [99] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.underAnchored).not.toContain("attribution");
+});
+
 test("anchor ids emitted as numeric strings resolve to their chunks (model formatting variance)", () => {
   // Some judge models (observed: a Claude model through the OpenAI-compat
   // endpoint) emit the cited chunk ids as JSON strings ("3") rather than

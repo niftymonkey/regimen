@@ -76,7 +76,8 @@ export async function judgeConversation(
 
   const prompt = buildJudgePrompt(input.chunks, config.setup);
   let lastModel = "unknown";
-  let parseError: string | undefined;
+  let repairMessage: string | undefined;
+  let anchorRepairAttempted = false;
 
   // One initial attempt plus up to `retryBudget` repairs.
   for (let attempt = 0; attempt <= retryBudget; attempt += 1) {
@@ -84,7 +85,7 @@ export async function judgeConversation(
     try {
       response = await llm.complete({
         system: prompt.system,
-        user: repairedUser(prompt.user, parseError),
+        user: repairedUser(prompt.user, repairMessage),
       });
     } catch {
       return failed(
@@ -96,7 +97,24 @@ export async function judgeConversation(
 
     const outcome = assembleVerdict(response.text, input.chunks);
     if (!outcome.ok) {
-      parseError = outcome.reason;
+      repairMessage = outcome.reason;
+      continue;
+    }
+
+    // Repair-retry on unresolved anchors (spec: make miscitation rare at the
+    // source). When the model valued a field but every cited id missed, re-prompt
+    // ONCE telling it to cite only real ids, so a hallucinated citation is
+    // corrected rather than silently dropping the signal or under-anchoring the
+    // narrative. Bounded to one extra call (anchorRepairAttempted) and only while
+    // a further attempt remains; on exhaustion the loop accepts the assembled
+    // verdict, falling back to graceful degradation (the prose is kept).
+    if (
+      outcome.underAnchored.length > 0 &&
+      !anchorRepairAttempted &&
+      attempt < retryBudget
+    ) {
+      anchorRepairAttempted = true;
+      repairMessage = anchorRepairMessage(outcome.underAnchored);
       continue;
     }
 
@@ -151,10 +169,19 @@ function provenanceOf(
   };
 }
 
-/** Append the prior parse error to the user prompt so the model can repair. */
-function repairedUser(user: string, parseError: string | undefined): string {
-  if (parseError === undefined) return user;
-  return `${user}\n\nYour previous response could not be used: ${parseError}. Return only the JSON object described above.`;
+/** Append the prior repair note to the user prompt so the model can repair. */
+function repairedUser(user: string, repairMessage: string | undefined): string {
+  if (repairMessage === undefined) return user;
+  return `${user}\n\nYour previous response could not be used: ${repairMessage}. Return only the JSON object described above.`;
+}
+
+/**
+ * The repair note for a response whose cited chunk ids did not match any real
+ * chunk. It names the under-anchored fields and instructs the model to cite only
+ * ids from the enumerated list, so the re-emitted verdict grounds on real chunks.
+ */
+function anchorRepairMessage(fields: ReadonlyArray<string>): string {
+  return `these fields cited chunk ids that do not match any provided chunk: ${fields.join(", ")}. Cite only ids from the enumerated chunk list above, and re-emit the full JSON object`;
 }
 
 /** A degraded JudgeResult: no signals, no narratives, an incomplete run. */

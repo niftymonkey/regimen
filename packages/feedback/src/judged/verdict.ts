@@ -40,6 +40,16 @@ export type VerdictOutcome =
       readonly ok: true;
       readonly signals: JudgedSignal[];
       readonly narratives: JudgedNarrative[];
+      /**
+       * The field keys the model gave a usable value or prose to but whose every
+       * cited chunk id missed the conversation, so the field assembled to zero
+       * anchors (a dropped signal, or an under-anchored assessment narrative).
+       * `assessment` leads when present. Empty on a fully-anchored verdict. The
+       * Judge reads this to fire one repair-retry that tells the model to cite
+       * only real ids; it never changes what assembles, so a caller that ignores
+       * it sees the identical signals and narratives.
+       */
+      readonly underAnchored: string[];
     }
   | { readonly ok: false; readonly reason: string };
 
@@ -161,7 +171,48 @@ export function assembleVerdict(
     ok: true,
     signals: buildSignals(verdict, chunks),
     narratives: buildNarratives(verdict, chunks),
+    underAnchored: underAnchoredFields(verdict, chunks),
   };
+}
+
+/**
+ * The field keys the model valued (a usable signal value in vocabulary, or
+ * assessment prose) but whose every cited id missed the conversation, so the
+ * field resolved to zero anchors. `assessment` leads when present so the Judge
+ * can prioritise recovering the prose's grounding. Attribution off a shortfall
+ * is excluded: it is dropped regardless of anchors, so re-citing cannot recover
+ * it. Pure; it re-walks the parsed verdict without mutating the assembly.
+ */
+function underAnchoredFields(
+  verdict: ParsedVerdict,
+  chunks: ReadonlyArray<ContentChunk>,
+): string[] {
+  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
+  const fields: string[] = [];
+  if (
+    verdict.assessment !== undefined &&
+    typeof verdict.assessment.prose === "string" &&
+    resolveAnchors(verdict.assessment.anchors, chunkByLineSeq).length === 0
+  ) {
+    fields.push("assessment");
+  }
+  for (const [signalName, vocab] of VOCAB_BY_SIGNAL) {
+    const claim = (verdict as Record<string, ParsedClaim | undefined>)[
+      signalName
+    ];
+    if (
+      claim === undefined ||
+      typeof claim.value !== "string" ||
+      !vocab.has(claim.value)
+    ) {
+      continue;
+    }
+    if (signalName === "attribution" && !isShortfall(verdict)) continue;
+    if (resolveAnchors(claim.anchors, chunkByLineSeq).length === 0) {
+      fields.push(signalName);
+    }
+  }
+  return fields;
 }
 
 /**
