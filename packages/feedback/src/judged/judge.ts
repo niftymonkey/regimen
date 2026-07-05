@@ -176,12 +176,13 @@ function repairedUser(user: string, repairMessage: string | undefined): string {
 }
 
 /**
- * The repair note for a response whose cited chunk ids did not match any real
- * chunk. It names the under-anchored fields and instructs the model to cite only
- * ids from the enumerated list, so the re-emitted verdict grounds on real chunks.
+ * The repair note for a response whose fields lack valid chunk citations, whether
+ * they cited no ids at all or cited ids that match no real chunk. It names the
+ * under-anchored fields and instructs the model to cite only ids from the
+ * enumerated list, so the re-emitted verdict grounds on real chunks.
  */
 function anchorRepairMessage(fields: ReadonlyArray<string>): string {
-  return `these fields cited chunk ids that do not match any provided chunk: ${fields.join(", ")}. Cite only ids from the enumerated chunk list above, and re-emit the full JSON object`;
+  return `these fields are missing valid chunk citations (they cited no ids, or ids that match no provided chunk): ${fields.join(", ")}. Cite only ids from the enumerated chunk list above, and re-emit the full JSON object`;
 }
 
 /** A degraded JudgeResult: no signals, no narratives, an incomplete run. */
