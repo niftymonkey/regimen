@@ -31,6 +31,13 @@ export interface SessionSummary {
   readonly eventCount: number;
   readonly judged: boolean;
   readonly outcome: string | null;
+  /**
+   * When a sweep confirmed this session's transcript was gone from disk, the
+   * ISO-8601 instant it was marked; null while the transcript is present. A
+   * marked session is durably excluded from judge selection (a gone transcript
+   * is gone permanently), so it is neither judged nor retried on later sweeps.
+   */
+  readonly transcriptMissingAt: string | null;
 }
 
 /**
@@ -129,7 +136,8 @@ export function listSessions(
          c.last_event_at  AS last_event_at,
          COALESCE(cc.event_count, 0) AS event_count,
          n.session_id IS NOT NULL AS judged,
-         s.value AS outcome
+         s.value AS outcome,
+         c.transcript_missing_at AS transcript_missing_at
        FROM conversations c
        LEFT JOIN conversation_counts cc USING (session_id)
        LEFT JOIN narrative n
@@ -173,6 +181,7 @@ interface SessionRow {
   event_count: number;
   judged: number;
   outcome: string | null;
+  transcript_missing_at: string | null;
 }
 
 /**
@@ -231,5 +240,6 @@ function toSummary(row: SessionRow): SessionSummary {
     eventCount: row.event_count,
     judged: row.judged === 1,
     outcome: row.outcome === null ? null : (JSON.parse(row.outcome) as string),
+    transcriptMissingAt: row.transcript_missing_at,
   };
 }

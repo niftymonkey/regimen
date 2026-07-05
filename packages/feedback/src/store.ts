@@ -199,6 +199,14 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
       ALTER TABLE assessment_run ADD COLUMN judge_backend TEXT;
     `,
   },
+  {
+    version: 9,
+    description:
+      "transcript-missing marker on conversations (durable sweep exclusion)",
+    up: `
+      ALTER TABLE conversations ADD COLUMN transcript_missing_at TEXT;
+    `,
+  },
 ];
 
 /** Result of an event insert. `inserted: false` means an identical hash already existed. */

@@ -203,6 +203,7 @@ test("feedback list --json prints the full SessionSummary array, newest first", 
     eventCount: 1,
     judged: true,
     outcome: "accomplished-cleanly",
+    transcriptMissingAt: null,
   });
 });
 

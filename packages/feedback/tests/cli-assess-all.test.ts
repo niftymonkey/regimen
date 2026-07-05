@@ -465,7 +465,7 @@ test("assessAll prints the opening accounting and judges only the unjudged conve
   }
 });
 
-test("assessAll continues past a missing transcript and reports it in the end summary", async () => {
+test("assessAll marks a missing transcript, reports it in the missing bucket, and excludes it on a re-sweep", async () => {
   const dataDir = tempDir("regimen-sweep-cli-");
   const codexHome = tempDir("regimen-sweep-home-");
   const dbPath = join(dataDir, "feedback.db");
@@ -475,7 +475,8 @@ test("assessAll continues past a missing transcript and reports it in the end su
     lastEventAt: "2026-06-15T10:30:00.000Z",
   });
   seedRollout(codexHome, SESSION);
-  // B: unjudged with NO transcript on disk (the judge throws; sweep continues).
+  // B: unjudged with NO transcript on disk (the judge throws the typed
+  // transcript-missing error; the sweep marks it and continues).
   seedConversation(dbPath, {
     sessionId: OTHER,
     lastEventAt: "2026-06-15T09:30:00.000Z",
@@ -497,19 +498,43 @@ test("assessAll continues past a missing transcript and reports it in the end su
     });
     expect(exit).toBe(0);
     const out = stdout.read();
+    // A gone transcript is its own honest bucket, not a generic failure.
     expect(out).toContain("done: judged 1");
-    expect(out).toContain("failed 1");
+    expect(out).toContain("missing 1");
+    expect(out).toContain("failed 0");
     expect(out).toContain("skipped 0");
-    // The failure prints inline with contiguous numbering (SESSION is index 1,
-    // OTHER index 2), so the progress has no gaps where a judge threw.
-    expect(out).toContain(`[2/2] codex ${OTHER} -> FAILED`);
-    // It is also named in the end summary, so a large sweep is debuggable
-    // without re-deriving which one broke.
-    expect(out).toContain(`failed: codex ${OTHER}`);
+    // It prints inline with contiguous numbering (SESSION index 1, OTHER index
+    // 2), so the progress has no gaps.
+    expect(out).toContain(`[2/2] codex ${OTHER} -> MISSING`);
+    // It is named in the end summary so a large sweep stays debuggable.
+    expect(out).toContain(`missing: codex ${OTHER}`);
     expect(isJudged(dbPath, SESSION)).toBe(true);
     expect(isJudged(dbPath, OTHER)).toBe(false);
   } finally {
     mock.stop();
+  }
+
+  // A second sweep no longer offers the marked session: it is durably excluded
+  // from selection, so "to judge" drops it and the judge is never re-invoked.
+  const stdout2 = captureStdout();
+  const mock2 = startMockAnthropic();
+  process.env.ANTHROPIC_BASE_URL = mock2.baseUrl;
+  try {
+    const exit = await assessAll({
+      dataDir,
+      filter: {},
+      force: false,
+      batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    expect(exit).toBe(0);
+    // SESSION is already judged and OTHER is transcript-missing, so nothing is
+    // selected; the marked session never reaches the judge again.
+    expect(stdout2.read()).toContain("to judge 0");
+    expect(mock2.count()).toBe(0);
+  } finally {
+    mock2.stop();
   }
 });
 

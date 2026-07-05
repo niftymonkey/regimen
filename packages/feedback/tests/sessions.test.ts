@@ -228,6 +228,7 @@ test("listSessions reports eventCount and the lifecycle timestamps", () => {
       eventCount: 3,
       judged: false,
       outcome: null,
+      transcriptMissingAt: null,
     });
   });
 });
@@ -560,5 +561,36 @@ test("countUnassessed is zero when every conversation is assessed", () => {
       resultWithOutcome("accomplished-cleanly"),
     );
     expect(countUnassessed(store.db)).toBe(0);
+  });
+});
+
+test("listSessions surfaces transcriptMissingAt for a marked session and null otherwise", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "present",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    seedSession(store.db, {
+      sessionId: "gone",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-14T10:00:00.000Z",
+      lastEventAt: "2026-06-14T10:30:00.000Z",
+    });
+    store.db
+      .prepare(
+        "UPDATE conversations SET transcript_missing_at = ? WHERE session_id = ?",
+      )
+      .run("2026-07-05T00:00:00.000Z", "gone");
+    const bySession = new Map(
+      listSessions(store.db, {}, NOW).map((s) => [s.sessionId, s]),
+    );
+    expect(bySession.get("gone")?.transcriptMissingAt).toBe(
+      "2026-07-05T00:00:00.000Z",
+    );
+    expect(bySession.get("present")?.transcriptMissingAt).toBeNull();
   });
 });

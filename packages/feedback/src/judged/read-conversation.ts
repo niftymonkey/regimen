@@ -19,6 +19,27 @@ import type { Store } from "../store.ts";
 import type { EngineerSetup, SetupSource } from "./setup.ts";
 import { writeSetupSnapshot } from "./setup-snapshot.ts";
 
+/**
+ * Thrown by {@link prepareConversation} when a session's transcript file cannot
+ * be located on disk. A distinct type (not a string-matched message) so a sweep
+ * can classify this one fail-closed case on the type: a gone transcript is gone
+ * permanently, so the sweep durably marks the session and stops retrying it,
+ * while transient or judge-unavailable failures stay generic and are retried on a
+ * later run. Carries the `sessionId` so the caller marks the right conversation
+ * without re-parsing the message.
+ */
+export class TranscriptNotFoundError extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string, sessionsDir: string) {
+    super(
+      `no rollout transcript found for session ${sessionId} under ${sessionsDir}`,
+    );
+    this.name = "TranscriptNotFoundError";
+    this.sessionId = sessionId;
+  }
+}
+
 export interface PrepareConversationOptions {
   /** The harness support bundle (resolver + reader) resolved by the caller. */
   readonly support: HarnessSupport;
@@ -67,9 +88,7 @@ export function prepareConversation(
 
   const located = support.resolver.locate({ sessionsDir, sessionId });
   if (located === null) {
-    throw new Error(
-      `no rollout transcript found for session ${sessionId} under ${sessionsDir}`,
-    );
+    throw new TranscriptNotFoundError(sessionId, sessionsDir);
   }
 
   const content = readFileSync(located.path, "utf8");
