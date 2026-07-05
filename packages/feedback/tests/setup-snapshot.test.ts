@@ -324,3 +324,58 @@ test("recordVerdict never resolves setup, so it writes no snapshot row", async (
     }
   });
 });
+
+test("recordVerdict keeps a valid prose assessment on the agent seam even when its cited anchors all miss", async () => {
+  // The agent-seam record path cannot auto-retry, so the graceful-degradation
+  // floor must protect it too: a weak judge model that anchors its signals but
+  // botches the assessment's citations must not lose the prose. Because record
+  // flows through the SAME shared assembleVerdict, Unit A's kept-with-empty-anchors
+  // narrative is honored here identically.
+  await withHarness(async ({ store, sessionsDir }) => {
+    seedRollout(sessionsDir);
+    const chunks = rolloutContent(TRANSCRIPT);
+    const human = chunks.find((c) => c.kind === "human_prompt")!;
+    const answer = chunks.find((c) => c.kind === "assistant_answer")!;
+
+    const emitted = emitPrompt({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    const result = recordVerdict({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      envelope: {
+        schemaVersion: emitted.schemaVersion,
+        sessionId: SESSION,
+        promptVersion: emitted.promptVersion,
+        rubricVersion: emitted.rubricVersion,
+        judgeModel: "gemini-2.5",
+        verdict: {
+          intent: { value: "test-writing", anchors: [human.lineSeq] },
+          // Every cited id here is out of range: the prose must still survive.
+          assessment: {
+            prose: "The engineer asked for a parser test; delivered.",
+            anchors: [9001, 9002],
+          },
+          accomplishment: { value: "accomplished", anchors: [answer.lineSeq] },
+        },
+      },
+      runId: "run-under-anchored",
+      now: () => new Date("2026-06-15T12:05:00.000Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.digest.judged).toBe(true);
+    if (!result.digest.judged) return;
+    expect(result.digest.assessment).not.toBeNull();
+    expect(result.digest.assessment!.prose).toContain("parser test");
+    expect(result.digest.assessment!.anchors).toEqual([]);
+  });
+});
