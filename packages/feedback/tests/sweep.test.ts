@@ -450,6 +450,63 @@ test("runSweep records a failed judge and continues with the rest", async () => 
   });
 });
 
+test("runSweep buckets each resolved judge by its reported outcome (complete, signals-only, incomplete)", async () => {
+  await withStoreAsync(async (store) => {
+    seedThree(store);
+    // s1 judged fully, s2 signals but no narrative, s3 an incomplete run.
+    const outcomeBySession: Record<
+      string,
+      "complete" | "signals-only" | "incomplete"
+    > = {
+      s1: "complete",
+      s2: "signals-only",
+      s3: "incomplete",
+    };
+    const judge = async (session: SessionSummary) =>
+      outcomeBySession[session.sessionId]!;
+    const summary = await runSweep(store.db, {
+      filter: {},
+      force: false,
+      batchSize: 10,
+      judge,
+      decideNextBatch: async (): Promise<BatchDecision> => "continue",
+      now: NOW,
+    });
+    // The aggregate still totals every resolved judge, so the honest sum holds.
+    expect(summary.judged.map((s) => s.sessionId).sort()).toEqual([
+      "s1",
+      "s2",
+      "s3",
+    ]);
+    expect(summary.complete.map((s) => s.sessionId)).toEqual(["s1"]);
+    expect(summary.signalsOnly.map((s) => s.sessionId)).toEqual(["s2"]);
+    expect(summary.incomplete.map((s) => s.sessionId)).toEqual(["s3"]);
+  });
+});
+
+test("a judge that resolves without classifying counts as a complete verdict", async () => {
+  await withStoreAsync(async (store) => {
+    seedSession(store.db, {
+      sessionId: "a",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    const summary = await runSweep(store.db, {
+      filter: {},
+      force: false,
+      batchSize: 10,
+      judge: async () => undefined,
+      decideNextBatch: async (): Promise<BatchDecision> => "continue",
+      now: NOW,
+    });
+    expect(summary.complete.map((s) => s.sessionId)).toEqual(["a"]);
+    expect(summary.signalsOnly).toEqual([]);
+    expect(summary.incomplete).toEqual([]);
+  });
+});
+
 test("runSweep rejects a non-positive batchSize and judges nothing", async () => {
   await withStoreAsync(async (store) => {
     seedThree(store);

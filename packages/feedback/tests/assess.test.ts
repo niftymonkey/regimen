@@ -18,6 +18,7 @@ import type {
   JudgeModelResponse,
 } from "../src/judged/port.ts";
 import type { SetupSource } from "../src/judged/setup.ts";
+import { listSessions } from "../src/sessions.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
 
@@ -384,6 +385,62 @@ test("a re-judge supersedes the prior run: one run's signals win, no duplicates"
       .all() as { run_id: string }[];
     expect(narrativeRows.length).toBe(1);
     expect(narrativeRows[0]!.run_id).toBe("run-2");
+  });
+});
+
+/** A judge whose assessment cites only a wildly out-of-range id (never snaps),
+ * so the narrative is under-anchored, while its signals anchor cleanly. */
+function underAnchoredAssessmentStub(content: string): JudgeModelPort {
+  const chunks = rolloutContent(content);
+  const human = chunks.find((c) => c.kind === "human_prompt")!;
+  const answer = chunks.find((c) => c.kind === "assistant_answer")!;
+  const verdict = JSON.stringify({
+    intent: { value: "test-writing", anchors: [human.lineSeq] },
+    assessment: {
+      prose: "The engineer asked for a parser test; the agent delivered it.",
+      anchors: [9001],
+    },
+    accomplishment: { value: "accomplished", anchors: [answer.lineSeq] },
+  });
+  return {
+    complete(): Promise<JudgeModelResponse> {
+      return Promise.resolve({ text: verdict, model: "claude-opus-4-8" });
+    },
+  };
+}
+
+test("an under-anchored assessment still persists the narrative, keeping the session visible to rollup (the 31-session data-loss fix)", async () => {
+  await withHarness(async ({ store, sessionsDir }) => {
+    seedRollout(sessionsDir);
+    const digest = await assessConversation({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      llm: underAnchoredAssessmentStub(TRANSCRIPT),
+      runId: "run-1",
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    if (digest.judged !== true) throw new Error("expected judged branch");
+    // The prose survived with an honest empty anchor array rather than being
+    // discarded, so the assessment is present.
+    expect(digest.assessment).not.toBeNull();
+    expect(digest.assessment!.anchors).toEqual([]);
+
+    // A narrative row exists, so listSessions marks the conversation judged and
+    // the rollup (which keys judged on that row) can see it: the exact loss the
+    // 31 stored sessions suffered is closed.
+    const narrativeCount = (
+      store.db.prepare("SELECT COUNT(*) AS n FROM narrative").get() as {
+        n: number;
+      }
+    ).n;
+    expect(narrativeCount).toBe(1);
+    const summary = listSessions(store.db, {}, () =>
+      Date.parse("2026-06-15T12:00:00.000Z"),
+    ).find((s) => s.sessionId === SESSION);
+    expect(summary!.judged).toBe(true);
   });
 });
 

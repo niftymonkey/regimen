@@ -51,6 +51,17 @@ export function selectSessionsToJudge(
  */
 export type BatchDecision = "continue" | "all" | "quit";
 
+/**
+ * How a resolved judge finished, so the summary can tell a fully-persisted
+ * verdict apart from a thinner one rather than reporting one flat `judged` count.
+ * `complete` is a clean run with both signals and the assessment narrative;
+ * `signals-only` persisted signals but no narrative prose; `incomplete` is a run
+ * that did not finish clean (insufficient evidence, unparseable, or unavailable).
+ * A judge that resolves without a tag is treated as `complete` (the default full
+ * verdict), so a caller that does not classify still totals honestly.
+ */
+export type SweepOutcome = "complete" | "signals-only" | "incomplete";
+
 /** A conversation whose judge threw, paired with the error, for the summary. */
 export interface SweepFailure {
   readonly session: SessionSummary;
@@ -58,12 +69,17 @@ export interface SweepFailure {
 }
 
 /**
- * The accounting for one sweep: conversations whose judge resolved, those whose
- * judge threw (continue-on-error), and those selected but never attempted
- * because the engineer quit between batches.
+ * The accounting for one sweep. `judged` is every conversation whose judge
+ * resolved (the honest aggregate); `complete`, `signalsOnly`, and `incomplete`
+ * partition that aggregate by how each run finished. `failed` are the judges that
+ * threw (continue-on-error); `skipped` were selected but never attempted because
+ * the engineer quit between batches.
  */
 export interface SweepSummary {
   readonly judged: readonly SessionSummary[];
+  readonly complete: readonly SessionSummary[];
+  readonly signalsOnly: readonly SessionSummary[];
+  readonly incomplete: readonly SessionSummary[];
   readonly failed: readonly SweepFailure[];
   readonly skipped: readonly SessionSummary[];
 }
@@ -74,8 +90,11 @@ export interface RunSweepOptions {
   readonly force: boolean;
   /** Conversations to judge per batch; must be a positive integer. */
   readonly batchSize: number;
-  /** Judge one conversation; resolve on success, throw to record a failure. */
-  readonly judge: (session: SessionSummary) => Promise<void>;
+  /**
+   * Judge one conversation; resolve with how the run finished (or void, taken as
+   * `complete`), throw to record a failure.
+   */
+  readonly judge: (session: SessionSummary) => Promise<SweepOutcome | void>;
   /** Decide whether to keep going; called only between batches. */
   readonly decideNextBatch: () => Promise<BatchDecision>;
   readonly now?: () => number;
@@ -103,6 +122,9 @@ export async function runSweep(
     options.now,
   );
   const judged: SessionSummary[] = [];
+  const complete: SessionSummary[] = [];
+  const signalsOnly: SessionSummary[] = [];
+  const incomplete: SessionSummary[] = [];
   const failed: SweepFailure[] = [];
   const skipped: SessionSummary[] = [];
   let runAll = false;
@@ -119,8 +141,11 @@ export async function runSweep(
     }
     for (const session of selected.slice(i, i + options.batchSize)) {
       try {
-        await options.judge(session);
+        const outcome = (await options.judge(session)) ?? "complete";
         judged.push(session);
+        if (outcome === "complete") complete.push(session);
+        else if (outcome === "signals-only") signalsOnly.push(session);
+        else incomplete.push(session);
       } catch (caught) {
         const error =
           caught instanceof Error ? caught : new Error(String(caught));
@@ -128,5 +153,5 @@ export async function runSweep(
       }
     }
   }
-  return { judged, failed, skipped };
+  return { judged, complete, signalsOnly, incomplete, failed, skipped };
 }
