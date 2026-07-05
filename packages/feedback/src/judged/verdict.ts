@@ -167,11 +167,12 @@ export function assembleVerdict(
       reason: invalidity ?? "the response was not a JSON object",
     };
   }
+  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
   return {
     ok: true,
-    signals: buildSignals(verdict, chunks),
-    narratives: buildNarratives(verdict, chunks),
-    underAnchored: underAnchoredFields(verdict, chunks),
+    signals: buildSignals(verdict, chunkByLineSeq),
+    narratives: buildNarratives(verdict, chunkByLineSeq),
+    underAnchored: underAnchoredFields(verdict, chunkByLineSeq),
   };
 }
 
@@ -185,9 +186,8 @@ export function assembleVerdict(
  */
 function underAnchoredFields(
   verdict: ParsedVerdict,
-  chunks: ReadonlyArray<ContentChunk>,
+  chunkByLineSeq: ReadonlyMap<number, ContentChunk>,
 ): string[] {
-  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
   const fields: string[] = [];
   if (
     verdict.assessment !== undefined &&
@@ -386,9 +386,8 @@ function isShortfall(verdict: ParsedVerdict): boolean {
 
 function buildSignals(
   verdict: ParsedVerdict,
-  chunks: ReadonlyArray<ContentChunk>,
+  chunkByLineSeq: ReadonlyMap<number, ContentChunk>,
 ): JudgedSignal[] {
-  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
   const signals: JudgedSignal[] = [];
 
   if (
@@ -577,9 +576,8 @@ function buildSignals(
 
 function buildNarratives(
   verdict: ParsedVerdict,
-  chunks: ReadonlyArray<ContentChunk>,
+  chunkByLineSeq: ReadonlyMap<number, ContentChunk>,
 ): JudgedNarrative[] {
-  const chunkByLineSeq = new Map(chunks.map((c) => [c.lineSeq, c]));
   if (
     verdict.assessment === undefined ||
     typeof verdict.assessment.prose !== "string"
