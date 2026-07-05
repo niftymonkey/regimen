@@ -261,38 +261,104 @@ function validityError(verdict: ParsedVerdict | undefined): string | undefined {
 }
 
 /**
+ * How far a near-miss cited id may sit from the closest real chunk id and still
+ * snap to it. Chunk ids are the contiguous lineSeq the prompt enumerated, so a
+ * miss is almost always an off-by-a-little past a boundary (a model citing one or
+ * two past the last id, or a 1-based slip). Two is deliberately small: it forgives
+ * the common weak-model slip without letting a wildly wrong id borrow a chunk's
+ * authority. An in-range id always matches exactly, so snapping only ever fires
+ * on an id outside the real set.
+ */
+const ANCHOR_SNAP_WINDOW = 2;
+
+/**
+ * The widest hyphenated range (e.g. "3-9") the resolver will expand. A range this
+ * wide is far more likely to be junk than a real citation, so it is dropped rather
+ * than iterated; genuine spans are bounded by the transcript's chunk count anyway.
+ */
+const MAX_RANGE_WIDTH = 1024;
+
+/**
  * Resolve a claim's cited chunk ids to the real AnchorRefs of those chunks,
- * keeping only ids that map to a chunk in the set (the membership check). The
- * cited id is the chunk's lineSeq, which the prompt enumerated. A cited id may
- * arrive as a number or, from a model that stringifies the ids (observed: a
- * Claude model through the OpenAI-compat endpoint emitting `["3"]` where the
- * prompt showed `3`), as a numeric string; both are accepted so the verdict does
- * not silently collapse to zero anchored signals on that model.
+ * forgiving the miscitation shapes a weak or non-Claude judge model emits so a
+ * sloppy citation degrades to fewer anchors rather than discarding the field.
+ * The cited id is the chunk's lineSeq, which the prompt enumerated. Accepted
+ * shapes, all filtered by membership: a number; a numeric string ("3", observed
+ * from a Claude model through the OpenAI-compat endpoint); a hyphenated range
+ * ("1-3") expanded to the ids it spans; a bare (non-array) value treated as a
+ * single citation. An id with no exact chunk snaps to the nearest real id within
+ * {@link ANCHOR_SNAP_WINDOW}; anything further, and any non-id junk, is ignored.
+ * Anchors are deduplicated by chunk so overlapping citations do not double-count.
  */
 function resolveAnchors(
   cited: unknown,
   chunkByLineSeq: ReadonlyMap<number, ContentChunk>,
 ): AnchorRef[] {
-  if (!Array.isArray(cited)) return [];
+  const tokens = Array.isArray(cited)
+    ? cited
+    : cited === undefined || cited === null
+      ? []
+      : [cited];
+  const sortedIds = [...chunkByLineSeq.keys()].sort((a, b) => a - b);
   const anchors: AnchorRef[] = [];
-  for (const id of cited) {
-    const lineSeq = coerceLineSeq(id);
-    if (lineSeq === undefined) continue;
-    const chunk = chunkByLineSeq.get(lineSeq);
-    if (chunk !== undefined) anchors.push(chunk.anchor);
+  const seen = new Set<number>();
+  for (const token of tokens) {
+    for (const candidate of candidateIds(token)) {
+      const lineSeq = snapToChunk(candidate, chunkByLineSeq, sortedIds);
+      if (lineSeq === undefined || seen.has(lineSeq)) continue;
+      seen.add(lineSeq);
+      anchors.push(chunkByLineSeq.get(lineSeq)!.anchor);
+    }
   }
   return anchors;
 }
 
 /**
- * A cited anchor id as a chunk lineSeq: a number passes through; a numeric
- * string (a whole non-negative integer, e.g. "3") is coerced; anything else is
- * undefined and the caller drops it.
+ * Expand one cited token into the candidate chunk ids it names, before the
+ * membership and snap checks: a whole non-negative number or numeric string is
+ * itself; a hyphenated range ("1-3", or reversed "3-1") is every id it spans, up
+ * to {@link MAX_RANGE_WIDTH}; anything else is junk and yields none.
  */
-function coerceLineSeq(id: unknown): number | undefined {
-  if (typeof id === "number") return Number.isInteger(id) ? id : undefined;
-  if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
-  return undefined;
+function candidateIds(token: unknown): number[] {
+  if (typeof token === "number") {
+    return Number.isInteger(token) && token >= 0 ? [token] : [];
+  }
+  if (typeof token !== "string") return [];
+  const trimmed = token.trim();
+  if (/^\d+$/.test(trimmed)) return [Number(trimmed)];
+  const range = /^(\d+)\s*-\s*(\d+)$/.exec(trimmed);
+  if (range === null) return [];
+  const lo = Math.min(Number(range[1]), Number(range[2]));
+  const hi = Math.max(Number(range[1]), Number(range[2]));
+  if (hi - lo > MAX_RANGE_WIDTH) return [];
+  const ids: number[] = [];
+  for (let id = lo; id <= hi; id += 1) ids.push(id);
+  return ids;
+}
+
+/**
+ * The real chunk id a candidate resolves to: itself on an exact match, otherwise
+ * the nearest real id within {@link ANCHOR_SNAP_WINDOW} (ties break to the lower
+ * id, `sortedIds` being ascending), or undefined when nothing is close enough.
+ */
+function snapToChunk(
+  candidate: number,
+  chunkByLineSeq: ReadonlyMap<number, ContentChunk>,
+  sortedIds: ReadonlyArray<number>,
+): number | undefined {
+  if (chunkByLineSeq.has(candidate)) return candidate;
+  let best: number | undefined;
+  let bestDistance = Infinity;
+  for (const id of sortedIds) {
+    const distance = Math.abs(id - candidate);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = id;
+    }
+  }
+  return best !== undefined && bestDistance <= ANCHOR_SNAP_WINDOW
+    ? best
+    : undefined;
 }
 
 /**

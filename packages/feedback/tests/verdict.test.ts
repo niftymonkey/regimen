@@ -31,6 +31,17 @@ const CHUNKS: ContentChunk[] = [
   }),
 ];
 
+/** A five-chunk conversation (ids 0..4) for the forgiving-resolution tests,
+ * which need room around a real id to exercise range expansion and near-miss
+ * snapping without colliding with the two-chunk CHUNKS fixture. */
+const FIVE_CHUNKS: ContentChunk[] = [
+  chunk(0, "human_prompt", "zero", { eventHash: "0".repeat(64) }),
+  chunk(1, "assistant_answer", "one", { eventHash: "1".repeat(64) }),
+  chunk(2, "human_prompt", "two", { eventHash: "2".repeat(64) }),
+  chunk(3, "assistant_answer", "three", { eventHash: "3".repeat(64) }),
+  chunk(4, "human_prompt", "four", { eventHash: "4".repeat(64) }),
+];
+
 const WELL_FORMED = JSON.stringify({
   intent: { value: "test-writing", anchors: [0] },
   assessment: {
@@ -130,6 +141,112 @@ test("anchor ids emitted as numeric strings resolve to their chunks (model forma
   const intent = outcome.signals.find((s) => s.signalName === "intent");
   expect(intent!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
   expect(outcome.narratives).toHaveLength(1);
+});
+
+test("a hyphenated range string expands to every valid chunk id it spans", () => {
+  // A weak judge model that cites a span as "1-3" instead of [1, 2, 3] should
+  // resolve to all three chunks rather than losing the whole citation.
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: ["1-3"] },
+    assessment: { prose: "spanning citation", anchors: ["1-3"] },
+    accomplishment: { value: "accomplished", anchors: [4] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([
+    { eventHash: "1".repeat(64) },
+    { eventHash: "2".repeat(64) },
+    { eventHash: "3".repeat(64) },
+  ]);
+});
+
+test("a reversed range string still expands to the ids it spans", () => {
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: ["3-1"] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([
+    { eventHash: "1".repeat(64) },
+    { eventHash: "2".repeat(64) },
+    { eventHash: "3".repeat(64) },
+  ]);
+});
+
+test("a near-miss id just past the end snaps to the nearest real chunk id", () => {
+  // The highest real id is 4; a model citing 5 (off-by-one past the end) snaps to
+  // chunk 4 rather than dropping the citation.
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: [5] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([{ eventHash: "4".repeat(64) }]);
+});
+
+test("an id beyond the snap window is dropped, not snapped", () => {
+  // 4 is the highest real id; 99 is far outside the small window, so it drops
+  // rather than snapping to chunk 4.
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: [99] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(
+    outcome.signals.find((s) => s.signalName === "intent"),
+  ).toBeUndefined();
+});
+
+test("obvious non-id junk in the anchor list is ignored without discarding the whole field", () => {
+  const raw = JSON.stringify({
+    intent: {
+      value: "test-writing",
+      anchors: ["not-an-id", 2, null, "chunk-2"],
+    },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([{ eventHash: "2".repeat(64) }]);
+});
+
+test("a bare (non-array) numeric-string anchor resolves as a single id", () => {
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: "2" },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([{ eventHash: "2".repeat(64) }]);
+});
+
+test("overlapping citations resolve to a chunk only once (deduplicated)", () => {
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: ["1-2", 2] },
+    assessment: { prose: "ok", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, FIVE_CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([
+    { eventHash: "1".repeat(64) },
+    { eventHash: "2".repeat(64) },
+  ]);
 });
 
 test("non-JSON raw text is rejected with the not-a-JSON-object reason", () => {
