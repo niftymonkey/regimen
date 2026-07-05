@@ -77,6 +77,27 @@ test("the adapter POSTs one /chat/completions request and returns content plus t
   ]);
 });
 
+test("the adapter reserves enough completion budget that a reasoning model's verdict is not truncated", async () => {
+  // A reasoning backend (a thinking model via OpenRouter, or Anthropic's own
+  // OpenAI-compat endpoint) spends completion tokens on internal reasoning that
+  // never reaches message.content, then emits the whole-conversation verdict
+  // JSON. A cap sized for the JSON alone truncates the object mid-stream on
+  // long sessions (finish_reason=length), and the verdict fails to parse. The
+  // cap must leave headroom for reasoning plus the JSON.
+  const captured: CapturedRequest[] = [];
+  const llm = openAiCompatJudgeModel({
+    apiKey: "sk-or-test",
+    model: "some-reasoning-model",
+    baseUrl: "https://openrouter.ai/api/v1",
+    fetch: mockFetch(captured, CHAT_RESPONSE),
+  });
+
+  await llm.complete({ system: "s", user: "u" });
+
+  const sent = JSON.parse(captured[0]!.init.body as string);
+  expect(sent.max_tokens).toBeGreaterThanOrEqual(16384);
+});
+
 test("the adapter omits the Authorization header when no apiKey is configured (keyless local endpoint)", async () => {
   const captured: CapturedRequest[] = [];
   const llm = openAiCompatJudgeModel({

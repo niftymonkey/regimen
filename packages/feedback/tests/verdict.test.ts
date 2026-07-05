@@ -58,6 +58,29 @@ test("a well-formed raw verdict assembles into anchored signals and the narrativ
   expect(outcome.narratives[0]!.narrativeType).toBe("assessment");
 });
 
+test("anchor ids emitted as numeric strings resolve to their chunks (model formatting variance)", () => {
+  // Some judge models (observed: a Claude model through the OpenAI-compat
+  // endpoint) emit the cited chunk ids as JSON strings ("3") rather than
+  // numbers (3), even though the prompt shows them as bare numbers. Coercing
+  // numeric-string ids keeps the whole verdict from collapsing to zero anchored
+  // signals on that model, matching what models actually emit.
+  const raw = JSON.stringify({
+    intent: { value: "test-writing", anchors: ["0"] },
+    assessment: {
+      prose: "The engineer asked; the agent delivered.",
+      anchors: ["0", "1"],
+    },
+    accomplishment: { value: "accomplished", anchors: ["1"] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+
+  const intent = outcome.signals.find((s) => s.signalName === "intent");
+  expect(intent!.anchors).toEqual([{ eventHash: "a".repeat(64) }]);
+  expect(outcome.narratives).toHaveLength(1);
+});
+
 test("non-JSON raw text is rejected with the not-a-JSON-object reason", () => {
   const outcome = assembleVerdict("no json here", CHUNKS);
   expect(outcome.ok).toBe(false);
