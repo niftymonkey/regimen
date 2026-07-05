@@ -212,7 +212,11 @@ function validityError(verdict: ParsedVerdict | undefined): string | undefined {
 /**
  * Resolve a claim's cited chunk ids to the real AnchorRefs of those chunks,
  * keeping only ids that map to a chunk in the set (the membership check). The
- * cited id is the chunk's lineSeq, which the prompt enumerated.
+ * cited id is the chunk's lineSeq, which the prompt enumerated. A cited id may
+ * arrive as a number or, from a model that stringifies the ids (observed: a
+ * Claude model through the OpenAI-compat endpoint emitting `["3"]` where the
+ * prompt showed `3`), as a numeric string; both are accepted so the verdict does
+ * not silently collapse to zero anchored signals on that model.
  */
 function resolveAnchors(
   cited: unknown,
@@ -221,11 +225,23 @@ function resolveAnchors(
   if (!Array.isArray(cited)) return [];
   const anchors: AnchorRef[] = [];
   for (const id of cited) {
-    if (typeof id !== "number") continue;
-    const chunk = chunkByLineSeq.get(id);
+    const lineSeq = coerceLineSeq(id);
+    if (lineSeq === undefined) continue;
+    const chunk = chunkByLineSeq.get(lineSeq);
     if (chunk !== undefined) anchors.push(chunk.anchor);
   }
   return anchors;
+}
+
+/**
+ * A cited anchor id as a chunk lineSeq: a number passes through; a numeric
+ * string (a whole non-negative integer, e.g. "3") is coerced; anything else is
+ * undefined and the caller drops it.
+ */
+function coerceLineSeq(id: unknown): number | undefined {
+  if (typeof id === "number") return Number.isInteger(id) ? id : undefined;
+  if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
+  return undefined;
 }
 
 /**
