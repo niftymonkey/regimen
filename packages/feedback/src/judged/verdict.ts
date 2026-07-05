@@ -470,7 +470,6 @@ function buildNarratives(
     return [];
   }
   const anchors = resolveAnchors(verdict.assessment.anchors, chunkByLineSeq);
-  if (anchors.length === 0) return [];
   return [
     {
       scope: "conversation",

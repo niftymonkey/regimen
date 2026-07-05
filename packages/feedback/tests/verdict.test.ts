@@ -96,7 +96,7 @@ test("a judgment label with no assessment prose is rejected (prose must precede 
   expect(outcome.reason).toContain("assessment prose");
 });
 
-test("a valid verdict whose every claim cites an out-of-set id assembles to zero signals", () => {
+test("a valid verdict whose every claim cites an out-of-set id assembles to zero signals but keeps the under-anchored narrative", () => {
   const raw = JSON.stringify({
     intent: { value: "feature", anchors: [99] },
     assessment: { prose: "unanchorable", anchors: [99] },
@@ -105,6 +105,48 @@ test("a valid verdict whose every claim cites an out-of-set id assembles to zero
   expect(outcome.ok).toBe(true);
   if (!outcome.ok) return;
   expect(outcome.signals).toHaveLength(0);
+  // The prose is valid, so the narrative survives with an empty anchor array
+  // (under-anchored, not fabricated) rather than being silently discarded.
+  expect(outcome.narratives).toHaveLength(1);
+  expect(outcome.narratives[0]!.anchors).toEqual([]);
+});
+
+test("prose with only unresolved anchors keeps the narrative with an empty anchor array (under-anchored, not fabricated)", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "The agent shipped the feature.", anchors: [99] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.narratives).toHaveLength(1);
+  expect(outcome.narratives[0]!.prose).toBe("The agent shipped the feature.");
+  expect(outcome.narratives[0]!.anchors).toEqual([]);
+});
+
+test("prose with a mix of resolved and unresolved anchors keeps only the resolved ones", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+    assessment: { prose: "Some of these anchors are real.", anchors: [99, 1] },
+    accomplishment: { value: "accomplished", anchors: [1] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(outcome.narratives).toHaveLength(1);
+  expect(outcome.narratives[0]!.anchors).toEqual([
+    { eventHash: "b".repeat(64) },
+  ]);
+});
+
+test("no assessment prose yields no narrative", () => {
+  const raw = JSON.stringify({
+    intent: { value: "feature", anchors: [0] },
+  });
+  const outcome = assembleVerdict(raw, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
   expect(outcome.narratives).toHaveLength(0);
 });
 
