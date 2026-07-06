@@ -5,8 +5,11 @@
  * `selectSessionsToJudge` narrows {@link listSessions} to the conversations a
  * sweep should actually judge: by default the ones not yet judged, or every
  * matching conversation when `force` is set (a re-judge after the judging
- * mechanism itself changed). It is `listSessions` plus a `judged` predicate, no
- * new query and no judged-layer dependency: pure selection over the same read.
+ * mechanism itself changed). A session durably marked transcript-missing is
+ * excluded under both `force` values, since a gone transcript is gone
+ * permanently and re-attempting it only wastes the sweep. It is `listSessions`
+ * plus a predicate, no new query and no judged-layer dependency: pure selection
+ * over the same read.
  *
  * `runSweep` drives that selection through an injected per-conversation judge
  * in batches, pausing between batches for an injected decision (continue / run
@@ -14,7 +17,10 @@
  * engine is exercised with zero real LLM calls and zero terminal. It is
  * sequential and continue-on-error: a conversation whose judge throws is
  * recorded and the sweep moves on, and because already-judged conversations are
- * excluded by selection, a quit-then-rerun resumes for free.
+ * excluded by selection, a quit-then-rerun resumes for free. A judge that throws
+ * the typed transcript-missing error is a special case: the sweep durably marks
+ * that session so selection permanently skips it, since a gone transcript never
+ * comes back.
  */
 import type { Database } from "bun:sqlite";
 import {
@@ -22,6 +28,23 @@ import {
   type SessionFilter,
   type SessionSummary,
 } from "../sessions.ts";
+import { TranscriptNotFoundError } from "./read-conversation.ts";
+
+/**
+ * Durably record that a session's transcript is gone from disk, at `at` (an
+ * ISO-8601 instant). Non-destructive: it touches only the marker column, leaving
+ * the conversation's captured events, evidence, and any assessment intact. A
+ * marked session is excluded from future judge selection.
+ */
+export function markTranscriptMissing(
+  db: Database,
+  sessionId: string,
+  at: string,
+): void {
+  db.prepare(
+    "UPDATE conversations SET transcript_missing_at = ? WHERE session_id = ?",
+  ).run(at, sessionId);
+}
 
 /** Options governing which matching conversations a sweep selects. */
 export interface SelectOptions {
@@ -32,7 +55,8 @@ export interface SelectOptions {
 /**
  * Select the conversations a sweep should judge. With `force: false` (default
  * sweep behavior) this is the unjudged subset of the filtered conversations;
- * with `force: true` it is every matching conversation.
+ * with `force: true` it is every matching conversation. A transcript-missing
+ * session is excluded either way.
  */
 export function selectSessionsToJudge(
   db: Database,
@@ -41,7 +65,9 @@ export function selectSessionsToJudge(
   now: () => number = Date.now,
 ): SessionSummary[] {
   return listSessions(db, filter, now).filter(
-    (session) => options.force || !session.judged,
+    (session) =>
+      session.transcriptMissingAt === null &&
+      (options.force || !session.judged),
   );
 }
 
@@ -72,8 +98,10 @@ export interface SweepFailure {
  * The accounting for one sweep. `judged` is every conversation whose judge
  * resolved (the honest aggregate); `complete`, `signalsOnly`, and `incomplete`
  * partition that aggregate by how each run finished. `failed` are the judges that
- * threw (continue-on-error); `skipped` were selected but never attempted because
- * the engineer quit between batches.
+ * threw a transient or judge-unavailable error (continue-on-error, still
+ * retriable); `missingTranscript` are the ones whose transcript was confirmed
+ * gone and durably marked so later sweeps skip them; `skipped` were selected but
+ * never attempted because the engineer quit between batches.
  */
 export interface SweepSummary {
   readonly judged: readonly SessionSummary[];
@@ -82,6 +110,14 @@ export interface SweepSummary {
   readonly incomplete: readonly SessionSummary[];
   readonly failed: readonly SweepFailure[];
   readonly skipped: readonly SessionSummary[];
+  /**
+   * Sessions this sweep confirmed had no transcript on disk and durably marked
+   * so future sweeps skip them (distinct from `failed`, which is a transient or
+   * judge-unavailable throw that may succeed on a later run). Because selection
+   * already excludes previously-marked sessions, this bucket is exactly the
+   * newly-marked-this-run set.
+   */
+  readonly missingTranscript: readonly SessionSummary[];
 }
 
 /** Inputs to {@link runSweep}; judge, decision, and clock are injected. */
@@ -115,11 +151,12 @@ export async function runSweep(
       `batchSize must be a positive integer, got ${options.batchSize}`,
     );
   }
+  const nowMs = options.now ?? Date.now;
   const selected = selectSessionsToJudge(
     db,
     options.filter,
     { force: options.force },
-    options.now,
+    nowMs,
   );
   const judged: SessionSummary[] = [];
   const complete: SessionSummary[] = [];
@@ -127,6 +164,7 @@ export async function runSweep(
   const incomplete: SessionSummary[] = [];
   const failed: SweepFailure[] = [];
   const skipped: SessionSummary[] = [];
+  const missingTranscript: SessionSummary[] = [];
   let runAll = false;
   for (let i = 0; i < selected.length; i += options.batchSize) {
     if (i > 0 && !runAll) {
@@ -147,11 +185,31 @@ export async function runSweep(
         else if (outcome === "signals-only") signalsOnly.push(session);
         else incomplete.push(session);
       } catch (caught) {
+        // A confirmed-gone transcript is permanent: mark it durably and bucket
+        // it apart from generic failures so future selection skips it. Every
+        // other throw (transient, judge-unavailable) stays retriable in `failed`.
+        if (caught instanceof TranscriptNotFoundError) {
+          markTranscriptMissing(
+            db,
+            session.sessionId,
+            new Date(nowMs()).toISOString(),
+          );
+          missingTranscript.push(session);
+          continue;
+        }
         const error =
           caught instanceof Error ? caught : new Error(String(caught));
         failed.push({ session, error });
       }
     }
   }
-  return { judged, complete, signalsOnly, incomplete, failed, skipped };
+  return {
+    judged,
+    complete,
+    signalsOnly,
+    incomplete,
+    failed,
+    skipped,
+    missingTranscript,
+  };
 }

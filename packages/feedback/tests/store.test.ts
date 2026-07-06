@@ -70,6 +70,26 @@ test("openStore creates the conversation_setup_snapshot provenance table (v7)", 
   });
 });
 
+test("openStore adds the nullable transcript_missing_at marker column on conversations (v9)", () => {
+  withTempDir((dir) => {
+    const store = openStore(join(dir, "feedback.db"));
+    try {
+      const columns = store.db
+        .prepare("PRAGMA table_info(conversations)")
+        .all() as ReadonlyArray<{ name: string; notnull: number }>;
+      const marker = columns.find(
+        (column) => column.name === "transcript_missing_at",
+      );
+      expect(marker).toBeDefined();
+      // Nullable: an unmarked conversation carries no marker, and the column is
+      // added to an existing table so it cannot be NOT NULL without a default.
+      expect(marker!.notnull).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+});
+
 test("conversation_setup_snapshot.session_id enforces a foreign key on conversations", () => {
   withTempDir((dir) => {
     const store = openStore(join(dir, "feedback.db"));

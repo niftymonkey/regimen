@@ -102,6 +102,7 @@ import {
   type BatchDecision,
   type SweepOutcome,
 } from "../judged/sweep.ts";
+import { TranscriptNotFoundError } from "../judged/read-conversation.ts";
 import {
   planInstall,
   serviceFileBytes,
@@ -671,14 +672,19 @@ export async function assessAll(options: {
     // calls could otherwise disagree across a relative boundary.
     const sweepNow = Date.now();
     const now = (): number => sweepNow;
-    const matched = listSessions(store.db, options.filter, now).length;
-    // already-judged is the complement of the unjudged (force:false) selection,
-    // so the count stays accurate even when --force grows toJudge to everything.
-    const unjudged = selectSessionsToJudge(
-      store.db,
-      options.filter,
-      { force: false },
-      now,
+    const sessions = listSessions(store.db, options.filter, now);
+    const matched = sessions.length;
+    // Count the fixed facts straight from the session state so they never fold
+    // into each other: `missing` is durably marked transcript-gone, and
+    // `alreadyJudged` is judged with the transcript still present (a missing
+    // session was never judged, so the two buckets stay disjoint). Both are
+    // independent of `force`; only `toJudge` grows when `force` re-offers the
+    // already-judged.
+    const missing = sessions.filter(
+      (s) => s.transcriptMissingAt !== null,
+    ).length;
+    const alreadyJudged = sessions.filter(
+      (s) => s.judged && s.transcriptMissingAt === null,
     ).length;
     const toJudge = selectSessionsToJudge(
       store.db,
@@ -687,14 +693,14 @@ export async function assessAll(options: {
       now,
     ).length;
     process.stdout.write(
-      `sweep: matched ${matched}, already judged ${matched - unjudged}, to judge ${toJudge}\n`,
+      `sweep: matched ${matched}, already judged ${alreadyJudged}, missing ${missing}, to judge ${toJudge}\n`,
     );
 
     // Nothing to judge: report the empty run and skip judge-backend resolution,
     // so an all-judged sweep succeeds without a configured judge.
     if (toJudge === 0) {
       process.stdout.write(
-        `done: judged 0 (complete 0, signals-only 0, incomplete 0), failed 0, skipped 0\n`,
+        `done: judged 0 (complete 0, signals-only 0, incomplete 0), missing 0, failed 0, skipped 0\n`,
       );
       return 0;
     }
@@ -752,9 +758,12 @@ export async function assessAll(options: {
         process.stdout.write(`${label} -> ${shown}\n`);
         return sweepOutcome;
       } catch (caught) {
-        // Mark the failure inline so progress numbering stays contiguous, then
-        // re-throw so the engine records it for the end-summary detail.
-        process.stdout.write(`${label} -> FAILED\n`);
+        // Print inline so progress numbering stays contiguous, then re-throw so
+        // the engine records it. A gone transcript is durably marked and reported
+        // apart from a generic failure, so label the two distinctly.
+        const inline =
+          caught instanceof TranscriptNotFoundError ? "MISSING" : "FAILED";
+        process.stdout.write(`${label} -> ${inline}\n`);
         throw caught;
       }
     };
@@ -767,8 +776,13 @@ export async function assessAll(options: {
       now,
     });
     process.stdout.write(
-      `done: judged ${summary.judged.length} (complete ${summary.complete.length}, signals-only ${summary.signalsOnly.length}, incomplete ${summary.incomplete.length}), failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
+      `done: judged ${summary.judged.length} (complete ${summary.complete.length}, signals-only ${summary.signalsOnly.length}, incomplete ${summary.incomplete.length}), missing ${summary.missingTranscript.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
     );
+    for (const missing of summary.missingTranscript) {
+      process.stdout.write(
+        `  missing: ${missing.harness} ${missing.sessionId} (transcript gone; marked so future sweeps skip it)\n`,
+      );
+    }
     for (const failure of summary.failed) {
       process.stdout.write(
         `  failed: ${failure.session.harness} ${failure.session.sessionId} (${failure.error.message})\n`,

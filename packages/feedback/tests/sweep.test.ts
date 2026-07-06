@@ -25,6 +25,8 @@ import {
   selectSessionsToJudge,
   type BatchDecision,
 } from "../src/judged/sweep.ts";
+import { TranscriptNotFoundError } from "../src/judged/read-conversation.ts";
+import { listSessions } from "../src/sessions.ts";
 
 const NOW = () => Date.parse("2026-06-15T12:00:00.000Z");
 const ASSIGNMENT = "whole-conversation";
@@ -256,6 +258,73 @@ test("a force re-sweep selects an already-judged conversation and supersedes its
   });
 });
 
+/** Durably mark a session's transcript gone, as a sweep does on confirming it. */
+function markMissing(store: Store, sessionId: string, at: string): void {
+  store.db
+    .prepare(
+      "UPDATE conversations SET transcript_missing_at = ? WHERE session_id = ?",
+    )
+    .run(at, sessionId);
+}
+
+test("selectSessionsToJudge excludes a transcript-missing session under force:false and force:true", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "gone",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    seedSession(store.db, {
+      sessionId: "live",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-14T10:00:00.000Z",
+      lastEventAt: "2026-06-14T10:30:00.000Z",
+    });
+    markMissing(store, "gone", "2026-07-05T00:00:00.000Z");
+    // A gone transcript is gone permanently, so even --force does not re-attempt it.
+    expect(
+      selectSessionsToJudge(store.db, {}, { force: false }, NOW).map(
+        (s) => s.sessionId,
+      ),
+    ).toEqual(["live"]);
+    expect(
+      selectSessionsToJudge(store.db, {}, { force: true }, NOW).map(
+        (s) => s.sessionId,
+      ),
+    ).toEqual(["live"]);
+  });
+});
+
+test("a transcript-missing session that is also judged stays out of selection under both force values", () => {
+  // The marker is decisive: even a session carrying a full assessment is excluded
+  // once marked, so a previously-marked session that later judges does not slip
+  // back into future selection.
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "gone-judged",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    writeAssessment(
+      store,
+      run("gone-judged", "run-gj"),
+      resultWithOutcome("accomplished-cleanly"),
+    );
+    markMissing(store, "gone-judged", "2026-07-05T00:00:00.000Z");
+    expect(selectSessionsToJudge(store.db, {}, { force: false }, NOW)).toEqual(
+      [],
+    );
+    expect(selectSessionsToJudge(store.db, {}, { force: true }, NOW)).toEqual(
+      [],
+    );
+  });
+});
+
 test("selectSessionsToJudge passes the filter through to listSessions", () => {
   withStore((store) => {
     seedSession(store.db, {
@@ -447,6 +516,67 @@ test("runSweep records a failed judge and continues with the rest", async () => 
     expect(summary.failed.map((f) => f.session.sessionId)).toEqual(["s2"]);
     expect(summary.failed[0]!.error).toBe(boom);
     expect(summary.skipped).toEqual([]);
+  });
+});
+
+test("runSweep marks a transcript-missing session, buckets it under missingTranscript, and does not fail it", async () => {
+  await withStoreAsync(async (store) => {
+    seedThree(store);
+    const judge = async (session: SessionSummary): Promise<void> => {
+      if (session.sessionId === "s2") {
+        throw new TranscriptNotFoundError("s2", "/nowhere/sessions");
+      }
+    };
+    const summary = await runSweep(store.db, {
+      filter: {},
+      force: false,
+      batchSize: 10,
+      judge,
+      decideNextBatch: async (): Promise<BatchDecision> => "continue",
+      now: NOW,
+    });
+    // The gone transcript is its own bucket, not a generic failure.
+    expect(summary.missingTranscript.map((s) => s.sessionId)).toEqual(["s2"]);
+    expect(summary.failed).toEqual([]);
+    expect(summary.judged.map((s) => s.sessionId)).toEqual(["s1", "s3"]);
+    // It is durably marked, so listSessions now carries the marker and a later
+    // sweep's selection excludes it for free.
+    const marked = listSessions(store.db, {}, NOW).find(
+      (s) => s.sessionId === "s2",
+    );
+    expect(marked?.transcriptMissingAt).toBe(new Date(NOW()).toISOString());
+    expect(
+      selectSessionsToJudge(store.db, {}, { force: false }, NOW).map(
+        (s) => s.sessionId,
+      ),
+    ).not.toContain("s2");
+  });
+});
+
+test("runSweep does NOT mark a session on a transient (non-transcript) judge error", async () => {
+  await withStoreAsync(async (store) => {
+    seedThree(store);
+    const judge = async (session: SessionSummary): Promise<void> => {
+      if (session.sessionId === "s2") {
+        throw new Error("judge model temporarily unavailable");
+      }
+    };
+    const summary = await runSweep(store.db, {
+      filter: {},
+      force: false,
+      batchSize: 10,
+      judge,
+      decideNextBatch: async (): Promise<BatchDecision> => "continue",
+      now: NOW,
+    });
+    // A transient failure may succeed on a later run, so it stays in `failed`
+    // and is never marked (it must remain retriable).
+    expect(summary.failed.map((f) => f.session.sessionId)).toEqual(["s2"]);
+    expect(summary.missingTranscript).toEqual([]);
+    const notMarked = listSessions(store.db, {}, NOW).find(
+      (s) => s.sessionId === "s2",
+    );
+    expect(notMarked?.transcriptMissingAt).toBeNull();
   });
 });
 
