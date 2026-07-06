@@ -335,7 +335,12 @@ export function install(
     "Regimen install (capture then enforcement then guidance)\n",
   );
 
-  writeEnvTemplateIfAbsent(configDir(), dryRun);
+  try {
+    writeEnvTemplateIfAbsent(configDir(), dryRun);
+  } catch {
+    // An unresolvable config dir (no HOME/APPDATA) must not abort install;
+    // the template is a courtesy, matching runCli's env-file tolerance.
+  }
 
   let manifest = readManifest(manifestPath(dir));
   for (const harness of targets) {

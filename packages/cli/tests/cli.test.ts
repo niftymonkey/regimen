@@ -198,6 +198,27 @@ test("install --dry-run never writes an env template", () => {
   expect(existsSync(join(process.env.REGIMEN_CONFIG_DIR!, "env"))).toBe(false);
 });
 
+test("install succeeds when no config dir is resolvable; the template is skipped", () => {
+  const saved = {
+    config: process.env.REGIMEN_CONFIG_DIR,
+    xdg: process.env.XDG_CONFIG_HOME,
+    home: process.env.HOME,
+  };
+  delete process.env.REGIMEN_CONFIG_DIR;
+  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.HOME;
+  try {
+    const calls: Call[] = [];
+    expect(install(["install"], recordingSteps(calls))).toBe(0);
+  } finally {
+    if (saved.config !== undefined) {
+      process.env.REGIMEN_CONFIG_DIR = saved.config;
+    }
+    if (saved.xdg !== undefined) process.env.XDG_CONFIG_HOME = saved.xdg;
+    if (saved.home !== undefined) process.env.HOME = saved.home;
+  }
+});
+
 test("install never overwrites an env template that already exists", () => {
   const calls: Call[] = [];
   const envPath = join(process.env.REGIMEN_CONFIG_DIR!, "env");
