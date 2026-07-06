@@ -29,13 +29,18 @@ export {
 } from "./harness/resolve.ts";
 export { resolveHarnessHome } from "./harness/home.ts";
 export {
+  extractCommandPath,
+  planDeadLeafRemoval,
   planHooks,
   planHooksRemoval,
   type BuiltLeaves,
+  type DeadLeaf,
   type GroupDecoration,
   type HooksFile as ParsedHooksFile,
   type LeafHook,
   type MatcherGroup,
+  type PruneContext,
+  type PrunePlan,
   type RegimenMarker,
   type UnwirePlan,
   type VersionedHooksFile,
