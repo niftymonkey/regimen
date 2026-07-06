@@ -10,7 +10,13 @@
  * the test sets that env around each call and restores it after.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -230,6 +236,44 @@ function seedManifest(dir: string, entries: ManifestEntry[]): void {
     entries,
   });
 }
+
+test("update writes an env template into the config dir when one is absent", () => {
+  const dir = tempDataDir();
+  delete process.env.REGIMEN_HARNESS;
+  seedManifest(dir, [
+    { harness: "codex", pillars: ["feedback"], scope: "config-home" },
+  ]);
+  const calls: Call[] = [];
+  const exit = update(["update"], recordingSteps(calls), lifecycleDeps(calls));
+  expect(exit).toBe(0);
+  expect(existsSync(join(process.env.REGIMEN_CONFIG_DIR!, "env"))).toBe(true);
+});
+
+test("update never overwrites an env template that already exists", () => {
+  const dir = tempDataDir();
+  delete process.env.REGIMEN_HARNESS;
+  seedManifest(dir, [
+    { harness: "codex", pillars: ["feedback"], scope: "config-home" },
+  ]);
+  const envPath = join(process.env.REGIMEN_CONFIG_DIR!, "env");
+  writeFileSync(envPath, "REGIMEN_JUDGE_MODEL=already-set\n");
+  const calls: Call[] = [];
+  update(["update"], recordingSteps(calls), lifecycleDeps(calls));
+  expect(readFileSync(envPath, "utf8")).toBe(
+    "REGIMEN_JUDGE_MODEL=already-set\n",
+  );
+});
+
+test("update --dry-run never writes an env template", () => {
+  const dir = tempDataDir();
+  delete process.env.REGIMEN_HARNESS;
+  seedManifest(dir, [
+    { harness: "codex", pillars: ["feedback"], scope: "config-home" },
+  ]);
+  const calls: Call[] = [];
+  update(["update", "--dry-run"], recordingSteps(calls), lifecycleDeps(calls));
+  expect(existsSync(join(process.env.REGIMEN_CONFIG_DIR!, "env"))).toBe(false);
+});
 
 test("update re-runs the install for each recorded entry, targeting each harness", () => {
   const dir = tempDataDir();
