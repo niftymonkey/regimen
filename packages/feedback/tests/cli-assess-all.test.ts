@@ -530,8 +530,13 @@ test("assessAll marks a missing transcript, reports it in the missing bucket, an
     });
     expect(exit).toBe(0);
     // SESSION is already judged and OTHER is transcript-missing, so nothing is
-    // selected; the marked session never reaches the judge again.
-    expect(stdout2.read()).toContain("to judge 0");
+    // selected; the marked session never reaches the judge again. The header
+    // keeps the two buckets disjoint: one judged, one missing, never folding the
+    // missing session into "already judged".
+    const header2 = stdout2.read();
+    expect(header2).toContain("already judged 1");
+    expect(header2).toContain("missing 1");
+    expect(header2).toContain("to judge 0");
     expect(mock2.count()).toBe(0);
   } finally {
     mock2.stop();

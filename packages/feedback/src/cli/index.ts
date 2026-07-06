@@ -672,14 +672,19 @@ export async function assessAll(options: {
     // calls could otherwise disagree across a relative boundary.
     const sweepNow = Date.now();
     const now = (): number => sweepNow;
-    const matched = listSessions(store.db, options.filter, now).length;
-    // already-judged is the complement of the unjudged (force:false) selection,
-    // so the count stays accurate even when --force grows toJudge to everything.
-    const unjudged = selectSessionsToJudge(
-      store.db,
-      options.filter,
-      { force: false },
-      now,
+    const sessions = listSessions(store.db, options.filter, now);
+    const matched = sessions.length;
+    // Count the fixed facts straight from the session state so they never fold
+    // into each other: `missing` is durably marked transcript-gone, and
+    // `alreadyJudged` is judged with the transcript still present (a missing
+    // session was never judged, so the two buckets stay disjoint). Both are
+    // independent of `force`; only `toJudge` grows when `force` re-offers the
+    // already-judged.
+    const missing = sessions.filter(
+      (s) => s.transcriptMissingAt !== null,
+    ).length;
+    const alreadyJudged = sessions.filter(
+      (s) => s.judged && s.transcriptMissingAt === null,
     ).length;
     const toJudge = selectSessionsToJudge(
       store.db,
@@ -688,7 +693,7 @@ export async function assessAll(options: {
       now,
     ).length;
     process.stdout.write(
-      `sweep: matched ${matched}, already judged ${matched - unjudged}, to judge ${toJudge}\n`,
+      `sweep: matched ${matched}, already judged ${alreadyJudged}, missing ${missing}, to judge ${toJudge}\n`,
     );
 
     // Nothing to judge: report the empty run and skip judge-backend resolution,
