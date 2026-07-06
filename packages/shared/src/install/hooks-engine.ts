@@ -345,3 +345,215 @@ export function planHooksRemoval<Change>(
   }
   return planNestedHooksRemoval(existing as HooksFile | undefined, role);
 }
+
+/**
+ * The interpreter words a hook command may lead with (or a path whose basename is
+ * one of them): the leaf's real script is the first ABSOLUTE path token that
+ * follows, never the interpreter itself. Lowercased and `.exe`-stripped before the
+ * lookup so a Windows `bun.exe` still reads as the interpreter.
+ */
+const INTERPRETERS: ReadonlySet<string> = new Set([
+  "bun",
+  "bash",
+  "node",
+  "sh",
+]);
+
+/** A leading `VAR=value` environment assignment, skipped before the interpreter. */
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * Split a hook command into tokens on unquoted whitespace, treating a
+ * double-quoted run as one token (so `"/abs/path with spaces/x.ts"` stays whole).
+ * The rule of thumb the harnesses write to: double quotes group, nothing else is
+ * special. Single quotes and escapes are not interpreted (no harness emits them).
+ */
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let started = false;
+  let inQuote = false;
+  for (const ch of command) {
+    if (ch === '"') {
+      inQuote = !inQuote;
+      started = true;
+      continue;
+    }
+    if (!inQuote && /\s/.test(ch)) {
+      if (started) tokens.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (started) tokens.push(current);
+  return tokens;
+}
+
+/** The basename's interpreter identity: `bun`/`bash`/`node`/`sh`, `.exe`-tolerant. */
+function isInterpreterToken(token: string): boolean {
+  const base = token.split(/[/\\]/).pop() ?? token;
+  return INTERPRETERS.has(base.toLowerCase().replace(/\.exe$/, ""));
+}
+
+/** An absolute path token: POSIX `/abs` or a Windows drive root `C:/` or `C:\`. */
+function isAbsolutePathToken(token: string): boolean {
+  return token.startsWith("/") || /^[A-Za-z]:[/\\]/.test(token);
+}
+
+/**
+ * The script path a hook command runs, or undefined when none can be extracted.
+ * Tokenizes (double quotes grouping), skips leading `VAR=value` assignments and a
+ * single interpreter word (`bun`/`bash`/`node`/`sh`, or a path to one), then
+ * returns the first remaining ABSOLUTE path token. Undefined on uncertainty (no
+ * absolute path token) so a caller never acts on a command it could not read.
+ */
+export function extractCommandPath(command: string): string | undefined {
+  const tokens = tokenizeCommand(command);
+  let i = 0;
+  while (i < tokens.length && ENV_ASSIGNMENT.test(tokens[i]!)) i++;
+  if (i < tokens.length && isInterpreterToken(tokens[i]!)) i++;
+  for (; i < tokens.length; i++) {
+    if (isAbsolutePathToken(tokens[i]!)) return tokens[i];
+  }
+  return undefined;
+}
+
+/**
+ * A dead Regimen-owned leaf: a leaf carrying a `_regimen` marker whose extracted
+ * script path no longer exists. Carries what a report or a removal line needs (the
+ * event, the marker role and id, the command).
+ */
+export interface DeadLeaf {
+  readonly event: string;
+  readonly role: RegimenMarker["role"];
+  readonly id?: string;
+  readonly command: string;
+}
+
+/** What {@link planDeadLeafRemoval} needs from the outside: on-disk existence and the clone roots. */
+export interface PruneContext {
+  /** True iff the leaf's extracted script path exists on disk. */
+  readonly scriptExists: (path: string) => boolean;
+  /**
+   * The Regimen clone roots a dead marked leaf must sit under to be auto-removed
+   * (the manifest's recorded clone before the update restamps it, and the current
+   * clone). A dead marked leaf outside all of them is reported, never removed.
+   */
+  readonly clonePaths: readonly string[];
+}
+
+/**
+ * The two-tier prune plan: `removed` are the dead marked leaves proven to sit
+ * inside a Regimen clone (safe to auto-remove); `reported` are dead marked leaves
+ * outside every known clone (an engineer's own gate on a moved or unavailable
+ * path), surfaced but never removed. `hooks` is the input with only the `removed`
+ * leaves stripped and any group they emptied pruned.
+ */
+export interface PrunePlan {
+  readonly hooks: HooksFile | VersionedHooksFile;
+  readonly removed: ReadonlyArray<DeadLeaf>;
+  readonly reported: ReadonlyArray<DeadLeaf>;
+}
+
+/**
+ * The extracted script path of a marked leaf whose script is missing, or
+ * undefined when the leaf is unmarked, has no extractable path, or the path still
+ * exists. Unmarked leaves and leaves whose command cannot be read are never dead,
+ * so a caller never removes or reports them.
+ */
+function deadScriptPath(
+  leaf: LeafHook,
+  scriptExists: (path: string) => boolean,
+): string | undefined {
+  if (leaf._regimen === undefined) return undefined;
+  const path = extractCommandPath(leaf.command);
+  if (path === undefined) return undefined;
+  return scriptExists(path) ? undefined : path;
+}
+
+/** Project a marked leaf onto the {@link DeadLeaf} report shape for one event. */
+function toDeadLeaf(event: string, leaf: LeafHook): DeadLeaf | undefined {
+  const marker = leaf._regimen;
+  if (marker === undefined) return undefined;
+  return {
+    event,
+    role: marker.role,
+    command: leaf.command,
+    ...(marker.id === undefined ? {} : { id: marker.id }),
+  };
+}
+
+/** Path segments, separator-normalized, with empty and `.` segments dropped. */
+function pathSegments(path: string): string[] {
+  return path
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((seg) => seg.length > 0 && seg !== ".");
+}
+
+/**
+ * True iff `child` lies at or under `parent` by whole path segments, so a clone
+ * `/tmp/x/regimen` contains `/tmp/x/regimen/gate.ts` but NOT the sibling
+ * `/tmp/x/regimen-other/gate.ts` (a raw string prefix would wrongly match).
+ */
+function isPathInside(child: string, parent: string): boolean {
+  const c = pathSegments(child);
+  const p = pathSegments(parent);
+  if (p.length === 0 || c.length < p.length) return false;
+  return p.every((seg, i) => seg === c[i]);
+}
+
+/**
+ * A prune role over dead marked leaves: `owns` selects which of them this pass
+ * removes (inside-clone) or merely visits (outside-clone), given the leaf's dead
+ * script path. The removal machinery then strips the owned leaves and prunes any
+ * group they emptied, identically to a normal unwire.
+ */
+function deadLeafRole(
+  ctx: PruneContext,
+  owns: (deadPath: string) => boolean,
+): WireRole<DeadLeaf> {
+  return {
+    isOwnLeaf: (leaf) => {
+      const dead = deadScriptPath(leaf, ctx.scriptExists);
+      return dead !== undefined && owns(dead);
+    },
+    events: [],
+    buildLeaves: () => ({ leaves: [], added: [], unchanged: [] }),
+    decorationFor: () => undefined,
+    removalChangeFor: toDeadLeaf,
+  };
+}
+
+/**
+ * Plan the two-tier dead-leaf prune (ADR: `regimen update` prunes only what it can
+ * prove it installed). A leaf is a removal candidate only when it carries a
+ * `_regimen` marker AND its extracted script path is missing AND that path sits
+ * inside one of `ctx.clonePaths`; such leaves are stripped from `hooks` and listed
+ * in `removed`. A marked, dead leaf whose path is outside every clone is listed in
+ * `reported` and left untouched. Unmarked leaves, live leaves, and leaves whose
+ * command yields no path are never touched and never reported. Reuses the shared
+ * removal planner for both format branches, so no format knowledge is duplicated.
+ */
+export function planDeadLeafRemoval(
+  existing: HooksFile | VersionedHooksFile | undefined,
+  format: HooksFormat,
+  ctx: PruneContext,
+): PrunePlan {
+  const inside = (path: string): boolean =>
+    ctx.clonePaths.some((clone) => isPathInside(path, clone));
+  const removal = planHooksRemoval(existing, deadLeafRole(ctx, inside), format);
+  const report = planHooksRemoval(
+    existing,
+    deadLeafRole(ctx, (path) => !inside(path)),
+    format,
+  );
+  return {
+    hooks: removal.hooks,
+    removed: removal.removed,
+    reported: report.removed,
+  };
+}

@@ -29,12 +29,20 @@
  * daemon) stay standalone and absolute-path-invoked; this collapse touches only the
  * user-facing command layer.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  asHarness,
   configDir,
   dataDir,
+  type DeadLeaf,
+  harnessContract,
+  type ParsedHooksFile,
+  planDeadLeafRemoval,
   resolveHarnessFromEnvironment,
+  resolveHarnessHome,
+  type VersionedHooksFile,
 } from "@regimen/shared";
 import { loadEnvFile } from "./env-file.ts";
 import {
@@ -426,6 +434,97 @@ export function uninstall(
 }
 
 /**
+ * The hooks file a recorded manifest entry wires into, or undefined when the
+ * harness has no registered contract. A per-workspace entry (Gemini, ADR-0011)
+ * carries `workspace:<dir>` in its scope and lands under that workspace's config
+ * subdirectory; a config-home entry lands under the harness's resolved config
+ * home. The path resolution mirrors the capture installer so update opens exactly
+ * the file the install wrote.
+ */
+function entryHooksPath(entry: ManifestEntry): string | undefined {
+  const harness = asHarness(entry.harness);
+  if (harness === undefined) return undefined;
+  const contract = harnessContract(harness);
+  if (contract === undefined) return undefined;
+  const relative = contract.hooksFile.relativePath;
+  if (entry.scope.startsWith(WORKSPACE_SCOPE_PREFIX)) {
+    const workspace = entry.scope.slice(WORKSPACE_SCOPE_PREFIX.length);
+    return join(workspace, contract.configHome.defaultSubdir, relative);
+  }
+  return join(resolveHarnessHome(contract, process.env, homedir()), relative);
+}
+
+/** The trailing gate id a dead-leaf report line carries, or nothing for a capture leaf. */
+function deadLeafSuffix(leaf: DeadLeaf): string {
+  return leaf.id === undefined ? "" : ` (${leaf.id})`;
+}
+
+/**
+ * Prune dead Regimen-owned hook leaves for every recorded harness (ADR-0012:
+ * `regimen update` removes what a repo change stranded). For each manifest entry
+ * it opens that harness's hooks file honoring the entry's scope, and via the
+ * shared two-tier planner removes only marked leaves whose script is gone AND
+ * provably inside a Regimen clone (the manifest's recorded clone read before the
+ * restamp, or the current clone), rewriting the file. A marked, dead leaf outside
+ * every clone is an engineer's own gate on a moved or unavailable path: it is
+ * reported with a warning and left untouched, never removed on uncertainty.
+ * Unmarked leaves are neither touched nor reported. A missing or unreadable hooks
+ * file is a no-op, and `--dry-run` reports without writing.
+ */
+export function pruneDeadHooks(
+  manifest: Manifest,
+  currentClonePath: string,
+  dryRun: boolean,
+): void {
+  const clonePaths = [manifest.clonePath, currentClonePath];
+  for (const entry of manifest.entries) {
+    const harness = asHarness(entry.harness);
+    if (harness === undefined) continue;
+    const contract = harnessContract(harness);
+    if (contract === undefined) continue;
+    const path = entryHooksPath(entry);
+    if (path === undefined || !existsSync(path)) continue;
+
+    let parsed: ParsedHooksFile | VersionedHooksFile;
+    try {
+      parsed = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      continue;
+    }
+
+    let plan;
+    try {
+      plan = planDeadLeafRemoval(parsed, contract.hooksFile.format, {
+        scriptExists: existsSync,
+        clonePaths,
+      });
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      continue;
+    }
+
+    for (const leaf of plan.reported) {
+      process.stdout.write(
+        `warning: a ${leaf.role} leaf on ${leaf.event}${deadLeafSuffix(leaf)} ` +
+          `points at a missing script Regimen cannot prove it installed: ${leaf.command}\n`,
+      );
+      process.stdout.write(
+        "  Regimen will not remove what it did not install; remove or fix it yourself if it is stale.\n",
+      );
+    }
+    for (const leaf of plan.removed) {
+      const verb = dryRun ? "would remove" : "removed";
+      process.stdout.write(
+        `${verb} dead ${leaf.role} leaf on ${leaf.event}${deadLeafSuffix(leaf)}: ${leaf.command}\n`,
+      );
+    }
+    if (!dryRun && plan.removed.length > 0) {
+      writeFileSync(path, `${JSON.stringify(plan.hooks, null, 2)}\n`);
+    }
+  }
+}
+
+/**
  * `regimen update`: re-apply the recorded install from the CURRENT clone so a
  * moved or upgraded clone rewrites the absolute paths baked into the installed
  * hooks, gates, and service definition (ADR-0012). It reads the manifest and,
@@ -466,6 +565,8 @@ export function update(
     const code = runPillars(entry.harness, dir, dryRun, steps, true);
     if (code !== 0) return code;
   }
+
+  pruneDeadHooks(existing, meta.clonePath, dryRun);
 
   const cycle = life.cycleDaemon(dir, dryRun);
   if (cycle !== 0) {
