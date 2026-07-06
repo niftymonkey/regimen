@@ -559,6 +559,13 @@ export function update(
   const dryRun = argv.includes("--dry-run");
   process.stdout.write("Regimen update (re-applying recorded installs)\n");
 
+  try {
+    writeEnvTemplateIfAbsent(configDir(), dryRun);
+  } catch {
+    // An unresolvable config dir (no HOME/APPDATA) must not abort update;
+    // the template is a courtesy, matching install's tolerance.
+  }
+
   const meta = installMeta(life);
   const updated: Manifest = {
     ...existing,
