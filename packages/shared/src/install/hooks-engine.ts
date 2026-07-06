@@ -405,20 +405,25 @@ function isAbsolutePathToken(token: string): boolean {
 
 /**
  * The script path a hook command runs, or undefined when none can be extracted.
- * Tokenizes (double quotes grouping), skips leading `VAR=value` assignments and a
- * single interpreter word (`bun`/`bash`/`node`/`sh`, or a path to one), then
- * returns the first remaining ABSOLUTE path token. Undefined on uncertainty (no
- * absolute path token) so a caller never acts on a command it could not read.
+ * Tokenizes (double quotes grouping) and skips leading `VAR=value` assignments.
+ * After a known interpreter word (`bun`/`bash`/`node`/`sh`, or a path to one) the
+ * script is the first following ABSOLUTE path token; with any other executable
+ * only the executable token itself counts when absolute, never its arguments (an
+ * absolute argument to an unknown command proves nothing about what runs).
+ * Undefined on uncertainty so a caller never acts on a command it could not read.
  */
 export function extractCommandPath(command: string): string | undefined {
   const tokens = tokenizeCommand(command);
   let i = 0;
   while (i < tokens.length && ENV_ASSIGNMENT.test(tokens[i]!)) i++;
-  if (i < tokens.length && isInterpreterToken(tokens[i]!)) i++;
-  for (; i < tokens.length; i++) {
-    if (isAbsolutePathToken(tokens[i]!)) return tokens[i];
+  if (i >= tokens.length) return undefined;
+  if (isInterpreterToken(tokens[i]!)) {
+    for (i++; i < tokens.length; i++) {
+      if (isAbsolutePathToken(tokens[i]!)) return tokens[i];
+    }
+    return undefined;
   }
-  return undefined;
+  return isAbsolutePathToken(tokens[i]!) ? tokens[i] : undefined;
 }
 
 /**
@@ -486,22 +491,36 @@ function toDeadLeaf(event: string, leaf: LeafHook): DeadLeaf | undefined {
   };
 }
 
-/** Path segments, separator-normalized, with empty and `.` segments dropped. */
-function pathSegments(path: string): string[] {
-  return path
-    .replace(/\\/g, "/")
-    .split("/")
-    .filter((seg) => seg.length > 0 && seg !== ".");
+/**
+ * Path segments, separator-normalized, with empty and `.` segments dropped and
+ * `..` collapsed into its parent. Undefined when a `..` underflows the root: such
+ * a path cannot be located, and containment must never be proven from it.
+ */
+function pathSegments(path: string): string[] | undefined {
+  const segments: string[] = [];
+  for (const seg of path.replace(/\\/g, "/").split("/")) {
+    if (seg.length === 0 || seg === ".") continue;
+    if (seg === "..") {
+      if (segments.length === 0) return undefined;
+      segments.pop();
+      continue;
+    }
+    segments.push(seg);
+  }
+  return segments;
 }
 
 /**
- * True iff `child` lies at or under `parent` by whole path segments, so a clone
- * `/tmp/x/regimen` contains `/tmp/x/regimen/gate.ts` but NOT the sibling
- * `/tmp/x/regimen-other/gate.ts` (a raw string prefix would wrongly match).
+ * True iff `child` lies at or under `parent` by whole path segments after `..`
+ * collapsing, so a clone `/tmp/x/regimen` contains `/tmp/x/regimen/gate.ts` but
+ * NOT the sibling `/tmp/x/regimen-other/gate.ts` (a raw string prefix would
+ * wrongly match) and NOT `/tmp/x/regimen/../escapee.ts` (which resolves outside).
+ * False on any unresolvable path, so containment is never proven from one.
  */
 function isPathInside(child: string, parent: string): boolean {
   const c = pathSegments(child);
   const p = pathSegments(parent);
+  if (c === undefined || p === undefined) return false;
   if (p.length === 0 || c.length < p.length) return false;
   return p.every((seg, i) => seg === c[i]);
 }

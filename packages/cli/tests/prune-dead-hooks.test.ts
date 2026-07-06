@@ -8,7 +8,7 @@
  * real clone need exist; a missing hooks file is a no-op, and `--dry-run` writes
  * nothing.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
   mkdtempSync,
   mkdirSync,
@@ -34,6 +34,10 @@ import {
 
 const tempDirs: string[] = [];
 let savedDataDir: string | undefined;
+
+beforeEach(() => {
+  savedDataDir = process.env.REGIMEN_DATA_DIR;
+});
 
 afterEach(() => {
   if (savedDataDir === undefined) delete process.env.REGIMEN_DATA_DIR;
@@ -232,7 +236,6 @@ test("update prunes a dead leaf recorded in the manifest end to end", () => {
   const dataDirPath = tempDir();
   const workspace = tempDir();
   const recorded = "/recorded/regimen";
-  savedDataDir = process.env.REGIMEN_DATA_DIR;
   process.env.REGIMEN_DATA_DIR = dataDirPath;
 
   const hooksPath = writeGeminiHooks(workspace, [

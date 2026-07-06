@@ -42,6 +42,18 @@ test("extractCommandPath returns undefined when no absolute path is present", ()
   expect(extractCommandPath("bun ./relative.ts")).toBeUndefined();
 });
 
+test("extractCommandPath never reads an absolute argument to an unknown executable", () => {
+  expect(
+    extractCommandPath("echo /current/regimen/missing.ts"),
+  ).toBeUndefined();
+});
+
+test("extractCommandPath reads a direct script invocation with arguments", () => {
+  expect(extractCommandPath("/abs/gates/my-gate.sh --strict")).toBe(
+    "/abs/gates/my-gate.sh",
+  );
+});
+
 test("extractCommandPath reads a Windows drive-letter path", () => {
   expect(extractCommandPath("bun C:/regimen/capture.ts")).toBe(
     "C:/regimen/capture.ts",
@@ -151,6 +163,24 @@ test("nested: clone containment is by segment, so regimen-other is not treated a
 
   expect(plan.removed).toEqual([]);
   expect(plan.reported.map((l) => l.id)).toEqual(["sibling"]);
+});
+
+test("nested: a dead path that dot-dot-escapes the clone is reported, never removed", () => {
+  const file = nested("PreToolUse", [
+    {
+      type: "command",
+      command: "bun /tmp/clone/regimen/../outside/gate.ts",
+      _regimen: { v: 1, role: "gate", id: "escapee" },
+    },
+  ]);
+  const plan = planDeadLeafRemoval(
+    file,
+    "nested-matcher-groups",
+    allMissing(["/tmp/clone/regimen"]),
+  );
+  expect(plan.removed).toHaveLength(0);
+  expect(plan.reported).toHaveLength(1);
+  expect(plan.hooks).toEqual(file);
 });
 
 test("nested: an unmarked leaf and a live marked leaf are never touched or reported", () => {
