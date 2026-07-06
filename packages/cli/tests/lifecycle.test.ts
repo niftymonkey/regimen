@@ -119,13 +119,20 @@ const HARNESS_MARKERS = [
 ];
 const savedMarkers = new Map<string, string | undefined>();
 let savedDataDir: string | undefined;
+let savedConfigDir: string | undefined;
 
 // The harness is resolved from the environment, so a controlled env is the
 // faithful way to target a harness per test. Clear every CLI-set marker (and
 // REGIMEN_HARNESS) up front so the ambient agent the suite runs inside never
-// leaks a harness into a test that pins (or deliberately omits) its own.
+// leaks a harness into a test that pins (or deliberately omits) its own. Every
+// test also gets a temp config dir, since install now writes an env template
+// under the config dir and must never touch the host's real config home.
 beforeEach(() => {
   savedDataDir = process.env.REGIMEN_DATA_DIR;
+  savedConfigDir = process.env.REGIMEN_CONFIG_DIR;
+  const configDir = mkdtempSync(join(tmpdir(), "regimen-lifecycle-config-"));
+  tempDirs.push(configDir);
+  process.env.REGIMEN_CONFIG_DIR = configDir;
   for (const marker of HARNESS_MARKERS) {
     savedMarkers.set(marker, process.env[marker]);
     delete process.env[marker];
@@ -135,6 +142,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedDataDir === undefined) delete process.env.REGIMEN_DATA_DIR;
   else process.env.REGIMEN_DATA_DIR = savedDataDir;
+  if (savedConfigDir === undefined) delete process.env.REGIMEN_CONFIG_DIR;
+  else process.env.REGIMEN_CONFIG_DIR = savedConfigDir;
   for (const [marker, value] of savedMarkers) {
     if (value === undefined) delete process.env[marker];
     else process.env[marker] = value;

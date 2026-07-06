@@ -12,7 +12,13 @@
  *    temp data dir so the host's real store is never touched.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -180,6 +186,37 @@ test("install without --no-daemon leaves the daemon step in place", () => {
   expect(feedback.daemon).not.toBe(false);
 });
 
+test("install writes an env template into the config dir when one is absent", () => {
+  const calls: Call[] = [];
+  install(["install"], recordingSteps(calls));
+  expect(existsSync(join(process.env.REGIMEN_CONFIG_DIR!, "env"))).toBe(true);
+});
+
+test("install --dry-run never writes an env template", () => {
+  const calls: Call[] = [];
+  install(["install", "--dry-run"], recordingSteps(calls));
+  expect(existsSync(join(process.env.REGIMEN_CONFIG_DIR!, "env"))).toBe(false);
+});
+
+test("install never overwrites an env template that already exists", () => {
+  const calls: Call[] = [];
+  const envPath = join(process.env.REGIMEN_CONFIG_DIR!, "env");
+  writeFileSync(envPath, "REGIMEN_JUDGE_MODEL=already-set\n");
+  install(["install"], recordingSteps(calls));
+  expect(readFileSync(envPath, "utf8")).toBe(
+    "REGIMEN_JUDGE_MODEL=already-set\n",
+  );
+});
+
+test("uninstall never removes the env template; user configuration survives", () => {
+  const calls: Call[] = [];
+  install(["install"], recordingSteps(calls));
+  const envPath = join(process.env.REGIMEN_CONFIG_DIR!, "env");
+  expect(existsSync(envPath)).toBe(true);
+  uninstall(["uninstall"], recordingSteps(calls));
+  expect(existsSync(envPath)).toBe(true);
+});
+
 test("uninstall tears down in reverse (guidance, enforcement, feedback), self-unlink last", () => {
   const calls: Call[] = [];
   const exit = uninstall(["uninstall"], recordingSteps(calls));
@@ -218,22 +255,28 @@ test("uninstall tells the feedback teardown selfLink:false so only the regimen u
 
 const tempDirs: string[] = [];
 let savedDataDir: string | undefined;
+let savedConfigDir: string | undefined;
 let savedHarness: string | undefined;
 
-// Every test runs in an isolated temp data dir and with a pinned harness, so the
-// install/uninstall orchestration runs its per-harness path deterministically
-// (the manifest write needs a resolved harness) and never reads or writes the
-// host's real store or ambient harness markers.
+// Every test runs in an isolated temp data dir, temp config dir, and with a
+// pinned harness, so the install/uninstall orchestration runs its per-harness
+// path deterministically (the manifest write needs a resolved harness) and
+// never reads or writes the host's real store, real config home (the env
+// template install writes there), or ambient harness markers.
 beforeEach(() => {
   savedDataDir = process.env.REGIMEN_DATA_DIR;
+  savedConfigDir = process.env.REGIMEN_CONFIG_DIR;
   savedHarness = process.env.REGIMEN_HARNESS;
   tempDataDir();
+  process.env.REGIMEN_CONFIG_DIR = tempDir("regimen-dispatch-config-");
   process.env.REGIMEN_HARNESS = "codex";
 });
 
 afterEach(() => {
   if (savedDataDir === undefined) delete process.env.REGIMEN_DATA_DIR;
   else process.env.REGIMEN_DATA_DIR = savedDataDir;
+  if (savedConfigDir === undefined) delete process.env.REGIMEN_CONFIG_DIR;
+  else process.env.REGIMEN_CONFIG_DIR = savedConfigDir;
   if (savedHarness === undefined) delete process.env.REGIMEN_HARNESS;
   else process.env.REGIMEN_HARNESS = savedHarness;
   for (const dir of tempDirs.splice(0)) {
@@ -241,9 +284,14 @@ afterEach(() => {
   }
 });
 
-function tempDataDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "regimen-dispatch-"));
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
   tempDirs.push(dir);
+  return dir;
+}
+
+function tempDataDir(): string {
+  const dir = tempDir("regimen-dispatch-");
   process.env.REGIMEN_DATA_DIR = dir;
   return dir;
 }

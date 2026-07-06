@@ -1,8 +1,18 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadEnvFile } from "../src/cli/env-file.ts";
+import {
+  loadEnvFile,
+  parseEnvFile,
+  writeEnvTemplateIfAbsent,
+} from "../src/cli/env-file.ts";
 
 let dir: string;
 
@@ -59,4 +69,36 @@ test("a value containing = splits only on the first =", () => {
   const target: NodeJS.ProcessEnv = {};
   loadEnvFile(dir, target);
   expect(target.REGIMEN_JUDGE_BASE_URL).toBe("https://example.com/v1?x=1&y=2");
+});
+
+test("writeEnvTemplateIfAbsent writes a template when the file is absent", () => {
+  const wrote = writeEnvTemplateIfAbsent(dir, false);
+  expect(wrote).toBe(true);
+  expect(existsSync(join(dir, "env"))).toBe(true);
+});
+
+test("writeEnvTemplateIfAbsent never touches an already-existing file, even an empty one", () => {
+  writeFileSync(join(dir, "env"), "");
+  const wrote = writeEnvTemplateIfAbsent(dir, false);
+  expect(wrote).toBe(false);
+  expect(readFileSync(join(dir, "env"), "utf8")).toBe("");
+});
+
+test("under dry run, writeEnvTemplateIfAbsent never creates a missing file", () => {
+  const wrote = writeEnvTemplateIfAbsent(dir, true);
+  expect(wrote).toBe(false);
+  expect(existsSync(join(dir, "env"))).toBe(false);
+});
+
+test("the written template is entirely comments and documents the three judge vars", () => {
+  writeEnvTemplateIfAbsent(dir, false);
+  const contents = readFileSync(join(dir, "env"), "utf8");
+  expect(parseEnvFile(contents)).toEqual([]);
+  for (const line of contents.split("\n")) {
+    expect(line === "" || line.startsWith("#")).toBe(true);
+  }
+  expect(contents).toContain("REGIMEN_JUDGE_API_KEY");
+  expect(contents).toContain("REGIMEN_JUDGE_BASE_URL");
+  expect(contents).toContain("REGIMEN_JUDGE_MODEL");
+  expect(contents.toLowerCase()).toContain("loaded at cli startup");
 });

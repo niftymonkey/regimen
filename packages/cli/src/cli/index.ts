@@ -36,7 +36,7 @@ import {
   dataDir,
   resolveHarnessFromEnvironment,
 } from "@regimen/shared";
-import { loadEnvFile } from "./env-file.ts";
+import { loadEnvFile, writeEnvTemplateIfAbsent } from "./env-file.ts";
 import {
   assess as feedbackAssess,
   assessAll as feedbackAssessAll,
@@ -334,6 +334,8 @@ export function install(
   process.stdout.write(
     "Regimen install (capture then enforcement then guidance)\n",
   );
+
+  writeEnvTemplateIfAbsent(configDir(), dryRun);
 
   let manifest = readManifest(manifestPath(dir));
   for (const harness of targets) {
