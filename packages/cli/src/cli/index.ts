@@ -36,7 +36,7 @@ import {
   dataDir,
   resolveHarnessFromEnvironment,
 } from "@regimen/shared";
-import { loadEnvFile } from "./env-file.ts";
+import { loadEnvFile, writeEnvTemplateIfAbsent } from "./env-file.ts";
 import {
   assess as feedbackAssess,
   assessAll as feedbackAssessAll,
@@ -334,6 +334,13 @@ export function install(
   process.stdout.write(
     "Regimen install (capture then enforcement then guidance)\n",
   );
+
+  try {
+    writeEnvTemplateIfAbsent(configDir(), dryRun);
+  } catch {
+    // An unresolvable config dir (no HOME/APPDATA) must not abort install;
+    // the template is a courtesy, matching runCli's env-file tolerance.
+  }
 
   let manifest = readManifest(manifestPath(dir));
   for (const harness of targets) {
