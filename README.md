@@ -23,6 +23,16 @@ You can ask this about the conversation you're in or the trend across many, and 
 
 Your telemetry stays in a local store on your machine. Nothing goes to a Regimen server, there is none. The one exception is assessment: to judge your work, the captured data for the conversations being assessed is sent to the same LLM you are already using.
 
+## Three ways to reach a judge
+
+Assessment needs an LLM, and there are three equally good ways to give it one. Use whichever matches what you already have:
+
+- **An API key.** Set `REGIMEN_JUDGE_API_KEY`, `REGIMEN_JUDGE_BASE_URL`, and `REGIMEN_JUDGE_MODEL` in `~/.config/regimen/env` to judge through any OpenAI-compatible provider, Anthropic included. A keyless local endpoint such as Ollama works too.
+- **The `claude` CLI.** If `claude` is on your PATH, Regimen shells out to it and uses the login you already have. No key involved.
+- **No key, no CLI.** The agent you are already talking to can be the judge itself: `regimen assess --emit-prompt` hands it the judging prompt, and `--record-verdict` stores its verdict. The bundled skill drives this end to end.
+
+Regimen picks automatically from what is available; `--judge-via` pins a specific one.
+
 ## How it works: Feedback, and two levers
 
 **Feedback** is the center: the observability that turns the feel into data. It observes how the work actually went and surfaces, plainly and comparably, where the interaction is strong and where it is weak. The question it answers about each thing you asked for: did the agent do what you wanted, and how much correction did that take? What it surfaces is specific and grounded in what actually happened, never vague coaching like "get better at prompting."

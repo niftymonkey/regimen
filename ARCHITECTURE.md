@@ -12,7 +12,7 @@ Regimen has three instruments, but they are not three co-equal pillars. Feedback
 
 The levers are cut by mechanism (advisory versus deterministic), not by purpose, even when both target the same outcome. That cut is the load-bearing reliability boundary, settled in ADR-0002.
 
-The levers are categories of response, not catalogs Regimen ships. Guidance and Enforcement name the two kinds of move (ask the model, or compel it); the actual contents are the engineer's own, drawn from their own Feedback, often subjective and often harness-specific. Much of that content lives outside this repo: Guidance skills come from the external `skills` repo, from harness built-ins, and from wherever each engineer sources them. The repo reflects this asymmetry, with Feedback substantial here, Enforcement a few reference gates plus the wiring to install them, and Guidance largely pointers outward. The reference gates Regimen includes are starter examples, not a fixed menu; the bundled feedback skills are not Guidance examples but Regimen's own infrastructure. ADR-0013 records this structural decision (Feedback the center, the levers in response), superseding the co-equality of ADR-0001 and ADR-0002 while preserving their felt-needs adoption and the Guidance-asks / Enforcement-compels boundary.
+The levers are categories of response, not catalogs Regimen ships. Guidance and Enforcement name the two kinds of move (ask the model, or compel it); the actual contents are the engineer's own, drawn from their own Feedback, often subjective and often harness-specific. Much of that content lives outside this repo: Guidance skills come from the external `skills` repo, from harness built-ins, and from wherever each engineer sources them. The repo reflects this asymmetry in content, not in wiring: Feedback is substantial here, while Enforcement and Guidance each ship the same thin install orchestration (a bundled operator skill plus the wiring to install it) with Enforcement adding a few reference gates and Guidance's actual content remaining pointers outward. The reference gates Regimen includes are starter examples, not a fixed menu; the bundled feedback skills are not Guidance examples but Regimen's own infrastructure. ADR-0013 records this structural decision (Feedback the center, the levers in response), superseding the co-equality of ADR-0001 and ADR-0002 while preserving their felt-needs adoption and the Guidance-asks / Enforcement-compels boundary.
 
 ## Feedback's two layers
 
@@ -41,9 +41,10 @@ What the engineer can do when each phase of Regimen lands is detailed in the PRD
 Regimen is a single Bun-workspace monorepo, one workspace package per instrument. The packages stay independently installable, but pluggability is about the levers: Feedback is the center an engineer runs, and Guidance and Enforcement are adopted incrementally on top of it, not three co-equal pieces picked in any order.
 
 - The workspace root holds the program docs (PRD, ADRs, glossary, this shape doc), with the implementation plan under [`docs/plan.md`](docs/plan.md), and the `./install.sh` front door.
-- [`packages/cli`](packages/cli): the `@regimen/cli` package, whose `regimen` bin orchestrates installing the instruments.
+- [`packages/cli`](packages/cli): the `@regimen/cli` package, whose `regimen` bin is the single command surface. It covers the install lifecycle (`install`, `update`, `uninstall`, `status`, the `daemon` group) and the read surface (`evidence`, `assess` including the bulk sweep and the zero-key agent-judge flow, `list`, `rollup`, `audit`, `calibrate`), dispatching in-process to the instrument packages.
 - [`packages/feedback`](packages/feedback): the Feedback instrument.
 - [`packages/enforcement`](packages/enforcement): the Enforcement instrument.
+- [`packages/guidance`](packages/guidance): the Guidance lever's install package, bundling its operator skill, structurally parallel to Enforcement's.
 - [`packages/otlp-bridge`](packages/otlp-bridge): an optional renderer that visualizes Feedback's signals in Grafana.
 - [`packages/shared`](packages/shared): the cross-package contracts the instruments share (`@regimen/shared`).
 - [`skills`](https://github.com/niftymonkey/skills): a curated source of Guidance skills the author maintains, installed separately; Guidance is skills generally, this is one good source.
@@ -51,7 +52,7 @@ Regimen is a single Bun-workspace monorepo, one workspace package per instrument
 ## Constraints and boundaries
 
 - **Harness- and model-agnostic by default.** Every artifact (schemas, signals, interfaces, configs) holds across harnesses; harness-specific detail is confined to a thin capture/adapter edge per harness.
-- **Local-only by default.** All data lives on the engineer's machine. The LLM call used by the judgment layer is the only network egress; no telemetry is sent to Regimen's authors.
+- **Local-only by default.** All data lives on the engineer's machine. The LLM call used by the judgment layer is the only network egress in the core instruments (the optional otlp-bridge adds opt-in Grafana Cloud egress when installed); no telemetry is sent to Regimen's authors.
 - **Single-user in current scope.** Team-shared or aggregated use cases are future directions the architecture leaves room for, not commitments.
 - **First-class on Linux, macOS, and native Windows.** WSL is treated as Linux.
 - **Context is a property of the interaction, not an instrument.** The AI's standing knowledge is something the instruments act on; it is not itself an addition Regimen makes.
