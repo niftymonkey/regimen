@@ -29,6 +29,7 @@ import {
   type SessionSummary,
 } from "../sessions.ts";
 import { TranscriptNotFoundError } from "./read-conversation.ts";
+import type { IncompleteReason } from "./types.ts";
 
 /**
  * Durably record that a session's transcript is gone from disk, at `at` (an
@@ -88,6 +89,23 @@ export type BatchDecision = "continue" | "all" | "quit";
  */
 export type SweepOutcome = "complete" | "signals-only" | "incomplete";
 
+/**
+ * A judge's resolved outcome carrying the machine reason for an incomplete
+ * run, so the sweep summary can report why rather than only that. A judge
+ * that has no reason to report (or whose outcome is not `incomplete`) may
+ * still resolve with the bare {@link SweepOutcome} string.
+ */
+export interface SweepJudgeResolution {
+  readonly outcome: SweepOutcome;
+  readonly incompleteReason?: IncompleteReason;
+}
+
+/** One incomplete-outcome session paired with the reason its judge reported. */
+export interface IncompleteRun {
+  readonly session: SessionSummary;
+  readonly incompleteReason?: IncompleteReason;
+}
+
 /** A conversation whose judge threw, paired with the error, for the summary. */
 export interface SweepFailure {
   readonly session: SessionSummary;
@@ -107,7 +125,7 @@ export interface SweepSummary {
   readonly judged: readonly SessionSummary[];
   readonly complete: readonly SessionSummary[];
   readonly signalsOnly: readonly SessionSummary[];
-  readonly incomplete: readonly SessionSummary[];
+  readonly incomplete: readonly IncompleteRun[];
   readonly failed: readonly SweepFailure[];
   readonly skipped: readonly SessionSummary[];
   /**
@@ -127,10 +145,14 @@ export interface RunSweepOptions {
   /** Conversations to judge per batch; must be a positive integer. */
   readonly batchSize: number;
   /**
-   * Judge one conversation; resolve with how the run finished (or void, taken as
-   * `complete`), throw to record a failure.
+   * Judge one conversation; resolve with how the run finished (a bare
+   * {@link SweepOutcome}, a {@link SweepJudgeResolution} carrying the
+   * incomplete reason, or void, taken as `complete`), throw to record a
+   * failure.
    */
-  readonly judge: (session: SessionSummary) => Promise<SweepOutcome | void>;
+  readonly judge: (
+    session: SessionSummary,
+  ) => Promise<SweepOutcome | SweepJudgeResolution | void>;
   /** Decide whether to keep going; called only between batches. */
   readonly decideNextBatch: () => Promise<BatchDecision>;
   readonly now?: () => number;
@@ -161,7 +183,7 @@ export async function runSweep(
   const judged: SessionSummary[] = [];
   const complete: SessionSummary[] = [];
   const signalsOnly: SessionSummary[] = [];
-  const incomplete: SessionSummary[] = [];
+  const incomplete: IncompleteRun[] = [];
   const failed: SweepFailure[] = [];
   const skipped: SessionSummary[] = [];
   const missingTranscript: SessionSummary[] = [];
@@ -179,11 +201,20 @@ export async function runSweep(
     }
     for (const session of selected.slice(i, i + options.batchSize)) {
       try {
-        const outcome = (await options.judge(session)) ?? "complete";
+        const resolved = (await options.judge(session)) ?? "complete";
+        const outcome =
+          typeof resolved === "string" ? resolved : resolved.outcome;
         judged.push(session);
         if (outcome === "complete") complete.push(session);
         else if (outcome === "signals-only") signalsOnly.push(session);
-        else incomplete.push(session);
+        else
+          incomplete.push({
+            session,
+            ...(typeof resolved !== "string" &&
+            resolved.incompleteReason !== undefined
+              ? { incompleteReason: resolved.incompleteReason }
+              : {}),
+          });
       } catch (caught) {
         // A confirmed-gone transcript is permanent: mark it durably and bucket
         // it apart from generic failures so future selection skips it. Every

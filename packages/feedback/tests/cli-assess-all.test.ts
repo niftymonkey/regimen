@@ -127,6 +127,30 @@ function seedRollout(codexHome: string, sessionId: string): void {
   );
 }
 
+/** A rollout carrying only session_meta: zero content chunks (insufficient-evidence). */
+function emptyRolloutFor(sessionId: string): string {
+  return line({
+    timestamp: "2026-06-15T10:00:00.000Z",
+    type: "session_meta",
+    payload: {
+      id: sessionId,
+      cwd: "/work/p",
+      originator: "codex_exec",
+      source: "exec",
+    },
+  });
+}
+
+/** Seed `sessionId`'s empty rollout (no message content) under CODEX_HOME. */
+function seedEmptyRollout(codexHome: string, sessionId: string): void {
+  const dir = join(codexHome, "sessions", "2026", "06", "15");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `rollout-2026-06-15T10-00-00-${sessionId}.jsonl`),
+    emptyRolloutFor(sessionId),
+  );
+}
+
 /**
  * Insert a conversations row so the sweep's selection finds the session. The
  * harness and model default to codex/gpt-5 so the existing codex callers stay
@@ -284,6 +308,39 @@ function startMockAnthropic(): {
     baseUrl: `http://localhost:${server.port}`,
     stop: () => server.stop(true),
     count: () => hits,
+  };
+}
+
+/**
+ * A local HTTP server whose /v1/messages reply is never valid verdict JSON, so
+ * every judge attempt (the initial call plus every repair retry) exhausts the
+ * Judge's retry budget and resolves incomplete with incompleteReason
+ * "llm-unparseable". Nothing leaves the machine.
+ */
+function startMockAnthropicUnparseable(): {
+  baseUrl: string;
+  stop: () => void;
+} {
+  const server = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (req.method !== "POST" || url.pathname !== "/v1/messages") {
+        return new Response("not found", { status: 404 });
+      }
+      return Response.json({
+        id: "msg_1",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-4-8",
+        content: [{ type: "text", text: "not a verdict, just prose" }],
+        stop_reason: "end_turn",
+      });
+    },
+  });
+  return {
+    baseUrl: `http://localhost:${server.port}`,
+    stop: () => server.stop(true),
   };
 }
 
@@ -604,6 +661,88 @@ test("assessAll's done line breaks the judged total into complete, signals-only,
     // lands in the complete bucket and the honest breakdown says so.
     expect(out).toContain(
       "done: judged 1 (complete 1, signals-only 0, incomplete 0)",
+    );
+  } finally {
+    mock.stop();
+  }
+});
+
+test("an incomplete sweep line and the done summary surface why, per session and as a breakdown", async () => {
+  const dataDir = tempDir("regimen-sweep-cli-");
+  const codexHome = tempDir("regimen-sweep-home-");
+  const dbPath = join(dataDir, "feedback.db");
+  // SESSION judges against a backend that never returns valid verdict JSON:
+  // llm-unparseable after the retry budget is exhausted.
+  seedConversation(dbPath, {
+    sessionId: SESSION,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  seedRollout(codexHome, SESSION);
+  // OTHER has no content chunks at all: insufficient-evidence, no LLM call.
+  seedConversation(dbPath, {
+    sessionId: OTHER,
+    lastEventAt: "2026-06-15T09:30:00.000Z",
+  });
+  seedEmptyRollout(codexHome, OTHER);
+  const mock = startMockAnthropicUnparseable();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  process.env.CODEX_HOME = codexHome;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  const stdout = captureStdout();
+  try {
+    const exit = await assessAll({
+      dataDir,
+      filter: {},
+      force: false,
+      batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    expect(exit).toBe(0);
+    const out = stdout.read();
+    expect(out).toContain(`${SESSION} -> incomplete (llm-unparseable)`);
+    expect(out).toContain(`${OTHER} -> incomplete (insufficient-evidence)`);
+    expect(out).toContain(
+      "done: judged 2 (complete 0, signals-only 0, incomplete 2)",
+    );
+    expect(out).toContain(
+      "incomplete reasons: insufficient-evidence 1, llm-unparseable 1",
+    );
+    // Mixed reasons, so the uniform-cause advisory line does not fire.
+    expect(out).not.toContain("every verdict failed the same way");
+  } finally {
+    mock.stop();
+  }
+});
+
+test("when every incomplete verdict shares the same reason, the summary says so plainly", async () => {
+  const dataDir = tempDir("regimen-sweep-cli-");
+  const codexHome = tempDir("regimen-sweep-home-");
+  const dbPath = join(dataDir, "feedback.db");
+  seedConversation(dbPath, {
+    sessionId: SESSION,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  seedRollout(codexHome, SESSION);
+  const mock = startMockAnthropicUnparseable();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  process.env.CODEX_HOME = codexHome;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  const stdout = captureStdout();
+  try {
+    await assessAll({
+      dataDir,
+      filter: {},
+      force: false,
+      batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    const out = stdout.read();
+    expect(out).toContain(
+      "every verdict failed the same way (llm-unparseable); check the judge backend (see --judge-via)",
     );
   } finally {
     mock.stop();

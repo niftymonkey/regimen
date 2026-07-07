@@ -100,7 +100,7 @@ import {
   runSweep,
   selectSessionsToJudge,
   type BatchDecision,
-  type SweepOutcome,
+  type SweepJudgeResolution,
 } from "../judged/sweep.ts";
 import { TranscriptNotFoundError } from "../judged/read-conversation.ts";
 import {
@@ -724,7 +724,9 @@ export async function assessAll(options: {
     // cwd through resolve); a test injects a stub instead.
     const setupSource = options.setupSource ?? createLiveSetupSource();
     let index = 0;
-    const judge = async (session: SessionSummary): Promise<SweepOutcome> => {
+    const judge = async (
+      session: SessionSummary,
+    ): Promise<SweepJudgeResolution> => {
       index++;
       const label = `[${index}/${toJudge}] ${session.harness} ${session.sessionId}`;
       try {
@@ -745,18 +747,27 @@ export async function assessAll(options: {
         // fully-persisted verdict from a thinner one. A complete run with an
         // assessment narrative is the full verdict; a complete run with no
         // narrative persisted only signals; anything not complete is incomplete.
-        const sweepOutcome: SweepOutcome =
+        const outcome =
           digest.judged && digest.complete
             ? digest.assessment !== null
               ? "complete"
               : "signals-only"
             : "incomplete";
+        const incompleteReason =
+          digest.judged && !digest.complete
+            ? digest.incompleteReason
+            : undefined;
         const shown =
-          digest.judged && digest.complete
-            ? (digest.outcome?.value ?? sweepOutcome)
-            : "incomplete";
+          outcome === "incomplete"
+            ? incompleteReason === undefined
+              ? "incomplete"
+              : `incomplete (${incompleteReason})`
+            : (digest.judged && digest.outcome?.value) || outcome;
         process.stdout.write(`${label} -> ${shown}\n`);
-        return sweepOutcome;
+        return {
+          outcome,
+          ...(incompleteReason === undefined ? {} : { incompleteReason }),
+        };
       } catch (caught) {
         // Print inline so progress numbering stays contiguous, then re-throw so
         // the engine records it. A gone transcript is durably marked and reported
@@ -778,6 +789,26 @@ export async function assessAll(options: {
     process.stdout.write(
       `done: judged ${summary.judged.length} (complete ${summary.complete.length}, signals-only ${summary.signalsOnly.length}, incomplete ${summary.incomplete.length}), missing ${summary.missingTranscript.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
     );
+    if (summary.incomplete.length > 0) {
+      const counts = new Map<string, number>();
+      for (const { incompleteReason } of summary.incomplete) {
+        if (incompleteReason === undefined) continue;
+        counts.set(incompleteReason, (counts.get(incompleteReason) ?? 0) + 1);
+      }
+      if (counts.size > 0) {
+        const breakdown = [...counts.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([reason, count]) => `${reason} ${count}`)
+          .join(", ");
+        process.stdout.write(`  incomplete reasons: ${breakdown}\n`);
+      }
+      if (counts.size === 1) {
+        const [reason] = counts.keys();
+        process.stdout.write(
+          `  every verdict failed the same way (${reason}); check the judge backend (see --judge-via)\n`,
+        );
+      }
+    }
     for (const missing of summary.missingTranscript) {
       process.stdout.write(
         `  missing: ${missing.harness} ${missing.sessionId} (transcript gone; marked so future sweeps skip it)\n`,
