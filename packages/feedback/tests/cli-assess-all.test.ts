@@ -22,7 +22,7 @@ import type { JudgeResult } from "../src/judged/types.ts";
 import type { DerivedOutcomeValue } from "../src/judged/outcome.ts";
 import type { BatchDecision } from "../src/judged/sweep.ts";
 import type { SetupSource } from "../src/judged/setup.ts";
-import { assessAll } from "../src/cli/index.ts";
+import { assessAll, incompleteSummaryLines } from "../src/cli/index.ts";
 
 const SESSION = "019e8c20-4491-7ea3-b809-d6586a5a72b8";
 const OTHER = "019e8c20-4491-7ea3-b809-000000000002";
@@ -714,6 +714,26 @@ test("an incomplete sweep line and the done summary surface why, per session and
   } finally {
     mock.stop();
   }
+});
+
+test("incompleteSummaryLines never claims uniformity when a run has no recorded reason", () => {
+  const lines = incompleteSummaryLines([
+    { incompleteReason: "llm-unavailable" },
+    {},
+  ]);
+  expect(lines).toContain("  incomplete reasons: llm-unavailable 1\n");
+  expect(lines.join("")).not.toContain("every verdict failed the same way");
+});
+
+test("incompleteSummaryLines claims uniformity only with the same reason on every run", () => {
+  const lines = incompleteSummaryLines([
+    { incompleteReason: "llm-unavailable" },
+    { incompleteReason: "llm-unavailable" },
+  ]);
+  expect(lines).toContain("  incomplete reasons: llm-unavailable 2\n");
+  expect(lines).toContain(
+    "  every verdict failed the same way (llm-unavailable); check the judge backend (see --judge-via)\n",
+  );
 });
 
 test("when every incomplete verdict shares the same reason, the summary says so plainly", async () => {
