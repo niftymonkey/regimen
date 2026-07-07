@@ -37,6 +37,25 @@ test("win32 routes to Task Scheduler", () => {
   expect(plan.installCommands[0]?.[0]).toBe("schtasks");
 });
 
+test("the darwin plan carries an already-loaded guard scoped to the context uid", () => {
+  const plan = planInstall({ ...CTX, uid: 501 }, "darwin", "/Users/test");
+  expect(plan.loadGuardCommand).toEqual([
+    "launchctl",
+    "print",
+    "gui/501/dev.niftymonkey.regimen-feedback",
+  ]);
+});
+
+test("the darwin plan omits the load guard when the uid is unknown", () => {
+  const plan = planInstall(CTX, "darwin", "/Users/test");
+  expect(plan.loadGuardCommand).toBeUndefined();
+});
+
+test("the linux plan carries no load guard", () => {
+  const plan = planInstall(CTX, "linux", "/home/test");
+  expect(plan.loadGuardCommand).toBeUndefined();
+});
+
 test("an unsupported platform throws a clear error", () => {
   expect(() => planInstall(CTX, "freebsd", "/home/test")).toThrow(
     /does not support automatic daemon install/,

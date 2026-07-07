@@ -28,6 +28,7 @@ import {
   MACOS_START_COMMANDS,
   MACOS_STOP_COMMANDS,
   macosInstallCommands,
+  macosIsLoadedCommand,
   macosRestartCommands,
   macosServiceContent,
   macosServicePath,
@@ -85,6 +86,15 @@ export interface InstallPlan {
   readonly startCommands: ReadonlyArray<ReadonlyArray<string>>;
   readonly stopCommands: ReadonlyArray<ReadonlyArray<string>>;
   readonly restartCommands: ReadonlyArray<ReadonlyArray<string>>;
+  /**
+   * An optional probe whose zero exit means "the service is already registered
+   * with the supervisor". When present, the installer runs it before the
+   * install commands and, on a zero exit, skips the load so re-running the
+   * install over a live service stays idempotent instead of erroring. Only
+   * macOS supplies one, and only when the context uid is known; every other
+   * platform reloads its unit file safely and leaves this undefined.
+   */
+  readonly loadGuardCommand?: ReadonlyArray<string>;
 }
 
 export function planInstall(
@@ -119,6 +129,9 @@ export function planInstall(
       stopCommands: MACOS_STOP_COMMANDS,
       restartCommands:
         ctx.uid === undefined ? [] : macosRestartCommands(ctx.uid),
+      ...(ctx.uid === undefined
+        ? {}
+        : { loadGuardCommand: macosIsLoadedCommand(ctx.uid) }),
     };
   }
   if (platform === "win32") {

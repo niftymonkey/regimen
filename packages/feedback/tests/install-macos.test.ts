@@ -9,6 +9,7 @@ import {
   MACOS_START_COMMANDS,
   MACOS_STOP_COMMANDS,
   macosInstallCommands,
+  macosIsLoadedCommand,
   macosRestartCommands,
   macosServiceContent,
   macosServicePath,
@@ -71,6 +72,14 @@ test("macosInstallCommands load the plist via launchctl", () => {
       "-w",
       "/Users/mlo/Library/LaunchAgents/dev.niftymonkey.regimen-feedback.plist",
     ],
+  ]);
+});
+
+test("macosIsLoadedCommand prints the job in the user gui domain to probe whether it is already loaded", () => {
+  expect(macosIsLoadedCommand(501)).toEqual([
+    "launchctl",
+    "print",
+    `gui/501/${MACOS_LABEL}`,
   ]);
 });
 
