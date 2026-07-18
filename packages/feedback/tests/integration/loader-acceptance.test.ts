@@ -91,18 +91,51 @@ async function startLoader(
   // run spawns ten of them and CPU contention from a concurrent agent session
   // can stretch a single spawn well past a second. A generous ceiling only
   // trips on a genuinely stuck loader; it does not assert startup latency.
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value);
-    if (buf.includes("ready\n")) break;
+  // The timer cancels the reader so a loader that prints NOTHING still trips
+  // the detector: a bare `reader.read()` await would otherwise block past any
+  // deadline and leave the test to the opaque per-test timeout instead.
+  const deadlineMs = 30000;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel();
+  }, deadlineMs);
+  try {
+    while (!timedOut) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value);
+      if (buf.includes("ready\n")) break;
+    }
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
   }
-  reader.releaseLock();
   if (!buf.includes("ready\n")) {
+    // Capture the discriminating evidence before the temp dir is torn down:
+    // an absent daemon.log means the child hung before opening the store; a
+    // `started`-only log means chokidar never reported ready; `started` and
+    // `ready` both present indict the parent's stdout plumbing instead.
+    let daemonLog = "ABSENT";
+    try {
+      daemonLog = readFileSync(join(dataDir, "daemon.log"), "utf8");
+    } catch {
+      /* keep ABSENT */
+    }
+    let procState = "unknown";
+    try {
+      procState =
+        readFileSync(`/proc/${proc.pid}/stat`, "utf8").split(" ")[2] ??
+        "unknown";
+    } catch {
+      /* process already gone */
+    }
     proc.kill();
+    const stderr = await new Response(proc.stderr).text();
     throw new Error(
-      "loader did not signal ready before the hang-detector deadline",
+      `loader did not signal ready before the ${deadlineMs}ms hang-detector deadline` +
+        ` (partial stdout: ${JSON.stringify(buf)}; daemon.log: ${JSON.stringify(daemonLog)};` +
+        ` process state: ${procState}; stderr: ${JSON.stringify(stderr.slice(0, 500))})`,
     );
   }
   return {
@@ -120,8 +153,24 @@ async function runHook(payload: unknown, dataDir: string): Promise<void> {
     env: { ...process.env, REGIMEN_DATA_DIR: dataDir },
     stdout: "pipe",
   });
-  const exit = await proc.exited;
-  if (exit !== 0) throw new Error(`capture hook exited ${exit}`);
+  // Hang detector, same rationale as startLoader's: bun 1.3.8 can leave a
+  // spawned child parked in its event loop before any user code runs, so a
+  // bare `await proc.exited` would ride to the opaque per-test timeout.
+  const outcome = await Promise.race([
+    proc.exited.then((code) => ({ exited: true as const, code })),
+    new Promise<{ exited: false }>((r) =>
+      setTimeout(() => r({ exited: false }), 30000),
+    ),
+  ]);
+  if (!outcome.exited) {
+    proc.kill("SIGKILL");
+    await proc.exited;
+    throw new Error(
+      "capture hook did not exit before the 30000ms hang-detector deadline",
+    );
+  }
+  if (outcome.code !== 0)
+    throw new Error(`capture hook exited ${outcome.code}`);
 }
 
 function countEvents(dataDir: string): number {
@@ -163,9 +212,12 @@ acceptanceTest(
         const sessionId = "ac-freshness";
         await runHook(sessionStart(sessionId), dataDir);
         const t0 = Date.now();
+        // The window is a hang detector; the freshness AC itself is the
+        // explicit <1000ms assertion below, so a slow drain fails with the
+        // measured latency rather than an opaque waitFor timeout.
         const { elapsedMs } = await waitFor(
           () => (countEvents(dataDir) >= 1 ? true : null),
-          2000,
+          10000,
         );
         const ttDb = Date.now() - t0;
         expect(ttDb).toBeLessThan(1000);
@@ -187,7 +239,7 @@ acceptanceTest(
         await runHook(sessionStart(id), dataDir);
         await runHook(preToolUse(id, "toolu_1"), dataDir);
         await runHook(postToolUse(id, "toolu_1"), dataDir);
-        await waitFor(() => (countEvents(dataDir) >= 3 ? true : null), 2000);
+        await waitFor(() => (countEvents(dataDir) >= 3 ? true : null), 10000);
 
         const db = new Database(join(dataDir, "feedback.db"), {
           readonly: true,
@@ -243,7 +295,7 @@ acceptanceTest(
       try {
         await runHook(sessionStart(id), dataDir);
         await runHook(preToolUse(id, "toolu_x"), dataDir);
-        await waitFor(() => (countEvents(dataDir) >= 2 ? true : null), 2000);
+        await waitFor(() => (countEvents(dataDir) >= 2 ? true : null), 10000);
       } finally {
         await first.stop();
       }
@@ -388,7 +440,11 @@ acceptanceTest(
         rollout,
       );
 
-      const codexSessionStarts = (): number => {
+      // Wait on the count of ALL codex events for the session, not just the
+      // session.start: the tailer inserts the rollout's records one by one, so
+      // waiting on the first insert alone races the assertion below against
+      // the user_prompt insert that follows it.
+      const codexEvents = (): number => {
         const db = new Database(join(dataDir, "feedback.db"), {
           readonly: true,
         });
@@ -396,7 +452,7 @@ acceptanceTest(
           return (
             db
               .prepare(
-                "SELECT COUNT(*) AS n FROM events WHERE harness = 'codex' AND session_id = ? AND event_type = 'session.start'",
+                "SELECT COUNT(*) AS n FROM events WHERE harness = 'codex' AND session_id = ?",
               )
               .get("rollout-tail-sess") as { n: number }
           ).n;
@@ -410,7 +466,9 @@ acceptanceTest(
         REGIMEN_ROLLOUT_POLL_MS: "150",
       });
       try {
-        await waitFor(() => (codexSessionStarts() >= 1 ? true : null), 5000);
+        // The fixture folds to exactly two events: the session.start and the
+        // user_prompt (the event_msg twin is dedup'd away).
+        await waitFor(() => (codexEvents() >= 2 ? true : null), 10000);
 
         const db = new Database(join(dataDir, "feedback.db"), {
           readonly: true,
@@ -485,7 +543,7 @@ acceptanceTest(
         for (let i = 0; i < 5; i += 1) {
           await runHook(sessionStart(`ac-oplog-${i}`), dataDir);
         }
-        await waitFor(() => (countEvents(dataDir) >= 5 ? true : null), 3000);
+        await waitFor(() => (countEvents(dataDir) >= 5 ? true : null), 10000);
       } finally {
         await loader.stop();
       }
