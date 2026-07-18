@@ -498,9 +498,12 @@ test("assessAll marks a missing transcript, reports it in the missing bucket, an
     });
     expect(exit).toBe(0);
     const out = stdout.read();
-    // A gone transcript is its own honest bucket, not a generic failure.
+    // A gone transcript is its own honest bucket, not a generic failure. The
+    // done line counts only sessions marked THIS run ("newly missing"), a
+    // different fact from the header's total of previously-marked sessions, so
+    // the two lines never share a label while reporting different numbers.
     expect(out).toContain("done: judged 1");
-    expect(out).toContain("missing 1");
+    expect(out).toContain("newly missing 1");
     expect(out).toContain("failed 0");
     expect(out).toContain("skipped 0");
     // It prints inline with contiguous numbering (SESSION index 1, OTHER index
@@ -537,6 +540,9 @@ test("assessAll marks a missing transcript, reports it in the missing bucket, an
     expect(header2).toContain("already judged 1");
     expect(header2).toContain("missing 1");
     expect(header2).toContain("to judge 0");
+    // The empty-run done line reports zero NEWLY marked sessions; the 1 in the
+    // header is the durable total, not something this run discovered.
+    expect(header2).toContain("newly missing 0");
     expect(mock2.count()).toBe(0);
   } finally {
     mock2.stop();

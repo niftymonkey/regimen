@@ -153,11 +153,13 @@ export function listSessions(
 }
 
 /**
- * How many conversations are captured but not yet assessed: the count of
- * conversation rows with no `assessment` narrative, mirroring exactly the
- * `judged` definition {@link listSessions} uses. Pure SQLite read; the backlog
- * banner and `status` both read it so the two never drift on what "unassessed"
- * means.
+ * How many conversations are captured, still assessable, and not yet assessed:
+ * the count of conversation rows with no `assessment` narrative and no
+ * transcript-missing marker, matching what a sweep would actually select. A
+ * durably marked transcript-gone conversation can never be judged, so counting
+ * it would advertise a backlog no sweep can clear. Pure SQLite read; the
+ * backlog banner and `status` both read it so the two never drift on what
+ * "unassessed" means.
  */
 export function countUnassessed(db: Database): number {
   const row = db
@@ -166,7 +168,8 @@ export function countUnassessed(db: Database): number {
          FROM conversations c
          LEFT JOIN narrative n
            ON n.session_id = c.session_id AND n.narrative_type = 'assessment'
-        WHERE n.session_id IS NULL`,
+        WHERE n.session_id IS NULL
+          AND c.transcript_missing_at IS NULL`,
     )
     .get() as { n: number };
   return row.n;

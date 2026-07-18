@@ -700,7 +700,7 @@ export async function assessAll(options: {
     // so an all-judged sweep succeeds without a configured judge.
     if (toJudge === 0) {
       process.stdout.write(
-        `done: judged 0 (complete 0, signals-only 0, incomplete 0), missing 0, failed 0, skipped 0\n`,
+        `done: judged 0 (complete 0, signals-only 0, incomplete 0), newly missing 0, failed 0, skipped 0\n`,
       );
       return 0;
     }
@@ -776,7 +776,7 @@ export async function assessAll(options: {
       now,
     });
     process.stdout.write(
-      `done: judged ${summary.judged.length} (complete ${summary.complete.length}, signals-only ${summary.signalsOnly.length}, incomplete ${summary.incomplete.length}), missing ${summary.missingTranscript.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
+      `done: judged ${summary.judged.length} (complete ${summary.complete.length}, signals-only ${summary.signalsOnly.length}, incomplete ${summary.incomplete.length}), newly missing ${summary.missingTranscript.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
     );
     for (const missing of summary.missingTranscript) {
       process.stdout.write(

@@ -546,6 +546,31 @@ test("countUnassessed counts only conversations with no assessment narrative", (
   });
 });
 
+test("countUnassessed excludes a transcript-missing conversation even when unassessed", () => {
+  withStore((store) => {
+    seedSession(store.db, {
+      sessionId: "gone",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-15T10:00:00.000Z",
+      lastEventAt: "2026-06-15T10:30:00.000Z",
+    });
+    store.db
+      .prepare(
+        "UPDATE conversations SET transcript_missing_at = ? WHERE session_id = ?",
+      )
+      .run("2026-06-16T09:00:00.000Z", "gone");
+    seedSession(store.db, {
+      sessionId: "present",
+      harness: "claude",
+      model: "claude-opus-4-8",
+      firstEventAt: "2026-06-14T10:00:00.000Z",
+      lastEventAt: "2026-06-14T10:30:00.000Z",
+    });
+    expect(countUnassessed(store.db)).toBe(1);
+  });
+});
+
 test("countUnassessed is zero when every conversation is assessed", () => {
   withStore((store) => {
     seedSession(store.db, {
