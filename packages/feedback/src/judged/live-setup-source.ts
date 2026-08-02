@@ -7,9 +7,11 @@
  *
  * Setup is discovered two ways, both over a REGISTERED set that lives only in
  * this file's private constants:
- * - Stated conventions: a roster of agent-instruction file names looked up at
- *   the project root (scope "project") and at the engineer's home (scope
- *   "global"). Each match becomes a ConventionSource carrying the file's text.
+ * - Stated conventions: a roster of agent-instruction file names looked up at the
+ *   project root and in each harness's config directory under it (scope
+ *   "project"), and in each harness's config directory under the engineer's home
+ *   (scope "global"). Each match becomes a ConventionSource carrying the file's
+ *   text.
  * - Established practices: a set of skill/practice directories under home. Each
  *   skill (a directory with a SKILL.md, or a plain file) normalizes to its name
  *   and one-line summary.
@@ -37,15 +39,24 @@ const DEFAULT_CONVENTION_ROSTER: ReadonlyArray<string> = [
   "GEMINI.md",
 ];
 
+/**
+ * The per-harness config directories that hold conventions, relative to whichever
+ * root is being scanned. A harness keeps its instruction file inside its own
+ * dot-directory, so the roster above is looked up within each of these.
+ *
+ * The two scopes use these asymmetrically. Global scope looks ONLY here, because
+ * no harness keeps a user-scope instruction file at the home root. Project scope
+ * looks here AND at the project root itself, because a root file is a real,
+ * widely used project convention.
+ */
+const HARNESS_CONFIG_DIRS: ReadonlyArray<string> = [
+  ".claude",
+  ".codex",
+  ".gemini",
+];
+
 /** The SKILL.md file a practice directory carries when it is a skill folder. */
 const SKILL_MANIFEST = "SKILL.md";
-
-/**
- * Convention text is truncated to this many characters so a very large
- * convention file cannot bloat the judge prompt. Read synchronously, then sliced
- * (these files are small in practice; the cap is a safety bound, not a budget).
- */
-const CONVENTION_TEXT_CAP = 8192;
 
 /** A practice summary is truncated to this many characters: it is one line. */
 const PRACTICE_SUMMARY_CAP = 200;
@@ -96,8 +107,12 @@ export function createLiveSetupSource(
     resolve(input): EngineerSetup | undefined {
       const projectRoot = input.cwd ?? process.cwd();
       const conventions: ConventionSource[] = [
-        ...readConventions(projectRoot, "project", conventionRoster),
-        ...readConventions(home, "global", conventionRoster),
+        ...projectConventionDirs(projectRoot).flatMap((dir) =>
+          readConventions(dir, "project", conventionRoster),
+        ),
+        ...HARNESS_CONFIG_DIRS.flatMap((dir) =>
+          readConventions(join(home, dir), "global", conventionRoster),
+        ),
       ];
       const practices: EstablishedPractice[] = readPractices(practiceDirs);
       if (conventions.length === 0 && practices.length === 0) return undefined;
@@ -107,10 +122,28 @@ export function createLiveSetupSource(
 }
 
 /**
- * Read each roster file that exists under `dir`, returning one size-bounded
- * ConventionSource per file tagged with `scope`. A roster file that does not
- * exist (or cannot be read) is skipped silently. The file name never leaves this
- * function: only its text and the generic scope are returned.
+ * The directories a project's stated conventions can live in: the project root
+ * itself, then each harness config directory under it. Both are real locations, a
+ * repo may keep its instructions at the root or inside a harness's dot-directory,
+ * and a repo that does both states conventions in both.
+ */
+function projectConventionDirs(projectRoot: string): ReadonlyArray<string> {
+  return [
+    projectRoot,
+    ...HARNESS_CONFIG_DIRS.map((dir) => join(projectRoot, dir)),
+  ];
+}
+
+/**
+ * Read each roster file that exists under `dir`, returning one ConventionSource
+ * per file tagged with `scope`. A roster file that does not exist (or cannot be
+ * read) is skipped silently. The file name never leaves this function: only its
+ * text and the generic scope are returned.
+ *
+ * The text is returned WHOLE. Provenance hashes it to answer "did the engineer's
+ * conventions change", which a truncated read cannot do: an edit past the cut
+ * would hash identically to the text before it. Bounding for the judge prompt is
+ * that consumer's concern and lives at its render edge.
  */
 function readConventions(
   dir: string,
@@ -121,7 +154,7 @@ function readConventions(
   for (const fileName of roster) {
     const text = tryReadText(join(dir, fileName));
     if (text === undefined) continue;
-    out.push({ scope, text: text.slice(0, CONVENTION_TEXT_CAP) });
+    out.push({ scope, text });
   }
   return out;
 }
