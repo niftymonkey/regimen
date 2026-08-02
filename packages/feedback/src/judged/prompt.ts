@@ -146,6 +146,14 @@ function buildSystem(setup: EngineerSetup | undefined): string {
 }
 
 /**
+ * A convention is rendered into the prompt up to this many characters, so a very
+ * large convention file cannot bloat the judge prompt. The bound belongs here
+ * rather than at the capture edge: the SetupSource carries whole text so
+ * provenance can hash it, and only this render is budget-constrained.
+ */
+const CONVENTION_TEXT_CAP = 8192;
+
+/**
  * Render the engineer's setup as a clearly delimited expected-behaviors block,
  * or nothing when no setup is supplied so the prompt stays the setup-blind
  * baseline. The conventions are tagged by scope and the practice roster is named
@@ -157,7 +165,8 @@ function renderSetup(setup: EngineerSetup | undefined): string[] {
     "Expected behaviors (the engineer's own setup). Weigh whether these were honored:",
   ];
   for (const convention of setup.conventions) {
-    lines.push(`- convention (${convention.scope}): ${convention.text}`);
+    const text = convention.text.slice(0, CONVENTION_TEXT_CAP);
+    lines.push(`- convention (${convention.scope}): ${text}`);
   }
   for (const practice of setup.practices) {
     lines.push(`- practice ${practice.name}: ${practice.summary}`);

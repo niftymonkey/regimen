@@ -181,6 +181,22 @@ test("injects a supplied convention's text and a practice's name when setup is p
   expect(full).toContain("tdd");
 });
 
+test("bounds a very large convention's rendered text so it cannot bloat the prompt", () => {
+  const tail = "PAST-THE-CAP";
+  const oversized: EngineerSetup = {
+    conventions: [{ scope: "global", text: `${"A".repeat(8192)}${tail}` }],
+    practices: [],
+  };
+
+  const prompt = buildJudgePrompt(CHUNKS, oversized);
+  const full = `${prompt.system}\n${prompt.user}`;
+
+  // Pin the exact boundary, not just the tail's absence: asserting only that
+  // PAST-THE-CAP is missing would still pass if the cap shrank to any value.
+  expect(prompt.user).toContain(`- convention (global): ${"A".repeat(8192)}\n`);
+  expect(full).not.toContain(tail);
+});
+
 test("the SYSTEM rubric gains the adherence instruction only when setup is present", () => {
   expect(buildJudgePrompt(CHUNKS, SETUP).system).toContain(
     "Expected-behaviors adherence",
