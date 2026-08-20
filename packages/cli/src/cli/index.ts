@@ -1116,5 +1116,8 @@ export function cliVersion(): string {
 }
 
 if (import.meta.main) {
-  process.exit(await runCli(process.argv.slice(2)));
+  // Setting the code and returning lets the runtime drain stdout before the
+  // process ends, so a result set larger than the OS pipe buffer reaches a
+  // piping consumer whole.
+  process.exitCode = await runCli(process.argv.slice(2));
 }
