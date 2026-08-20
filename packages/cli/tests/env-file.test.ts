@@ -91,7 +91,7 @@ test("under dry run, writeEnvTemplateIfAbsent never creates a missing file", () 
   expect(existsSync(join(dir, "env"))).toBe(false);
 });
 
-test("the written template is entirely comments and documents the three judge vars", () => {
+test("the written template is entirely comments and documents the judge vars", () => {
   writeEnvTemplateIfAbsent(dir, false);
   const contents = readFileSync(join(dir, "env"), "utf8");
   expect(parseEnvFile(contents)).toEqual([]);
@@ -101,6 +101,7 @@ test("the written template is entirely comments and documents the three judge va
   expect(contents).toContain("REGIMEN_JUDGE_API_KEY");
   expect(contents).toContain("REGIMEN_JUDGE_BASE_URL");
   expect(contents).toContain("REGIMEN_JUDGE_MODEL");
+  expect(contents).toContain("REGIMEN_JUDGE_VIA");
   expect(contents.toLowerCase()).toContain("loaded at cli startup");
 });
 

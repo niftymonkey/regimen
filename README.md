@@ -31,7 +31,7 @@ Assessment needs an LLM, and there are three equally good ways to give it one. U
 - **The `claude` CLI.** If `claude` is on your PATH, Regimen shells out to it and uses the login you already have. No key involved.
 - **No key, no CLI.** The agent you are already talking to can be the judge itself: `regimen assess --emit-prompt` hands it the judging prompt, and `--record-verdict` stores its verdict. The bundled skill drives this end to end.
 
-Regimen picks automatically from what is available; `--judge-via` pins a specific one.
+Regimen picks automatically from what is available; `--judge-via` pins a specific one, and `REGIMEN_JUDGE_VIA=cli` (or `api`) pins it for every run, including the nightly sweep, which takes no flags.
 
 ## How it works: Feedback, and two levers
 

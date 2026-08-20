@@ -228,3 +228,65 @@ test("--judge-via api with no key throws even when claude is on PATH", () => {
     resolveJudgeModel({ env: {}, judgeVia: "api", claudeOnPath: () => true }),
   ).toThrow(/ANTHROPIC_API_KEY/);
 });
+
+test("REGIMEN_JUDGE_VIA=cli forces the cli backend even when a key is present", async () => {
+  const resolved = resolveJudgeModel({
+    env: { ANTHROPIC_API_KEY: "sk-ant", REGIMEN_JUDGE_VIA: "cli" },
+    run: cliRunner(),
+  });
+  expect(resolved.backend).toBe("cli");
+  await resolved.port.complete({ system: "s", user: "u" });
+});
+
+test("REGIMEN_JUDGE_VIA=api picks the HTTP backend even when only claude is on PATH", () => {
+  expect(() =>
+    resolveJudgeModel({
+      env: { REGIMEN_JUDGE_VIA: "api" },
+      claudeOnPath: () => true,
+    }),
+  ).toThrow(/ANTHROPIC_API_KEY/);
+});
+
+test("--judge-via wins over REGIMEN_JUDGE_VIA", async () => {
+  const resolved = resolveJudgeModel({
+    env: { ANTHROPIC_API_KEY: "sk-ant", REGIMEN_JUDGE_VIA: "api" },
+    judgeVia: "cli",
+    run: cliRunner(),
+  });
+  expect(resolved.backend).toBe("cli");
+  await resolved.port.complete({ system: "s", user: "u" });
+});
+
+test("an unknown REGIMEN_JUDGE_VIA value throws instead of quietly auto-selecting", () => {
+  let message = "";
+  try {
+    resolveJudgeModel({
+      env: { ANTHROPIC_API_KEY: "sk-ant", REGIMEN_JUDGE_VIA: "clii" },
+    });
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain("REGIMEN_JUDGE_VIA");
+  expect(message).toContain("clii");
+  expect(message).toContain("cli");
+  expect(message).toContain("api");
+});
+
+test("REGIMEN_JUDGE_VIA=agent throws and names the emit/record flow", () => {
+  let message = "";
+  try {
+    resolveJudgeModel({
+      env: { ANTHROPIC_API_KEY: "sk-ant", REGIMEN_JUDGE_VIA: "agent" },
+    });
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain("--emit-prompt");
+});
+
+test("an empty REGIMEN_JUDGE_VIA counts as unset, like the other judge vars", () => {
+  const resolved = resolveJudgeModel({
+    env: { ANTHROPIC_API_KEY: "sk-ant", REGIMEN_JUDGE_VIA: "" },
+  });
+  expect(resolved.backend).toBe("api");
+});

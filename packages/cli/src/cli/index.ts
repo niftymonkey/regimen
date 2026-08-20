@@ -971,7 +971,7 @@ Flags:
   --auto                          assess --all: the nightly sweep the daemon launches; judges conversations quiet
                                   for a day, re-judges ones that outgrew their verdict, never prompts
   --force                         assess --all: re-judge sessions already judged
-  --judge-via <api|cli|agent>     assess: force the judge backend (agent = the emit/record flow)
+  --judge-via <api|cli|agent>     assess: force the judge backend (agent = the emit/record flow); REGIMEN_JUDGE_VIA sets it for every run
   --judge-model <id>              assess: override the judge model
 
 The harness is auto-detected per invocation, or set REGIMEN_HARNESS.
