@@ -882,3 +882,43 @@ test("omitting config.llm resolves the default judge adapter (no network here)",
     if (savedPath !== undefined) process.env.PATH = savedPath;
   }
 });
+
+test("a thrown port carries the provider's own message as the incomplete detail", async () => {
+  const failing: JudgeModelPort = {
+    complete(): Promise<JudgeModelResponse> {
+      return Promise.reject(
+        new Error(
+          "judge request failed: 400 Your credit balance is too low to access the Anthropic API.",
+        ),
+      );
+    },
+  };
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: failing },
+  );
+  expect(result.incompleteReason).toBe("llm-unavailable");
+  expect(result.incompleteDetail).toContain("credit balance is too low");
+});
+
+test("the incomplete detail carries no credential and stays short", async () => {
+  const long = "context overflow: ".concat("x".repeat(500));
+  const failing: JudgeModelPort = {
+    complete(): Promise<JudgeModelResponse> {
+      return Promise.reject(
+        new Error(
+          `401 invalid key sk-ant-api03-QRSTUVWXYZabcdefghij0123456789 at https://user:hunter2@api.example.com/v1 ${long}`,
+        ),
+      );
+    },
+  };
+  const result = await judgeConversation(
+    { sessionId: SESSION, chunks: CHUNKS },
+    { llm: failing },
+  );
+  const detail = result.incompleteDetail!;
+  expect(detail).toContain("401 invalid key");
+  expect(detail).not.toContain("sk-ant-api03-QRSTUVWXYZabcdefghij0123456789");
+  expect(detail).not.toContain("hunter2");
+  expect(detail.length).toBeLessThanOrEqual(200);
+});

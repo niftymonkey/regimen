@@ -119,12 +119,16 @@ export type SweepOutcome = "complete" | "signals-only" | "incomplete";
 export interface SweepJudgeResolution {
   readonly outcome: SweepOutcome;
   readonly incompleteReason?: IncompleteReason;
+  /** What the backend said, when the reason alone cannot diagnose the failure. */
+  readonly incompleteDetail?: string;
 }
 
 /** One incomplete-outcome session paired with the reason its judge reported. */
 export interface IncompleteRun {
   readonly session: SessionSummary;
   readonly incompleteReason?: IncompleteReason;
+  /** What the backend said, when the reason alone cannot diagnose the failure. */
+  readonly incompleteDetail?: string;
 }
 
 /** A conversation whose judge threw, paired with the error, for the summary. */
@@ -263,6 +267,10 @@ export async function runSweep(
             ...(typeof resolved !== "string" &&
             resolved.incompleteReason !== undefined
               ? { incompleteReason: resolved.incompleteReason }
+              : {}),
+            ...(typeof resolved !== "string" &&
+            resolved.incompleteDetail !== undefined
+              ? { incompleteDetail: resolved.incompleteDetail }
               : {}),
           });
       } catch (caught) {

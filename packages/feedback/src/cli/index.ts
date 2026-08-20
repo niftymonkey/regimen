@@ -659,7 +659,9 @@ export async function assess(options: {
  * did not observe on every run.
  */
 export function incompleteSummaryLines(
-  incomplete: ReadonlyArray<Pick<IncompleteRun, "incompleteReason">>,
+  incomplete: ReadonlyArray<
+    Pick<IncompleteRun, "incompleteReason" | "incompleteDetail">
+  >,
 ): string[] {
   const counts = new Map<string, number>();
   for (const { incompleteReason } of incomplete) {
@@ -677,8 +679,15 @@ export function incompleteSummaryLines(
   const reasoned = [...counts.values()].reduce((sum, n) => sum + n, 0);
   if (counts.size === 1 && reasoned === incomplete.length) {
     const [reason] = counts.keys();
+    // The detail is quoted only when every run reported the same one, for the
+    // same reason the uniformity claim itself is: a cause is never asserted
+    // beyond what was observed on every run.
+    const details = new Set(incomplete.map((run) => run.incompleteDetail));
+    const [detail] = details;
+    const said =
+      details.size === 1 && detail !== undefined ? `: ${detail}` : "";
     lines.push(
-      `  every verdict failed the same way (${reason}); check the judge backend (see --judge-via)\n`,
+      `  every verdict failed the same way (${reason})${said}; check the judge backend (see --judge-via)\n`,
     );
   }
   return lines;
@@ -815,16 +824,23 @@ export async function assessAll(options: {
           digest.judged && !digest.complete
             ? digest.incompleteReason
             : undefined;
+        const incompleteDetail =
+          digest.judged && !digest.complete
+            ? digest.incompleteDetail
+            : undefined;
+        const said =
+          incompleteDetail === undefined ? "" : `: ${incompleteDetail}`;
         const shown =
           outcome === "incomplete"
             ? incompleteReason === undefined
               ? "incomplete"
-              : `incomplete (${incompleteReason})`
+              : `incomplete (${incompleteReason})${said}`
             : (digest.judged && digest.outcome?.value) || outcome;
         process.stdout.write(`${label} -> ${shown}\n`);
         return {
           outcome,
           ...(incompleteReason === undefined ? {} : { incompleteReason }),
+          ...(incompleteDetail === undefined ? {} : { incompleteDetail }),
         };
       } catch (caught) {
         // Print inline so progress numbering stays contiguous, then re-throw so
