@@ -334,3 +334,32 @@ test("an out-of-vocabulary signal value is dropped rather than assembled", () =>
     outcome.signals.find((s) => s.signalName === "accomplishment"),
   ).toBeDefined();
 });
+
+test("a null claim field is treated as absent, not dereferenced", () => {
+  const withNulls = JSON.stringify({
+    intent: { value: "test-writing", anchors: [0] },
+    assessment: {
+      prose: "The engineer asked for a parser test; the agent delivered it.",
+      anchors: [0, 1],
+    },
+    accomplishment: { value: "accomplished", anchors: [1] },
+    "correction-cost": null,
+    attribution: null,
+    engagement: null,
+    effort: null,
+    framing: null,
+    conducting: null,
+    verification: null,
+    "convention-adherence": null,
+  });
+
+  const outcome = assembleVerdict(withNulls, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(
+    outcome.signals.find((s) => s.signalName === "correction-cost"),
+  ).toBeUndefined();
+  expect(outcome.signals.find((s) => s.signalName === "intent")!.value).toBe(
+    "test-writing",
+  );
+});
