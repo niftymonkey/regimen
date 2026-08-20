@@ -12,6 +12,7 @@ import type { Database } from "bun:sqlite";
 import type { AnchorRef } from "../loader/reader-types.ts";
 import { sessionHarnessModel } from "./slice.ts";
 import type {
+  IncompleteReason,
   JudgeBackend,
   JudgeProvenance,
   SignalName,
@@ -84,6 +85,8 @@ export interface JudgedDigest {
    */
   model: string | null;
   complete: boolean;
+  /** Why the run did not finish clean; absent on a complete run. */
+  incompleteReason?: IncompleteReason;
   provenance: JudgeProvenance;
   /** The conversation assessment; null when the run abstained on it. */
   assessment: DigestAssessment | null;
@@ -119,6 +122,7 @@ interface RunRow {
   judge_model: string;
   judge_backend: string | null;
   complete: number;
+  incomplete_reason: string | null;
 }
 
 interface JudgedSignalRow {
@@ -153,7 +157,7 @@ export function readJudgmentDigest(
 ): JudgmentDigest {
   const latest = db
     .prepare(
-      `SELECT run_id, rubric_version, prompt_version, judge_model, judge_backend, complete
+      `SELECT run_id, rubric_version, prompt_version, judge_model, judge_backend, complete, incomplete_reason
          FROM assessment_run WHERE session_id = ?
          ORDER BY created_at DESC, run_id DESC LIMIT 1`,
     )
@@ -211,6 +215,9 @@ export function readJudgmentDigest(
     harness: slice?.harness ?? "",
     model: slice?.model ?? null,
     complete: latest.complete === 1,
+    ...(latest.incomplete_reason === null
+      ? {}
+      : { incompleteReason: latest.incomplete_reason as IncompleteReason }),
     provenance: {
       judgeModel: latest.judge_model,
       rubricVersion: latest.rubric_version,

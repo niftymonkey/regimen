@@ -180,6 +180,22 @@ test("an incomplete run still renders the judged branch carrying complete=false"
     expect(digest.assignment.signals.map((s) => s.signalName)).toEqual([
       "intent",
     ]);
+    expect(digest.incompleteReason).toBe("insufficient-evidence");
+  });
+});
+
+test("a complete run carries no incompleteReason", () => {
+  withStore((store) => {
+    writeAssessment(
+      store,
+      run("run-1", "2026-06-15T10:00:00.000Z"),
+      fullResult(),
+    );
+    const digest = readJudgmentDigest(store.db, SESSION, FIXED);
+    expect(digest.judged).toBe(true);
+    if (digest.judged !== true) return;
+    expect(digest.complete).toBe(true);
+    expect(digest.incompleteReason).toBeUndefined();
   });
 });
 

@@ -207,6 +207,14 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
       ALTER TABLE conversations ADD COLUMN transcript_missing_at TEXT;
     `,
   },
+  {
+    version: 10,
+    description:
+      "assessment_run.incomplete_reason so a degraded run's cause survives the write",
+    up: `
+      ALTER TABLE assessment_run ADD COLUMN incomplete_reason TEXT;
+    `,
+  },
 ];
 
 /** Result of an event insert. `inserted: false` means an identical hash already existed. */

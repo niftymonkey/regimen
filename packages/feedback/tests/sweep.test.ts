@@ -610,7 +610,34 @@ test("runSweep buckets each resolved judge by its reported outcome (complete, si
     ]);
     expect(summary.complete.map((s) => s.sessionId)).toEqual(["s1"]);
     expect(summary.signalsOnly.map((s) => s.sessionId)).toEqual(["s2"]);
-    expect(summary.incomplete.map((s) => s.sessionId)).toEqual(["s3"]);
+    expect(summary.incomplete.map((i) => i.session.sessionId)).toEqual(["s3"]);
+  });
+});
+
+test("runSweep carries the judge's reported incompleteReason on an incomplete outcome", async () => {
+  await withStoreAsync(async (store) => {
+    seedThree(store);
+    const judge = async (session: SessionSummary) =>
+      session.sessionId === "s2"
+        ? {
+            outcome: "incomplete" as const,
+            incompleteReason: "llm-unavailable" as const,
+          }
+        : "complete";
+    const summary = await runSweep(store.db, {
+      filter: {},
+      force: false,
+      batchSize: 10,
+      judge,
+      decideNextBatch: async (): Promise<BatchDecision> => "continue",
+      now: NOW,
+    });
+    expect(summary.incomplete).toEqual([
+      {
+        session: expect.objectContaining({ sessionId: "s2" }),
+        incompleteReason: "llm-unavailable",
+      },
+    ]);
   });
 });
 

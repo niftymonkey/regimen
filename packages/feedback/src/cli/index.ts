@@ -100,7 +100,8 @@ import {
   runSweep,
   selectSessionsToJudge,
   type BatchDecision,
-  type SweepOutcome,
+  type IncompleteRun,
+  type SweepJudgeResolution,
 } from "../judged/sweep.ts";
 import { TranscriptNotFoundError } from "../judged/read-conversation.ts";
 import {
@@ -645,6 +646,40 @@ export async function assess(options: {
 }
 
 /**
+ * The sweep summary's incomplete-reason lines (newline-terminated, ready to
+ * write): a sorted per-reason breakdown when any incomplete run carries a
+ * reason, plus the plain "every verdict failed the same way" pointer ONLY when
+ * every incomplete run carries the same reason. Runs without a recorded reason
+ * block the uniformity claim: the sweep must never assert a shared cause it
+ * did not observe on every run.
+ */
+export function incompleteSummaryLines(
+  incomplete: ReadonlyArray<Pick<IncompleteRun, "incompleteReason">>,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const { incompleteReason } of incomplete) {
+    if (incompleteReason === undefined) continue;
+    counts.set(incompleteReason, (counts.get(incompleteReason) ?? 0) + 1);
+  }
+  if (counts.size === 0) return [];
+
+  const breakdown = [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([reason, count]) => `${reason} ${count}`)
+    .join(", ");
+  const lines = [`  incomplete reasons: ${breakdown}\n`];
+
+  const reasoned = [...counts.values()].reduce((sum, n) => sum + n, 0);
+  if (counts.size === 1 && reasoned === incomplete.length) {
+    const [reason] = counts.keys();
+    lines.push(
+      `  every verdict failed the same way (${reason}); check the judge backend (see --judge-via)\n`,
+    );
+  }
+  return lines;
+}
+
+/**
  * `regimen assess --all`: judge many conversations in one sweep. Selects the
  * conversations matching `filter` (default skip already-judged; `--force`
  * re-judges), then judges them in batches of `batchSize`, pausing between batches
@@ -724,7 +759,9 @@ export async function assessAll(options: {
     // cwd through resolve); a test injects a stub instead.
     const setupSource = options.setupSource ?? createLiveSetupSource();
     let index = 0;
-    const judge = async (session: SessionSummary): Promise<SweepOutcome> => {
+    const judge = async (
+      session: SessionSummary,
+    ): Promise<SweepJudgeResolution> => {
       index++;
       const label = `[${index}/${toJudge}] ${session.harness} ${session.sessionId}`;
       try {
@@ -745,18 +782,27 @@ export async function assessAll(options: {
         // fully-persisted verdict from a thinner one. A complete run with an
         // assessment narrative is the full verdict; a complete run with no
         // narrative persisted only signals; anything not complete is incomplete.
-        const sweepOutcome: SweepOutcome =
+        const outcome =
           digest.judged && digest.complete
             ? digest.assessment !== null
               ? "complete"
               : "signals-only"
             : "incomplete";
+        const incompleteReason =
+          digest.judged && !digest.complete
+            ? digest.incompleteReason
+            : undefined;
         const shown =
-          digest.judged && digest.complete
-            ? (digest.outcome?.value ?? sweepOutcome)
-            : "incomplete";
+          outcome === "incomplete"
+            ? incompleteReason === undefined
+              ? "incomplete"
+              : `incomplete (${incompleteReason})`
+            : (digest.judged && digest.outcome?.value) || outcome;
         process.stdout.write(`${label} -> ${shown}\n`);
-        return sweepOutcome;
+        return {
+          outcome,
+          ...(incompleteReason === undefined ? {} : { incompleteReason }),
+        };
       } catch (caught) {
         // Print inline so progress numbering stays contiguous, then re-throw so
         // the engine records it. A gone transcript is durably marked and reported
@@ -778,6 +824,9 @@ export async function assessAll(options: {
     process.stdout.write(
       `done: judged ${summary.judged.length} (complete ${summary.complete.length}, signals-only ${summary.signalsOnly.length}, incomplete ${summary.incomplete.length}), newly missing ${summary.missingTranscript.length}, failed ${summary.failed.length}, skipped ${summary.skipped.length}\n`,
     );
+    for (const line of incompleteSummaryLines(summary.incomplete)) {
+      process.stdout.write(line);
+    }
     for (const missing of summary.missingTranscript) {
       process.stdout.write(
         `  missing: ${missing.harness} ${missing.sessionId} (transcript gone; marked so future sweeps skip it)\n`,

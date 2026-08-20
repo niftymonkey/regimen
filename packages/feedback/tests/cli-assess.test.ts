@@ -253,9 +253,45 @@ test("feedback assess --session runs the full pass against a mock judge and prin
       expect(digest.outcome.value).toBe("accomplished-cleanly");
       // The headline assessment resolved an inserted-event anchor.
       expect(digest.assessment.anchors.length).toBeGreaterThan(0);
+      expect(digest.incompleteReason).toBeUndefined();
     } finally {
       mock.stop();
     }
+  });
+});
+
+test("feedback assess --session on an empty transcript surfaces incompleteReason in the JSON digest", async () => {
+  await withTemp(async ({ dataDir, codexHome }) => {
+    // A transcript carrying only session_meta yields zero content chunks: an
+    // honest insufficient-evidence run with no judge call.
+    const dir = join(codexHome, "sessions", "2026", "06", "15");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, `rollout-2026-06-15T10-00-00-${SESSION}.jsonl`),
+      line({
+        timestamp: "2026-06-15T10:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: SESSION,
+          cwd: "/work/p",
+          originator: "codex_exec",
+          source: "exec",
+        },
+      }),
+    );
+    const { exit, stdout } = await runCliWith(
+      ["assess", "--session", SESSION],
+      {
+        REGIMEN_DATA_DIR: dataDir,
+        REGIMEN_HARNESS: "codex",
+        CODEX_HOME: codexHome,
+        ANTHROPIC_API_KEY: "sk-ant-test",
+      },
+    );
+    expect(exit).toBe(0);
+    const digest = JSON.parse(stdout);
+    expect(digest.complete).toBe(false);
+    expect(digest.incompleteReason).toBe("insufficient-evidence");
   });
 });
 
