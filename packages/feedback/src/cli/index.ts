@@ -121,6 +121,11 @@ import { waitForDaemonAlive } from "./wait-for-daemon.ts";
 export type { SessionFilter, SessionSummary } from "../sessions.ts";
 export type { BatchDecision } from "../judged/sweep.ts";
 export type { AuditFilter } from "../judged/audit.ts";
+export {
+  maybeTriggerNightlySweep,
+  readNightlySettings,
+  type NightlySettings,
+} from "../judged/nightly.ts";
 
 /** How to run the daemon foreground when no supervisor is installed. */
 const FOREGROUND_HINT =
@@ -694,6 +699,16 @@ export async function assessAll(options: {
   filter: SessionFilter;
   force: boolean;
   batchSize: number;
+  /**
+   * Also re-judge an already-judged conversation that has grown past its
+   * verdict's watermark (ADR-0018's nightly sweep). Off by default.
+   */
+  growth?: boolean;
+  /**
+   * A hard cap on conversations judged in this sweep (ADR-0018's nightly
+   * limit), spent on the ones closest to aging out. Omitted means no cap.
+   */
+  limit?: number;
   judgeModel?: string;
   judgeVia?: "cli" | "api";
   /** The setup source; defaults to the live adapter. Tests inject a stub. */
@@ -721,12 +736,20 @@ export async function assessAll(options: {
     const alreadyJudged = sessions.filter(
       (s) => s.judged && s.transcriptMissingAt === null,
     ).length;
-    const toJudge = selectSessionsToJudge(
+    const selectOptions = {
+      force: options.force,
+      ...(options.growth === true ? { growth: true } : {}),
+    };
+    const selectable = selectSessionsToJudge(
       store.db,
       options.filter,
-      { force: options.force },
+      selectOptions,
       now,
     ).length;
+    const toJudge =
+      options.limit === undefined
+        ? selectable
+        : Math.min(selectable, options.limit);
     process.stdout.write(
       `sweep: matched ${matched}, already judged ${alreadyJudged}, missing ${missing}, to judge ${toJudge}\n`,
     );
@@ -816,6 +839,8 @@ export async function assessAll(options: {
     const summary = await runSweep(store.db, {
       filter: options.filter,
       force: options.force,
+      ...(options.growth === true ? { growth: true } : {}),
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
       batchSize: options.batchSize,
       judge,
       decideNextBatch: options.decideNextBatch,

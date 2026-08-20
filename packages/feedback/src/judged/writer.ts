@@ -78,6 +78,32 @@ function unionAnchors(
   return union;
 }
 
+/** The conversation state one run covered: how far it ran and how much it held. */
+interface Coverage {
+  readonly lastEventAt: string | null;
+  readonly eventCount: number | null;
+}
+
+/**
+ * Read the conversation's current watermark, the pair a later sweep compares
+ * against to tell growth from noise (ADR-0018). Both are null when the store
+ * holds no conversation row for the session, which leaves the run readable and
+ * simply not re-judgeable on growth.
+ */
+function readCoverage(db: Store["db"], sessionId: string): Coverage {
+  const row = db
+    .prepare(
+      `SELECT c.last_event_at AS last_event_at,
+              COALESCE(cc.event_count, 0) AS event_count
+         FROM conversations c
+         LEFT JOIN conversation_counts cc USING (session_id)
+        WHERE c.session_id = ?`,
+    )
+    .get(sessionId) as { last_event_at: string; event_count: number } | null;
+  if (row === null) return { lastEventAt: null, eventCount: null };
+  return { lastEventAt: row.last_event_at, eventCount: row.event_count };
+}
+
 /** The run identity the orchestrator mints for one judgment pass. */
 export interface AssessmentRunIdentity {
   readonly runId: string;
@@ -98,10 +124,11 @@ export function writeAssessment(
 ): void {
   const db = store.db;
   db.transaction(() => {
+    const covered = readCoverage(db, run.sessionId);
     db.prepare(
       `INSERT INTO assessment_run
-         (run_id, session_id, rubric_version, prompt_version, judge_model, judge_backend, complete, created_at, incomplete_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (run_id, session_id, rubric_version, prompt_version, judge_model, judge_backend, complete, created_at, incomplete_reason, covered_last_event_at, covered_event_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.runId,
       run.sessionId,
@@ -112,6 +139,8 @@ export function writeAssessment(
       result.complete ? 1 : 0,
       run.createdAt,
       result.incompleteReason ?? null,
+      covered.lastEventAt,
+      covered.eventCount,
     );
 
     db.prepare(

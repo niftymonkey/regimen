@@ -51,6 +51,7 @@ import {
   audit as feedbackAudit,
   calibrate as feedbackCalibrate,
   type AuditFilter,
+  readNightlySettings,
   type BatchDecision,
   emitPrompt as feedbackEmitPrompt,
   recordVerdict as feedbackRecordVerdict,
@@ -184,6 +185,16 @@ function collectFlagValues(
   }
   return out;
 }
+
+/**
+ * How long a conversation must be quiet before the nightly sweep judges it
+ * (ADR-0018). Quiescence is the only finished-signal the store carries, and a
+ * full day is where re-judging stops paying for itself.
+ */
+const QUIESCENCE_WINDOW = "24h";
+
+/** The nightly sweep never pauses: no one is at the terminal to answer. */
+const SWEEP_EVERYTHING = async (): Promise<BatchDecision> => "all";
 
 /** The default sweep batch size when `--batch` is absent or invalid. */
 export const DEFAULT_BATCH_SIZE = 10;
@@ -765,7 +776,13 @@ async function assess(argv: ReadonlyArray<string>): Promise<number> {
   }
 
   if (argv.includes("--all")) {
+    // The nightly sweep (ADR-0018): quiescence-bounded, watermark-aware,
+    // capped, and never interactive, since nobody is watching it. An explicit
+    // --until still wins, so the flag composes with a hand-run narrower window.
+    const auto = argv.includes("--auto");
+    const nightly = readNightlySettings(process.env);
     const filter: SessionFilter = {
+      ...(auto ? { until: QUIESCENCE_WINDOW } : {}),
       ...optionalFilter(argv, "--harness", "harness"),
       ...optionalFilter(argv, "--model", "model"),
       ...optionalFilter(argv, "--since", "since"),
@@ -777,9 +794,10 @@ async function assess(argv: ReadonlyArray<string>): Promise<number> {
       filter,
       force: argv.includes("--force"),
       batchSize: parseBatchSize(flagValue(argv, "--batch")),
+      ...(auto ? { growth: true, limit: nightly.limit } : {}),
       ...(judgeModel === undefined ? {} : { judgeModel }),
       ...(judgeVia === undefined ? {} : { judgeVia }),
-      decideNextBatch: promptNextBatch,
+      decideNextBatch: auto ? SWEEP_EVERYTHING : promptNextBatch,
     });
   }
   return feedbackAssess({
@@ -937,6 +955,7 @@ Read & judge:
   evidence                               quantitative digest of the current session (free, deterministic)
   assess                                 judged verdict of the current session (paid LLM call, writes a verdict)
   assess --all [filters] [--batch <n>] [--force]   judge many sessions in one sweep (paid; batched, resumable)
+  assess --all --auto             one nightly-style sweep: quiet a day, uncapped batches, nightly limit (paid)
   assess --emit-prompt                   print the judge prompt for the current agent to judge (no paid call)
   assess --record-verdict                read the agent's verdict from stdin and record it
   rollup [filters] [--json]              read across judged sessions: how it is going, patterns, remedies (paid LLM synthesis)
@@ -949,6 +968,8 @@ Flags:
   --no-daemon                     install capture without the loader daemon (install)
   --all                           assess: judge every matching session, not just the current one
   --batch <n>                     assess --all: sessions per batch before the continue/all/quit prompt (default 10)
+  --auto                          assess --all: the nightly sweep the daemon launches; judges conversations quiet
+                                  for a day, re-judges ones that outgrew their verdict, never prompts
   --force                         assess --all: re-judge sessions already judged
   --judge-via <api|cli|agent>     assess: force the judge backend (agent = the emit/record flow)
   --judge-model <id>              assess: override the judge model
@@ -986,7 +1007,7 @@ installed version, harnesses + scopes, and daemon health
 control or inspect the capture daemon
 `,
   assess: `usage: regimen assess [--session <id>] [--judge-model <id>] [--judge-via <api|cli|agent>]
-       regimen assess --all [--harness <h>] [--since <when>] [--until <when>] [--outcome <o>] [--batch <n>] [--force]
+       regimen assess --all [--harness <h>] [--since <when>] [--until <when>] [--outcome <o>] [--batch <n>] [--force] [--auto]
        regimen assess --emit-prompt | --record-verdict
 
 judged verdict of a session (paid LLM call, writes a verdict)

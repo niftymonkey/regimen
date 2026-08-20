@@ -28,6 +28,10 @@ import {
   type SessionFilter,
   type SessionSummary,
 } from "../sessions.ts";
+import {
+  hasGrownPastWatermark,
+  readCoverageWatermarks,
+} from "./auto-assess.ts";
 import { TranscriptNotFoundError } from "./read-conversation.ts";
 import type { IncompleteReason } from "./types.ts";
 
@@ -51,13 +55,21 @@ export function markTranscriptMissing(
 export interface SelectOptions {
   /** Re-judge already-judged conversations too, instead of skipping them. */
   readonly force: boolean;
+  /**
+   * Also re-select an already-judged conversation that has grown past what its
+   * verdict covered (ADR-0018). Off by default, so an ordinary sweep keeps
+   * skipping everything judged.
+   */
+  readonly growth?: boolean;
 }
 
 /**
  * Select the conversations a sweep should judge. With `force: false` (default
  * sweep behavior) this is the unjudged subset of the filtered conversations;
- * with `force: true` it is every matching conversation. A transcript-missing
- * session is excluded either way.
+ * with `force: true` it is every matching conversation. With `growth: true` it
+ * is the unjudged subset plus every judged conversation that has grown past its
+ * verdict's watermark (ADR-0018). A transcript-missing session is excluded in
+ * every case.
  */
 export function selectSessionsToJudge(
   db: Database,
@@ -65,10 +77,19 @@ export function selectSessionsToJudge(
   options: SelectOptions,
   now: () => number = Date.now,
 ): SessionSummary[] {
-  return listSessions(db, filter, now).filter(
+  const present = listSessions(db, filter, now).filter(
+    (session) => session.transcriptMissingAt === null,
+  );
+  if (options.force) return [...present];
+  if (options.growth !== true) return present.filter((s) => !s.judged);
+  const watermarks = readCoverageWatermarks(db);
+  return present.filter(
     (session) =>
-      session.transcriptMissingAt === null &&
-      (options.force || !session.judged),
+      !session.judged ||
+      hasGrownPastWatermark(
+        watermarks.get(session.sessionId) ?? null,
+        session.eventCount,
+      ),
   );
 }
 
@@ -145,6 +166,13 @@ export interface RunSweepOptions {
   /** Conversations to judge per batch; must be a positive integer. */
   readonly batchSize: number;
   /**
+   * A hard cap on how many conversations this sweep judges (ADR-0018's nightly
+   * limit). When set, the cap keeps the conversations closest to aging out,
+   * oldest last event first, because a transcript that disappears takes its
+   * only chance at a verdict with it. Omitted means no cap.
+   */
+  readonly limit?: number;
+  /**
    * Judge one conversation; resolve with how the run finished (a bare
    * {@link SweepOutcome}, a {@link SweepJudgeResolution} carrying the
    * incomplete reason, or void, taken as `complete`), throw to record a
@@ -155,6 +183,11 @@ export interface RunSweepOptions {
   ) => Promise<SweepOutcome | SweepJudgeResolution | void>;
   /** Decide whether to keep going; called only between batches. */
   readonly decideNextBatch: () => Promise<BatchDecision>;
+  /**
+   * Also re-judge an already-judged conversation that has grown past its
+   * verdict's watermark (ADR-0018). Off by default.
+   */
+  readonly growth?: boolean;
   readonly now?: () => number;
 }
 
@@ -174,12 +207,21 @@ export async function runSweep(
     );
   }
   const nowMs = options.now ?? Date.now;
-  const selected = selectSessionsToJudge(
+  const matching = selectSessionsToJudge(
     db,
     options.filter,
-    { force: options.force },
+    {
+      force: options.force,
+      ...(options.growth === true ? { growth: true } : {}),
+    },
     nowMs,
   );
+  const selected =
+    options.limit === undefined
+      ? matching
+      : [...matching]
+          .sort((a, b) => a.lastEventAt.localeCompare(b.lastEventAt))
+          .slice(0, options.limit);
   const judged: SessionSummary[] = [];
   const complete: SessionSummary[] = [];
   const signalsOnly: SessionSummary[] = [];

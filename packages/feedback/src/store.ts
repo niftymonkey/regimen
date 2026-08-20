@@ -215,6 +215,15 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
       ALTER TABLE assessment_run ADD COLUMN incomplete_reason TEXT;
     `,
   },
+  {
+    version: 11,
+    description:
+      "coverage watermark on assessment_run so a re-judge can tell growth from noise (ADR-0018)",
+    up: `
+      ALTER TABLE assessment_run ADD COLUMN covered_last_event_at TEXT;
+      ALTER TABLE assessment_run ADD COLUMN covered_event_count INTEGER;
+    `,
+  },
 ];
 
 /** Result of an event insert. `inserted: false` means an identical hash already existed. */
