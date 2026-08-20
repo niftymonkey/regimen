@@ -1742,7 +1742,7 @@ export function install(options: {
       ? "dry run complete; nothing was changed\n"
       : options.daemon === false
         ? "Regimen installed without the daemon; drain the buffer yourself as noted above\n"
-        : "Regimen installed; run `feedback status` to confirm the daemon is live\n",
+        : "Regimen installed; run `regimen status` to confirm the daemon is live\n",
   );
   return 0;
 }
@@ -1838,6 +1838,7 @@ export function installDaemon(options: {
     bunPath: process.execPath,
     loaderPath: resolve(import.meta.dir, "..", "loader", "run.ts"),
     dataDir: dir,
+    ...(typeof process.getuid === "function" ? { uid: process.getuid() } : {}),
   };
   const plan = planInstall(ctx, process.platform, home);
 
@@ -1855,7 +1856,7 @@ export function installDaemon(options: {
     serviceFileBytes(plan.serviceContent, plan.serviceFileEncoding),
   );
   process.stdout.write(`wrote ${plan.servicePath}\n`);
-  return runCommands(plan.installCommands);
+  return runDaemonInstallCommands(plan);
 }
 
 export function uninstallDaemon(options: {
@@ -1893,24 +1894,68 @@ export function uninstallDaemon(options: {
   return 0;
 }
 
-function runCommands(commands: ReadonlyArray<ReadonlyArray<string>>): number {
+/**
+ * The supervisor-command execution seam: runs one command and returns its exit
+ * code. `quiet` suppresses the child's stdout and stderr, used for probes whose
+ * output is a noisy diagnostic blob (e.g. `launchctl print`) and whose only
+ * signal is the exit code. Injected by callers in tests so supervisor commands
+ * are never really executed off the host's launchd/systemd/Task Scheduler.
+ */
+export type CommandRunner = (
+  cmd: ReadonlyArray<string>,
+  options?: { quiet?: boolean },
+) => number;
+
+const spawnCommand: CommandRunner = (cmd, options) => {
+  const [head, ...rest] = cmd;
+  if (head === undefined) return 0;
+  const proc = Bun.spawnSync({
+    cmd: [head, ...rest],
+    stdout: options?.quiet ? "ignore" : "inherit",
+    stderr: options?.quiet ? "ignore" : "inherit",
+  });
+  return proc.exitCode ?? 1;
+};
+
+function runCommands(
+  commands: ReadonlyArray<ReadonlyArray<string>>,
+  run: CommandRunner = spawnCommand,
+): number {
   for (const cmd of commands) {
-    const [head, ...rest] = cmd;
-    if (head === undefined) continue;
+    if (cmd[0] === undefined) continue;
     process.stdout.write(`running: ${cmd.join(" ")}\n`);
-    const proc = Bun.spawnSync({
-      cmd: [head, ...rest],
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    if (proc.exitCode !== 0) {
-      process.stderr.write(
-        `command failed (exit ${proc.exitCode}): ${cmd.join(" ")}\n`,
-      );
-      return proc.exitCode ?? 1;
+    const code = run(cmd);
+    if (code !== 0) {
+      process.stderr.write(`command failed (exit ${code}): ${cmd.join(" ")}\n`);
+      return code;
     }
   }
   return 0;
+}
+
+/**
+ * Execute a daemon-install plan's load step idempotently. When the plan carries
+ * a `loadGuardCommand` (macOS) and that probe reports the service is already
+ * registered, the install is left in place with a calm line rather than running
+ * a second `load`, which launchd rejects with "Load failed: 5: Input/output
+ * error" every time an update re-runs over a live service. When the guard says
+ * not-loaded, or no guard is present, the install commands run as usual and a
+ * genuine load failure still surfaces loudly through `runCommands`.
+ */
+export function runDaemonInstallCommands(
+  plan: Pick<InstallPlan, "installCommands" | "loadGuardCommand">,
+  run: CommandRunner = spawnCommand,
+): number {
+  if (
+    plan.loadGuardCommand !== undefined &&
+    run(plan.loadGuardCommand, { quiet: true }) === 0
+  ) {
+    process.stdout.write(
+      "daemon already registered; leaving the running service in place\n",
+    );
+    return 0;
+  }
+  return runCommands(plan.installCommands, run);
 }
 
 interface Status {

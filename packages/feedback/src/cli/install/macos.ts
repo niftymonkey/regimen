@@ -63,6 +63,18 @@ export function macosInstallCommands(
   return [["launchctl", "load", "-w", servicePath]];
 }
 
+/**
+ * The probe that decides whether the LaunchAgent is already bootstrapped in the
+ * user's `gui` domain. `launchctl print gui/<uid>/<label>` exits 0 when the
+ * service is registered and nonzero when it is not, so its exit code is a clean
+ * already-loaded signal. Used to keep an update idempotent: re-running the
+ * install over a running service must not attempt a second `load`, which
+ * launchd rejects with "Load failed: 5: Input/output error".
+ */
+export function macosIsLoadedCommand(uid: number): ReadonlyArray<string> {
+  return ["launchctl", "print", `gui/${uid}/${LABEL}`];
+}
+
 export function macosUninstallCommands(
   servicePath: string,
 ): ReadonlyArray<ReadonlyArray<string>> {
