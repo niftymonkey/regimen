@@ -363,3 +363,22 @@ test("a null claim field is treated as absent, not dereferenced", () => {
     "test-writing",
   );
 });
+
+test("a __proto__ field cannot smuggle a null claim back past the null drop", () => {
+  const withProto = `{
+    "intent": { "value": "test-writing", "anchors": [0] },
+    "assessment": {
+      "prose": "The engineer asked for a parser test; the agent delivered it.",
+      "anchors": [0, 1]
+    },
+    "accomplishment": { "value": "accomplished", "anchors": [1] },
+    "__proto__": { "correction-cost": null }
+  }`;
+
+  const outcome = assembleVerdict(withProto, CHUNKS);
+  expect(outcome.ok).toBe(true);
+  if (!outcome.ok) return;
+  expect(
+    outcome.signals.find((s) => s.signalName === "correction-cost"),
+  ).toBeUndefined();
+});

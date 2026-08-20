@@ -242,10 +242,12 @@ function parseVerdict(text: string): ParsedVerdict | undefined {
  * then dereferences it, which is how one sweep died on `correction-cost`.
  */
 function withoutNullFields(parsed: Record<string, unknown>): ParsedVerdict {
-  const kept: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    if (value !== null) kept[key] = value;
-  }
+  // fromEntries, not assignment: `kept["__proto__"] = value` runs the setter
+  // and makes a model-emitted `__proto__` the prototype of the result, so its
+  // null claims read back through the chain and crash exactly as above.
+  const kept = Object.fromEntries(
+    Object.entries(parsed).filter(([, value]) => value !== null),
+  );
   return kept as ParsedVerdict;
 }
 
