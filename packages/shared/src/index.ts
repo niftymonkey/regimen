@@ -29,6 +29,11 @@ export {
 } from "./harness/resolve.ts";
 export { resolveHarnessHome } from "./harness/home.ts";
 export {
+  loadEnvFile,
+  parseEnvFile,
+  writeEnvTemplateIfAbsent,
+} from "./env-file.ts";
+export {
   extractCommandPath,
   planDeadLeafRemoval,
   planHooks,

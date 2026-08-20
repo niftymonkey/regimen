@@ -23,7 +23,7 @@ import { prepareConversation } from "./read-conversation.ts";
 import type { SetupSource } from "./setup.ts";
 import type { JudgeBackend, JudgeResult } from "./types.ts";
 import { PROMPT_VERSION, RUBRIC_VERSION } from "./versions.ts";
-import { writeAssessment } from "./writer.ts";
+import { readCoverage, writeAssessment } from "./writer.ts";
 
 const WHOLE_CONVERSATION_ASSIGNMENT = "whole-conversation";
 
@@ -94,6 +94,11 @@ export async function assessConversation(
     now,
   });
 
+  // The watermark, read while the judge's input is fixed and before the call
+  // that can run for minutes. The daemon keeps capturing throughout it, and
+  // events it lands after this point were never judged (ADR-0018).
+  const covered = readCoverage(store.db, sessionId);
+
   const result: JudgeResult =
     prepared.content.length === 0
       ? {
@@ -131,6 +136,7 @@ export async function assessConversation(
       createdAt: now().toISOString(),
     },
     result,
+    covered,
   );
 
   return readJudgmentDigest(store.db, sessionId, () => now().getTime());

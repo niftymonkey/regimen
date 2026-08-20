@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { openStore } from "../../feedback/src/store.ts";
 import { runCli } from "../src/cli/index.ts";
 
 const MANAGED_ENV = [
@@ -19,7 +20,23 @@ const MANAGED_ENV = [
   "REGIMEN_HARNESS",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
+  "REGIMEN_JUDGE_API_KEY",
+  "REGIMEN_JUDGE_BASE_URL",
+  "REGIMEN_JUDGE_MODEL",
 ];
+
+/**
+ * Blank every judge credential this process might inherit. `runCli` loads
+ * `~/.config/regimen/env` before dispatch, so without this a dispatch test can
+ * reach the engineer's real judge endpoint and spend a metered call.
+ */
+function withoutJudgeConfig(): void {
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_BASE_URL;
+  process.env.REGIMEN_JUDGE_API_KEY = "";
+  process.env.REGIMEN_JUDGE_BASE_URL = "";
+  process.env.REGIMEN_JUDGE_MODEL = "";
+}
 
 let savedEnv: Record<string, string | undefined>;
 let savedWrite: typeof process.stdout.write;
@@ -54,8 +71,7 @@ test("regimen assess --all routes to the bulk sweep and reports an empty store",
   // No judge backend: deleting the key and forcing --judge-via api means
   // resolving one would throw, so a passing empty-store sweep proves the
   // toJudge === 0 short-circuit returns before any backend resolution.
-  delete process.env.ANTHROPIC_API_KEY;
-  delete process.env.ANTHROPIC_BASE_URL;
+  withoutJudgeConfig();
   let stdout = "";
   process.stdout.write = ((chunk: string | Uint8Array): boolean => {
     stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
@@ -67,4 +83,46 @@ test("regimen assess --all routes to the bulk sweep and reports an empty store",
   // resolve a current session against an empty store).
   expect(stdout).toContain("matched 0");
   expect(stdout).toContain("to judge 0");
+});
+
+test("regimen assess --all --auto only considers conversations quiet for a full day", async () => {
+  const dataDir = tempDataDir();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  withoutJudgeConfig();
+  const store = openStore(join(dataDir, "feedback.db"));
+  try {
+    const anHourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO conversations
+           (session_id, harness, model, first_event_at, last_event_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "019e8c20-4491-7ea3-b809-d6586a5a72b8",
+        "codex",
+        "gpt-5",
+        anHourAgo,
+        anHourAgo,
+      );
+  } finally {
+    store.close();
+  }
+  let stdout = "";
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+    return true;
+  }) as typeof process.stdout.write;
+
+  const exit = await runCli([
+    "assess",
+    "--all",
+    "--auto",
+    "--judge-via",
+    "api",
+  ]);
+
+  expect(exit).toBe(0);
+  // Still active an hour ago, so quiescence excludes it entirely.
+  expect(stdout).toContain("matched 0");
 });

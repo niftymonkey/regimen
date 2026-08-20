@@ -681,3 +681,22 @@ test("runSweep rejects a non-positive batchSize and judges nothing", async () =>
     expect(calls.length).toBe(0);
   });
 });
+
+test("runSweep rejects a non-positive limit and judges nothing", async () => {
+  await withStoreAsync(async (store) => {
+    seedThree(store);
+    const { judge, calls } = recordingJudge();
+    await expect(
+      runSweep(store.db, {
+        filter: {},
+        force: false,
+        batchSize: 5,
+        limit: 0,
+        judge,
+        decideNextBatch: async (): Promise<BatchDecision> => "continue",
+        now: NOW,
+      }),
+    ).rejects.toThrow(/positive integer/);
+    expect(calls.length).toBe(0);
+  });
+});

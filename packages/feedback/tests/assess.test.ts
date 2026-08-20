@@ -9,6 +9,8 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { traceIdFor } from "@regimen/shared";
+import { type RegimenEvent } from "../hooks/event-log.ts";
 import { openStore, type Store } from "../src/store.ts";
 import { rolloutContent } from "../src/loader/rollout/codex-reader.ts";
 import { assessConversation } from "../src/judged/assess.ts";
@@ -539,5 +541,68 @@ test("an empty transcript is an insufficient-evidence run with the signal absent
       }
     ).n;
     expect(signalCount).toBe(0);
+  });
+});
+
+/** A user_prompt event the capture daemon could land at any moment. */
+function lateEvent(timestamp: string): RegimenEvent {
+  return {
+    schema_version: 1,
+    timestamp,
+    session_id: SESSION,
+    harness: "codex",
+    model: "gpt-5",
+    event_type: "user_prompt",
+    trace_id: traceIdFor(SESSION),
+    span_phase: "point",
+    span_name: "user_prompt",
+    attributes: { text: timestamp },
+  };
+}
+
+/** The conversation's current event count, the number the watermark stamps. */
+function eventCount(store: Store): number {
+  const row = store.db
+    .prepare(
+      "SELECT COALESCE(event_count, 0) AS n FROM conversation_counts WHERE session_id = ?",
+    )
+    .get(SESSION) as { n: number } | null;
+  return row === null ? 0 : row.n;
+}
+
+test("the coverage watermark holds the conversation the judge saw, not events captured while it ran", async () => {
+  await withHarness(async ({ store, sessionsDir }) => {
+    seedRollout(sessionsDir);
+    const inner = stubJudgeModel(TRANSCRIPT);
+    let atJudgeTime = -1;
+    const judge: JudgeModelPort = {
+      complete(request: JudgeModelRequest): Promise<JudgeModelResponse> {
+        atJudgeTime = eventCount(store);
+        store.insertEvent(lateEvent("2026-06-15T11:00:00.000Z"));
+        return inner.complete(request);
+      },
+    };
+
+    await assessConversation({
+      store,
+      harness: "codex",
+      sessionsDir,
+      sessionId: SESSION,
+      llm: judge,
+      runId: "run-1",
+      now: () => new Date("2026-06-15T12:00:00.000Z"),
+    });
+
+    const row = store.db
+      .prepare(
+        "SELECT covered_last_event_at, covered_event_count FROM assessment_run WHERE run_id = ?",
+      )
+      .get("run-1") as {
+      covered_last_event_at: string | null;
+      covered_event_count: number | null;
+    };
+    expect(eventCount(store)).toBe(atJudgeTime + 1);
+    expect(row.covered_event_count).toBe(atJudgeTime);
+    expect(row.covered_last_event_at).not.toBe("2026-06-15T11:00:00.000Z");
   });
 });

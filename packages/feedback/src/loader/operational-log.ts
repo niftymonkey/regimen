@@ -55,6 +55,8 @@ export interface OperationalLog {
   rotated(sealed: string): void;
   /** Record a caught anomaly, with a short `context` and the error. */
   anomaly(context: string, err: unknown): void;
+  /** A nightly assessment sweep was launched as a separate process. */
+  nightlySweep(limit: number): void;
   /** Emit the aggregated heartbeat line now and reset the window. */
   heartbeat(): void;
   /** Flush a pending heartbeat and stop the timer. Idempotent. */
@@ -183,6 +185,9 @@ export function openOperationalLog(
       append(
         `${stamp()} anomaly context="${context}" error=${describeError(err)}`,
       );
+    },
+    nightlySweep(limit: number): void {
+      append(`${stamp()} nightly-sweep launched limit=${limit}`);
     },
     heartbeat,
     close(): void {

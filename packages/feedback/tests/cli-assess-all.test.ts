@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
+import { traceIdFor } from "@regimen/shared";
 import { openStore } from "../src/store.ts";
 import { listSessions } from "../src/sessions.ts";
 import {
@@ -971,6 +972,72 @@ test("assessAll quits between batches and reports the remainder as skipped", asy
     expect(mock.count()).toBe(1);
     expect(isJudged(dbPath, SESSION)).toBe(true);
     expect(isJudged(dbPath, OTHER)).toBe(false);
+  } finally {
+    mock.stop();
+  }
+});
+
+test("a growth sweep re-judges a conversation that outgrew its verdict, and honors the nightly cap", async () => {
+  const dataDir = tempDir("regimen-sweep-cli-");
+  const codexHome = tempDir("regimen-sweep-home-");
+  const dbPath = join(dataDir, "feedback.db");
+  seedConversation(dbPath, {
+    sessionId: SESSION,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  prejudge(dbPath, SESSION);
+  // Steady: judged and unchanged since, so a growth sweep must leave it alone.
+  seedConversation(dbPath, {
+    sessionId: OTHER,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  prejudge(dbPath, OTHER);
+  seedRollout(codexHome, SESSION);
+
+  // SESSION alone grows, by more than the twenty-event floor.
+  const store = openStore(dbPath);
+  try {
+    for (let i = 0; i < 25; i++) {
+      const at = new Date(
+        Date.parse("2026-06-16T09:00:00.000Z") + i * 60_000,
+      ).toISOString();
+      store.insertEvent({
+        schema_version: 1,
+        timestamp: at,
+        session_id: SESSION,
+        harness: "codex",
+        model: "gpt-5",
+        event_type: "user_prompt",
+        trace_id: traceIdFor(SESSION),
+        span_phase: "point",
+        span_name: "user_prompt",
+        attributes: { text: at },
+      });
+    }
+  } finally {
+    store.close();
+  }
+
+  const mock = startMockAnthropic();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  process.env.CODEX_HOME = codexHome;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  const stdout = captureStdout();
+  try {
+    const exit = await assessAll({
+      dataDir,
+      filter: {},
+      force: false,
+      growth: true,
+      limit: 50,
+      batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    expect(exit).toBe(0);
+    expect(stdout.read()).toContain("to judge 1");
+    expect(mock.count()).toBe(1);
   } finally {
     mock.stop();
   }

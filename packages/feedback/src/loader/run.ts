@@ -2,7 +2,8 @@
 /**
  * Foreground entrypoint for the Feedback loader.
  *
- * Resolves the data dir per OS (or honours `REGIMEN_DATA_DIR`), opens the
+ * Resolves the data dir per OS (or honours `REGIMEN_DATA_DIR`), loads the
+ * Regimen config file so the nightly-assessment settings are visible, opens the
  * SQLite store, wraps chokidar in a `BufferWatcher`, and hands both to
  * `startDriver`. Per ADR-0006 this is the "opt-in always-on daemon" in
  * foreground form; the install/lifecycle wrapper that backgrounds this
@@ -11,9 +12,18 @@
 import chokidar from "chokidar";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { bufferDir as bufferDirFor, dataDir } from "@regimen/shared";
+import {
+  bufferDir as bufferDirFor,
+  configDir,
+  dataDir,
+  loadEnvFile,
+} from "@regimen/shared";
 import { isEnabled } from "../enabled-flag.ts";
 import { recordError } from "../../hooks/event-log.ts";
+import {
+  maybeTriggerNightlySweep,
+  nightlySweepCommand,
+} from "../judged/nightly.ts";
 import { openStore } from "../store.ts";
 import {
   startDriver,
@@ -48,6 +58,9 @@ function chokidarBufferWatcher(
 }
 
 async function main(): Promise<void> {
+  // The service manager starts this without a login shell, so the daemon reads
+  // `~/.config/regimen/env` itself; the real environment still wins.
+  loadEnvFile(configDir());
   const dir = dataDir();
   if (!isEnabled(dir)) {
     process.stderr.write(
@@ -75,6 +88,7 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     log.shutdown(reason);
+    clearInterval(nightlyTimer);
     tailer?.stop();
     try {
       await driver.shutdown();
@@ -113,6 +127,33 @@ async function main(): Promise<void> {
       onDisabled: () => void shutdown("feedback disabled"),
     },
   });
+
+  // The nightly assessment trigger (ADR-0018). Off unless the config turns it
+  // on; when due, it launches a SEPARATE `regimen assess --all --auto` process
+  // and returns immediately, so no judge call ever runs inside this loop.
+  const nightlyPollMs =
+    Number(process.env.REGIMEN_AUTO_ASSESS_POLL_MS) || 900_000;
+  const nightlyTimer = setInterval(() => {
+    try {
+      maybeTriggerNightlySweep({
+        dataDir: dir,
+        env: process.env,
+        now: Date.now,
+        launch: (settings) => {
+          const command = nightlySweepCommand(process.env);
+          Bun.spawn(command, {
+            stdin: "ignore",
+            stdout: "ignore",
+            stderr: "ignore",
+          }).unref();
+          log.nightlySweep(settings.limit);
+        },
+      });
+    } catch (err) {
+      log.anomaly("nightly assessment trigger", err);
+    }
+  }, nightlyPollMs);
+  nightlyTimer.unref();
 
   // Opt-in rollout tailer: the version-proof fallback capture (Phase 1.4). Off
   // unless REGIMEN_CODEX_SESSIONS_DIR names a Codex sessions root, so it never
