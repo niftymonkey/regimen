@@ -230,9 +230,25 @@ function parseVerdict(text: string): ParsedVerdict | undefined {
   } catch {
     return undefined;
   }
-  return typeof parsed === "object" && parsed !== null
-    ? (parsed as ParsedVerdict)
-    : undefined;
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  return withoutNullFields(parsed as Record<string, unknown>);
+}
+
+/**
+ * Drop every field the model emitted as an explicit `null`. A model with
+ * nothing to say for a field may omit it or write `null`, and both mean absent.
+ * Normalizing here is what makes `ParsedClaim | undefined` an honest shape:
+ * without it, every `!== undefined` guard downstream passes on a `null` and
+ * then dereferences it, which is how one sweep died on `correction-cost`.
+ */
+function withoutNullFields(parsed: Record<string, unknown>): ParsedVerdict {
+  // fromEntries, not assignment: `kept["__proto__"] = value` runs the setter
+  // and makes a model-emitted `__proto__` the prototype of the result, so its
+  // null claims read back through the chain and crash exactly as above.
+  const kept = Object.fromEntries(
+    Object.entries(parsed).filter(([, value]) => value !== null),
+  );
+  return kept as ParsedVerdict;
 }
 
 /**
