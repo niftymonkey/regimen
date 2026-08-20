@@ -15,7 +15,7 @@ import { openStore } from "../../feedback/src/store.ts";
 
 const CLI_ENTRY = join(dirname(import.meta.dir), "src", "cli", "index.ts");
 const PIPE_BUFFER_BYTES = 65_536;
-const SESSIONS = 400;
+const SESSIONS = 1000;
 
 const tempDirs: string[] = [];
 
@@ -49,12 +49,26 @@ async function runCliProcess(
 ): Promise<{ exit: number; stdout: string }> {
   // Through a real shell pipe, not Bun's own stdout pipe: only an OS pipe
   // reproduces the 64 KB buffer the entrypoint used to abandon on exit.
-  const piped = [`bun ${CLI_ENTRY} ${args.join(" ")} | cat`];
-  const proc = Bun.spawn(["sh", "-c", ...piped], {
-    env: { ...process.env, REGIMEN_DATA_DIR: dataDir },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  // `pipefail` carries the CLI's own status past `cat`, so the exit assertions
+  // below can still fail; the command and its arguments are passed positionally
+  // rather than interpolated into the script.
+  const proc = Bun.spawn(
+    [
+      "bash",
+      "-o",
+      "pipefail",
+      "-c",
+      'bun "$@" | cat',
+      "bash",
+      CLI_ENTRY,
+      ...args,
+    ],
+    {
+      env: { ...process.env, REGIMEN_DATA_DIR: dataDir },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   const stdout = await new Response(proc.stdout).text();
   const exit = await proc.exited;
   return { exit, stdout };
@@ -69,4 +83,16 @@ test("list --json into a pipe returns every session, past the pipe buffer", asyn
   expect(stdout.length).toBeGreaterThan(PIPE_BUFFER_BYTES);
   const sessions = JSON.parse(stdout) as ReadonlyArray<{ sessionId: string }>;
   expect(sessions).toHaveLength(SESSIONS);
+});
+
+test("list into a pipe returns every session, past the pipe buffer", async () => {
+  const dataDir = seedStore(SESSIONS);
+
+  const { exit, stdout } = await runCliProcess(["list"], dataDir);
+
+  expect(exit).toBe(0);
+  expect(stdout.length).toBeGreaterThan(PIPE_BUFFER_BYTES);
+  const rows = stdout.split("\n").filter((line) => /^\d{4}-/.test(line));
+  expect(rows).toHaveLength(SESSIONS);
+  expect(stdout.trimEnd().endsWith(`${SESSIONS} sessions`)).toBe(true);
 });
