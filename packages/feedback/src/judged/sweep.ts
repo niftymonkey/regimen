@@ -206,6 +206,14 @@ export async function runSweep(
       `batchSize must be a positive integer, got ${options.batchSize}`,
     );
   }
+  if (
+    options.limit !== undefined &&
+    (!Number.isInteger(options.limit) || options.limit < 1)
+  ) {
+    throw new RangeError(
+      `limit must be a positive integer, got ${options.limit}`,
+    );
+  }
   const nowMs = options.now ?? Date.now;
   const matching = selectSessionsToJudge(
     db,

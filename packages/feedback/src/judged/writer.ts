@@ -79,7 +79,7 @@ function unionAnchors(
 }
 
 /** The conversation state one run covered: how far it ran and how much it held. */
-interface Coverage {
+export interface Coverage {
   readonly lastEventAt: string | null;
   readonly eventCount: number | null;
 }
@@ -90,7 +90,7 @@ interface Coverage {
  * holds no conversation row for the session, which leaves the run readable and
  * simply not re-judgeable on growth.
  */
-function readCoverage(db: Store["db"], sessionId: string): Coverage {
+export function readCoverage(db: Store["db"], sessionId: string): Coverage {
   const row = db
     .prepare(
       `SELECT c.last_event_at AS last_event_at,
@@ -116,15 +116,23 @@ export interface AssessmentRunIdentity {
  * Write one judgment pass's verdict, superseding any prior run for the session
  * atomically. The signal `value` is JSON-encoded by its `value_kind`; the
  * narrative `anchors` are JSON-encoded as an AnchorRef[].
+ *
+ * `covered` is the watermark the caller read when it fixed the judge's input.
+ * A judge call takes minutes, and the capture daemon keeps inserting events
+ * throughout it; stamping the watermark here instead would record those unseen
+ * events as covered and suppress the growth re-judge they should trigger. The
+ * argument is optional only so a caller that writes a verdict with no separate
+ * judge step keeps the current-state reading.
  */
 export function writeAssessment(
   store: Store,
   run: AssessmentRunIdentity,
   result: JudgeResult,
+  covered?: Coverage,
 ): void {
   const db = store.db;
   db.transaction(() => {
-    const covered = readCoverage(db, run.sessionId);
+    const watermark = covered ?? readCoverage(db, run.sessionId);
     db.prepare(
       `INSERT INTO assessment_run
          (run_id, session_id, rubric_version, prompt_version, judge_model, judge_backend, complete, created_at, incomplete_reason, covered_last_event_at, covered_event_count)
@@ -139,8 +147,8 @@ export function writeAssessment(
       result.complete ? 1 : 0,
       run.createdAt,
       result.incompleteReason ?? null,
-      covered.lastEventAt,
-      covered.eventCount,
+      watermark.lastEventAt,
+      watermark.eventCount,
     );
 
     db.prepare(

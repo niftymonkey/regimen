@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -102,3 +103,12 @@ test("the written template is entirely comments and documents the three judge va
   expect(contents).toContain("REGIMEN_JUDGE_MODEL");
   expect(contents.toLowerCase()).toContain("loaded at cli startup");
 });
+
+test.skipIf(process.platform === "win32")(
+  "the written template is readable only by its owner, since it holds an API key",
+  () => {
+    writeEnvTemplateIfAbsent(dir, false);
+    const mode = statSync(join(dir, "env")).mode & 0o777;
+    expect(mode).toBe(0o600);
+  },
+);

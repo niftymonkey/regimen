@@ -46,7 +46,15 @@ export function writeEnvTemplateIfAbsent(
     return false;
   }
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path, ENV_TEMPLATE);
+  // Exclusive create, owner-only: the file this drops is where the reader puts
+  // REGIMEN_JUDGE_API_KEY, so it must never be world-readable, and `wx` closes
+  // the window between the existence check above and this write.
+  try {
+    writeFileSync(path, ENV_TEMPLATE, { flag: "wx", mode: 0o600 });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  }
   return true;
 }
 
