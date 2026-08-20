@@ -238,4 +238,11 @@ export interface JudgeResult {
   readonly signals: ReadonlyArray<JudgedSignal>;
   readonly narratives: ReadonlyArray<JudgedNarrative>;
   readonly incompleteReason?: IncompleteReason;
+  /**
+   * What the backend actually said when the run failed, so a sweep of
+   * `llm-unavailable` rows can be told apart from a bad key, a wrong model, a
+   * rate limit or an outage. An opaque, truncated, credential-free string from
+   * whichever backend answered, never a provider-specific shape.
+   */
+  readonly incompleteDetail?: string;
 }

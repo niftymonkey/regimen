@@ -330,3 +330,31 @@ test("reopening a store with migration v6 applied is a no-op", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("an incomplete run persists the backend's own failure detail", () => {
+  withStore((store) => {
+    const unavailable: JudgeResult = {
+      ...fullResult(),
+      complete: false,
+      incompleteReason: "llm-unavailable",
+      incompleteDetail: "400 Your credit balance is too low.",
+      signals: [],
+      narratives: [],
+    };
+    writeAssessment(
+      store,
+      run("run-1", "2026-06-15T10:00:00.000Z"),
+      unavailable,
+    );
+
+    const rows = store.db
+      .prepare(
+        "SELECT incomplete_reason, incomplete_detail FROM assessment_run",
+      )
+      .all() as ReadonlyArray<Record<string, unknown>>;
+    expect(rows[0]!.incomplete_reason).toBe("llm-unavailable");
+    expect(rows[0]!.incomplete_detail).toBe(
+      "400 Your credit balance is too low.",
+    );
+  });
+});

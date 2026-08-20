@@ -135,8 +135,8 @@ export function writeAssessment(
     const watermark = covered ?? readCoverage(db, run.sessionId);
     db.prepare(
       `INSERT INTO assessment_run
-         (run_id, session_id, rubric_version, prompt_version, judge_model, judge_backend, complete, created_at, incomplete_reason, covered_last_event_at, covered_event_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (run_id, session_id, rubric_version, prompt_version, judge_model, judge_backend, complete, created_at, incomplete_reason, incomplete_detail, covered_last_event_at, covered_event_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.runId,
       run.sessionId,
@@ -147,6 +147,7 @@ export function writeAssessment(
       result.complete ? 1 : 0,
       run.createdAt,
       result.incompleteReason ?? null,
+      result.incompleteDetail ?? null,
       watermark.lastEventAt,
       watermark.eventCount,
     );

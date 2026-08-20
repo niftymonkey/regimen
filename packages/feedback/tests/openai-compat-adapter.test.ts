@@ -185,3 +185,21 @@ test("the adapter returns an empty string when the response carries no choice co
   expect(response.text).toBe("");
   expect(response.model).toBe("some-model");
 });
+
+test("a non-2xx error carries the provider's own words, not just the status", async () => {
+  const captured: CapturedRequest[] = [];
+  const llm = openAiCompatJudgeModel({
+    apiKey: "sk-test",
+    model: "meta-llama/llama-3.3-70b-instruct:free",
+    baseUrl: "https://openrouter.ai/api/v1",
+    fetch: mockFetch(
+      captured,
+      { error: { message: "insufficient credits for this request" } },
+      402,
+    ),
+  });
+
+  await expect(llm.complete({ system: "s", user: "u" })).rejects.toThrow(
+    /insufficient credits/,
+  );
+});
