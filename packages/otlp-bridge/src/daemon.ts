@@ -6,7 +6,9 @@
  * batch since it, and if the batch is non-empty, project it and send it. A
  * stream's watermark advances only after its send reports `ok`, so a failed
  * delivery is retried on the next tick rather than lost, and the three streams
- * advance independently.
+ * advance independently. The one exception is a batch the endpoint rejects:
+ * no retry can deliver it, so it is dropped and reported, and the watermark
+ * advances past it rather than pinning the stream forever.
  */
 import { eventsToLogs } from "./projection/logs.ts";
 import { projectMetrics } from "./projection/metrics.ts";
@@ -108,13 +110,20 @@ export function createDaemon(deps: DaemonDeps): Daemon {
       if (step === null) continue;
       const stream = step.payload.stream;
       const result = await exporter.send(step.payload);
-      if (!result.ok) {
+      if (!result.ok && !result.rejected) {
         // A failed send leaves the watermark unadvanced, so the next tick
         // retries the same batch; the log records the failure to act on.
         log.sendFailed(stream, result.error);
         continue;
       }
-      log.delivered(stream, payloadSize(step.payload));
+      if (result.ok) {
+        log.delivered(stream, payloadSize(step.payload));
+      } else {
+        log.anomaly(
+          `${stream} batch rejected by the endpoint, ${payloadSize(step.payload)} record(s) dropped`,
+          result.error,
+        );
+      }
       if (step.nextWatermark !== null) {
         state.commit(stream, step.nextWatermark);
       }

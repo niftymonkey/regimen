@@ -4,7 +4,8 @@
  * Grafana Cloud is a true external dependency, so this is a real seam with
  * two adapters: the live OTLP/HTTP adapter and a recording adapter for tests.
  * The daemon advances a stream's watermark only after `send` reports `ok`, so
- * a failed delivery is retried on the next tick rather than lost.
+ * a failed delivery is retried on the next tick rather than lost. A `rejected`
+ * send is the exception: the daemon drops that batch and moves on.
  */
 import type { LogsData, MetricsData, TracesData } from "../otlp.ts";
 
@@ -14,8 +15,14 @@ export type OtlpPayload =
   | { stream: "metrics"; data: MetricsData }
   | { stream: "traces"; data: TracesData };
 
-/** The outcome of one delivery attempt. */
-export type SendResult = { ok: true } | { ok: false; error: string };
+/**
+ * The outcome of one delivery attempt. A failure is retried unless it is
+ * `rejected`: the endpoint refused the payload itself, so sending it again
+ * can never succeed.
+ */
+export type SendResult =
+  | { ok: true }
+  | { ok: false; error: string; rejected?: boolean };
 
 export interface Exporter {
   /** Deliver one OTLP payload; `ok` gates whether its watermark advances. */

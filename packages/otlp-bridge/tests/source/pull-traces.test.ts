@@ -354,3 +354,101 @@ test("a pre-rebuild plain-timestamp watermark is re-read from the start", () => 
   expect(batch.sessionSpans).toHaveLength(1);
   expect(batch.pointEvents).toHaveLength(1);
 });
+
+test("a tool-span backlog larger than the row cap drains in order over successive pulls", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  insertConversation(db, {
+    session_id: "sess-a",
+    last_event_at: "2026-05-21T12:05:00.000Z",
+  });
+  insertEvent(db, {
+    session_id: "sess-a",
+    trace_id: TRACE_ID,
+    event_type: "session.start",
+  });
+  for (const n of ["1", "2", "3"]) {
+    insertToolCallSpan(db, {
+      session_id: "sess-a",
+      tool_call_id: `tc-${n}`,
+      started_at: `2026-05-21T12:01:0${n}.000Z`,
+      ended_at: `2026-05-21T12:02:0${n}.000Z`,
+    });
+  }
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(first.toolSpans.map((t) => t.toolCallId)).toEqual(["tc-1", "tc-2"]);
+  expect(second.toolSpans.map((t) => t.toolCallId)).toEqual(["tc-3"]);
+  expect(third.toolSpans).toHaveLength(0);
+});
+
+test("a session-span backlog larger than the row cap drains in order over successive pulls", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  for (const n of ["1", "2", "3"]) {
+    insertConversation(db, {
+      session_id: `sess-${n}`,
+      session_started_at: `2026-05-21T12:0${n}:00.000Z`,
+      session_ended_at: `2026-05-21T12:3${n}:00.000Z`,
+      last_event_at: `2026-05-21T12:3${n}:00.000Z`,
+    });
+    insertEvent(db, {
+      session_id: `sess-${n}`,
+      trace_id: TRACE_ID,
+      event_type: "session.start",
+    });
+  }
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(first.sessionSpans.map((s) => s.sessionId)).toEqual([
+    "sess-1",
+    "sess-2",
+  ]);
+  expect(second.sessionSpans.map((s) => s.sessionId)).toEqual(["sess-3"]);
+  expect(third.sessionSpans).toHaveLength(0);
+});
+
+test("a point-event backlog larger than the row cap drains in order over successive pulls", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  insertConversation(db, {
+    session_id: "sess-a",
+    last_event_at: "2026-05-21T12:05:00.000Z",
+  });
+  for (const n of ["1", "2", "3"]) {
+    insertEvent(db, {
+      session_id: "sess-a",
+      trace_id: TRACE_ID,
+      event_type: "user_prompt",
+      timestamp: `2026-05-21T12:0${n}:00.000Z`,
+    });
+  }
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(first.pointEvents.map((e) => e.timestamp)).toEqual([
+    "2026-05-21T12:01:00.000Z",
+    "2026-05-21T12:02:00.000Z",
+  ]);
+  expect(second.pointEvents.map((e) => e.timestamp)).toEqual([
+    "2026-05-21T12:03:00.000Z",
+  ]);
+  expect(third.pointEvents).toHaveLength(0);
+});

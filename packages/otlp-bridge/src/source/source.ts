@@ -104,20 +104,30 @@ interface BoundaryCursor {
  * when it sits on the prior cursor's boundary timestamp and its id is in the
  * prior emitted set. Re-reading the boundary timestamp every call is what
  * stops a row landing at an already-passed millisecond from being skipped.
+ *
+ * At most `maxRows` rows come back, and the cursor describes only those: it sits on the last returned row, and
+ * keeps the prior emitted set when that row is still on the prior boundary
+ * timestamp, so a row the cap left out of the re-read is not emitted twice.
  */
 function advanceBoundary<T>(
   ordered: T[],
   prior: BoundaryCursor | null,
   tsOf: (row: T) => string,
   idOf: (row: T) => string,
+  maxRows: number,
 ): { fresh: T[]; next: BoundaryCursor | null } {
-  if (ordered.length === 0) return { fresh: [], next: prior };
   const seen = new Set(prior?.emitted ?? []);
-  const fresh = ordered.filter(
+  const unseen = ordered.filter(
     (row) => !(prior !== null && tsOf(row) === prior.ts && seen.has(idOf(row))),
   );
-  const ts = tsOf(ordered[ordered.length - 1]!);
-  const emitted = ordered.filter((row) => tsOf(row) === ts).map(idOf);
+  const fresh = unseen.slice(0, maxRows);
+  if (fresh.length === 0) return { fresh, next: prior };
+  const ts = tsOf(fresh[fresh.length - 1]!);
+  const carried = prior !== null && prior.ts === ts ? prior.emitted : [];
+  const emitted = [
+    ...carried,
+    ...fresh.filter((row) => tsOf(row) === ts).map(idOf),
+  ];
   return { fresh, next: { ts, emitted } };
 }
 
@@ -251,7 +261,9 @@ function toToolSpanRow(row: ToolSpanQueryRow): ToolSpanRow {
 
 /**
  * Only closed tool calls (`ended_at IS NOT NULL`); an open call is skipped.
- * The EXISTS guard keeps the trace_id subquery non-null, as for session spans.
+ * The session guard keeps the trace_id subquery non-null, as for session
+ * spans. It is an uncorrelated IN so SQLite builds the set of sessions once:
+ * a per-row EXISTS probe over a large span backlog takes tens of seconds.
  */
 const TOOL_SPANS_SELECT = `
   SELECT t.session_id, c.harness, t.tool_name, t.tool_call_id,
@@ -261,24 +273,46 @@ const TOOL_SPANS_SELECT = `
   FROM tool_call_spans t
   JOIN conversations c ON c.session_id = t.session_id
   WHERE t.ended_at IS NOT NULL
-    AND EXISTS (SELECT 1 FROM events e WHERE e.session_id = t.session_id)`;
+    AND t.session_id IN (SELECT session_id FROM events)`;
 
 /** The instantaneous events that become point spans, emitted once each. */
 const POINT_EVENTS_SELECT = `
   SELECT ${LOG_COLUMNS} FROM events
   WHERE event_type IN ('user_prompt', 'compaction')`;
 
+export interface SourceOptions {
+  /**
+   * The most rows one pull returns for the logs stream and for each traces
+   * sub-stream. A backlog larger than this drains over successive pulls, so
+   * one payload stays within what the OTLP endpoint accepts.
+   */
+  maxRows?: number;
+}
+
+const DEFAULT_MAX_ROWS = 1000;
+
 /** Open the Source against the Feedback store at `dbPath`. */
-export function openSource(dbPath: string): Source {
+export function openSource(
+  dbPath: string,
+  options: SourceOptions = {},
+): Source {
+  const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS;
   const db = new Database(dbPath, { readonly: true });
 
-  const allLogs = db.query<EventRow, []>(
-    `SELECT ${LOG_COLUMNS} FROM events ORDER BY timestamp, event_hash`,
+  // A boundary re-read returns the rows already emitted at the cursor's
+  // timestamp, so the query limit makes room for them: a pull can still
+  // return up to `maxRows` new rows.
+  const limitFor = (cursor: BoundaryCursor | null): number =>
+    maxRows + (cursor?.emitted.length ?? 0);
+
+  const allLogs = db.query<EventRow, { $limit: number }>(
+    `SELECT ${LOG_COLUMNS} FROM events
+     ORDER BY timestamp, event_hash LIMIT $limit`,
   );
-  const logsFrom = db.query<EventRow, { $ts: string }>(
+  const logsFrom = db.query<EventRow, { $ts: string; $limit: number }>(
     `SELECT ${LOG_COLUMNS} FROM events
        WHERE timestamp >= $ts
-     ORDER BY timestamp, event_hash`,
+     ORDER BY timestamp, event_hash LIMIT $limit`,
   );
 
   const allCounts = db.query<CountsRow, []>(
@@ -300,28 +334,36 @@ export function openSource(dbPath: string): Source {
   // The three trace sub-streams each advance their own boundary cursor: point
   // events by event timestamp, tool spans by close time, session spans by
   // session close time. Each span is emitted exactly once.
-  const allSessionSpans = db.query<SessionSpanQueryRow, []>(
-    `${SESSION_SPANS_SELECT} ORDER BY c.session_ended_at, c.session_id`,
+  const allSessionSpans = db.query<SessionSpanQueryRow, { $limit: number }>(
+    `${SESSION_SPANS_SELECT}
+     ORDER BY c.session_ended_at, c.session_id LIMIT $limit`,
   );
-  const sessionSpansFrom = db.query<SessionSpanQueryRow, { $ts: string }>(
+  const sessionSpansFrom = db.query<
+    SessionSpanQueryRow,
+    { $ts: string; $limit: number }
+  >(
     `${SESSION_SPANS_SELECT} AND c.session_ended_at >= $ts
-     ORDER BY c.session_ended_at, c.session_id`,
+     ORDER BY c.session_ended_at, c.session_id LIMIT $limit`,
   );
 
-  const allToolSpans = db.query<ToolSpanQueryRow, []>(
-    `${TOOL_SPANS_SELECT} ORDER BY t.ended_at, t.session_id, t.tool_call_id`,
+  const allToolSpans = db.query<ToolSpanQueryRow, { $limit: number }>(
+    `${TOOL_SPANS_SELECT}
+     ORDER BY t.ended_at, t.session_id, t.tool_call_id LIMIT $limit`,
   );
-  const toolSpansFrom = db.query<ToolSpanQueryRow, { $ts: string }>(
+  const toolSpansFrom = db.query<
+    ToolSpanQueryRow,
+    { $ts: string; $limit: number }
+  >(
     `${TOOL_SPANS_SELECT} AND t.ended_at >= $ts
-     ORDER BY t.ended_at, t.session_id, t.tool_call_id`,
+     ORDER BY t.ended_at, t.session_id, t.tool_call_id LIMIT $limit`,
   );
 
-  const allPointEvents = db.query<EventRow, []>(
-    `${POINT_EVENTS_SELECT} ORDER BY timestamp, event_hash`,
+  const allPointEvents = db.query<EventRow, { $limit: number }>(
+    `${POINT_EVENTS_SELECT} ORDER BY timestamp, event_hash LIMIT $limit`,
   );
-  const pointEventsFrom = db.query<EventRow, { $ts: string }>(
+  const pointEventsFrom = db.query<EventRow, { $ts: string; $limit: number }>(
     `${POINT_EVENTS_SELECT} AND timestamp >= $ts
-     ORDER BY timestamp, event_hash`,
+     ORDER BY timestamp, event_hash LIMIT $limit`,
   );
 
   return {
@@ -340,13 +382,16 @@ export function openSource(dbPath: string): Source {
         }
       }
       const queried = (
-        cursor === null ? allLogs.all() : logsFrom.all({ $ts: cursor.ts })
+        cursor === null
+          ? allLogs.all({ $limit: limitFor(cursor) })
+          : logsFrom.all({ $ts: cursor.ts, $limit: limitFor(cursor) })
       ).map(toLogRow);
       const { fresh, next } = advanceBoundary(
         queried,
         cursor,
         (row) => row.timestamp,
         (row) => row.eventHash,
+        maxRows,
       );
       if (fresh.length === 0) {
         return { rows: [], nextWatermark: watermark };
@@ -398,38 +443,50 @@ export function openSource(dbPath: string): Source {
 
       const sessionRows = (
         cursor.session === null
-          ? allSessionSpans.all()
-          : sessionSpansFrom.all({ $ts: cursor.session.ts })
+          ? allSessionSpans.all({ $limit: limitFor(cursor.session) })
+          : sessionSpansFrom.all({
+              $ts: cursor.session.ts,
+              $limit: limitFor(cursor.session),
+            })
       ).map(toSessionSpanRow);
       const session = advanceBoundary(
         sessionRows,
         cursor.session,
         (row) => row.endedAt,
         (row) => row.sessionId,
+        maxRows,
       );
 
       const toolRows = (
         cursor.tool === null
-          ? allToolSpans.all()
-          : toolSpansFrom.all({ $ts: cursor.tool.ts })
+          ? allToolSpans.all({ $limit: limitFor(cursor.tool) })
+          : toolSpansFrom.all({
+              $ts: cursor.tool.ts,
+              $limit: limitFor(cursor.tool),
+            })
       ).map(toToolSpanRow);
       const tool = advanceBoundary(
         toolRows,
         cursor.tool,
         (row) => row.endedAt,
         (row) => JSON.stringify([row.sessionId, row.toolCallId]),
+        maxRows,
       );
 
       const pointRows = (
         cursor.point === null
-          ? allPointEvents.all()
-          : pointEventsFrom.all({ $ts: cursor.point.ts })
+          ? allPointEvents.all({ $limit: limitFor(cursor.point) })
+          : pointEventsFrom.all({
+              $ts: cursor.point.ts,
+              $limit: limitFor(cursor.point),
+            })
       ).map(toLogRow);
       const point = advanceBoundary(
         pointRows,
         cursor.point,
         (row) => row.timestamp,
         (row) => row.eventHash,
+        maxRows,
       );
 
       return {

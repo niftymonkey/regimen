@@ -6,8 +6,11 @@
  * `ok: false`; the daemon then leaves that stream's watermark unadvanced and
  * retries on the next tick, so the poll loop is itself the retry mechanism.
  *
- * This adapter has no automated test; it is exercised only by a real run
- * against Grafana Cloud. The recording adapter covers the port shape.
+ * A 400 is the exception: the endpoint refused the payload itself (Grafana
+ * Cloud answers 400 to log entries older than its ingestion window), so the
+ * send reports `rejected` and the daemon drops the batch. Every other status
+ * stays retryable. Auth failures in particular must never read as rejected,
+ * or a bad token would drain the whole backlog into nothing.
  */
 import type { Exporter, OtlpPayload, SendResult } from "./port.ts";
 
@@ -23,6 +26,18 @@ export interface HttpExporterConfig {
   endpoint: string;
   /** The full `Authorization` header value, e.g. `Basic <base64>`. */
   authHeader: string;
+}
+
+/**
+ * How much of a response body an error carries. Grafana Cloud can answer a
+ * rejected batch with one line per refused entry, which would otherwise put
+ * a body of a hundred kilobytes or more into `bridge.log` per failure.
+ */
+const MAX_ERROR_BODY_CHARS = 500;
+
+function clipBody(body: string): string {
+  if (body.length <= MAX_ERROR_BODY_CHARS) return body;
+  return `${body.slice(0, MAX_ERROR_BODY_CHARS)}... (${body.length} chars in all)`;
 }
 
 const SIGNAL_PATHS: Record<OtlpPayload["stream"], string> = {
@@ -48,10 +63,10 @@ export function httpExporter(config: HttpExporterConfig): Exporter {
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
         if (response.ok) return { ok: true };
-        return {
-          ok: false,
-          error: `HTTP ${response.status} from ${url}: ${await response.text()}`,
-        };
+        const error = `HTTP ${response.status} from ${url}: ${clipBody(await response.text())}`;
+        if (response.status === 400)
+          return { ok: false, error, rejected: true };
+        return { ok: false, error };
       } catch (cause) {
         return {
           ok: false,
