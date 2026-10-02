@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect, spyOn } from "bun:test";
 import { httpExporter } from "../../src/exporter/http.ts";
 import type { OtlpPayload } from "../../src/exporter/port.ts";
 
@@ -49,4 +49,32 @@ test("a long response body is cut short in the reported error", async () => {
   expect(result.error.length).toBeLessThan(1000);
   expect(result.error).toContain("HTTP 400");
   expect(result.error).toEndWith("(100000 chars in all)");
+});
+
+test("a 400 whose body cannot be read is still a rejected payload", async () => {
+  // The status arrives intact, then the body stream fails partway, as when the
+  // connection drops mid-body.
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("partial"));
+      controller.error(new Error("connection reset"));
+    },
+  });
+  const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(body, { status: 400 }),
+  );
+  let result;
+  try {
+    result = await httpExporter({
+      endpoint: "http://localhost/otlp",
+      authHeader: "Basic dGVzdA==",
+    }).send(PAYLOAD);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.rejected).toBe(true);
+  expect(result.error).toContain("HTTP 400");
 });

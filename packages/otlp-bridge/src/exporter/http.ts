@@ -63,7 +63,15 @@ export function httpExporter(config: HttpExporterConfig): Exporter {
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
         if (response.ok) return { ok: true };
-        const error = `HTTP ${response.status} from ${url}: ${clipBody(await response.text())}`;
+        // The status alone decides whether the payload was rejected, so a
+        // body that cannot be read must not turn a 400 into a retryable error.
+        let body: string;
+        try {
+          body = clipBody(await response.text());
+        } catch (cause) {
+          body = `(unreadable body: ${String(cause)})`;
+        }
+        const error = `HTTP ${response.status} from ${url}: ${body}`;
         if (response.status === 400)
           return { ok: false, error, rejected: true };
         return { ok: false, error };
