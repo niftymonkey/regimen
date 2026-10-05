@@ -21,6 +21,7 @@ const ENV_TEMPLATE = `# Regimen judge configuration, loaded at CLI startup. Real
 # REGIMEN_JUDGE_API_KEY= the API key for the judge model's provider, any OpenAI-compatible endpoint including Anthropic
 # REGIMEN_JUDGE_BASE_URL= the judge endpoint; a keyless local endpoint such as Ollama works too
 # REGIMEN_JUDGE_MODEL= the judge model name
+# REGIMEN_JUDGE_VIA= force the judge backend: "cli" (the local claude CLI, no key needed) or "api"
 #
 # Nightly automatic assessment (ADR-0018). Off unless turned on here; the daemon
 # then launches one "regimen assess --all --auto" sweep a day, in its own process.

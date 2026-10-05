@@ -12,8 +12,9 @@
  * REGIMEN_JUDGE_* configuration (a key, or a keyless base URL such as a local
  * Ollama, selecting the generic backend) outranks an ambient ANTHROPIC_API_KEY
  * (often set for other tooling), which outranks the local `claude` CLI. With none available it throws an actionable error naming all
- * three remedies plus the zero-key agent path. `--judge-via` forces a backend;
- * the `--judge-model` flag wins over env on the model.
+ * three remedies plus the zero-key agent path. `--judge-via` forces a backend,
+ * and REGIMEN_JUDGE_VIA forces one for every run (an unattended sweep takes no
+ * flags); the flag wins over the var, as `--judge-model` wins over env.
  */
 import type { JudgeModelPort } from "./port.ts";
 import type { JudgeBackend } from "./types.ts";
@@ -92,8 +93,11 @@ export function resolveJudgeModel(
     options.claudeOnPath ??
     (() => Bun.which("claude", { PATH: env.PATH ?? "" }) !== null);
 
-  if (options.judgeVia === "cli") return cliBackend(options, env);
-  if (options.judgeVia === "api") {
+  const judgeVia =
+    options.judgeVia ?? envJudgeVia(nonEmpty(env.REGIMEN_JUDGE_VIA));
+
+  if (judgeVia === "cli") return cliBackend(options, env);
+  if (judgeVia === "api") {
     return genericConfigured
       ? genericBackend(options, env, regimenKey)
       : anthropicBackend(options, env, anthropicKey);
@@ -105,6 +109,18 @@ export function resolveJudgeModel(
   }
   if (claudeOnPath()) return cliBackend(options, env);
   throw new Error(NO_BACKEND_ERROR);
+}
+
+/**
+ * The REGIMEN_JUDGE_VIA fallback under the `--judge-via` flag, so a nightly
+ * sweep and any other unattended run can pick a backend without a flag.
+ */
+function envJudgeVia(value: string | undefined): "cli" | "api" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "cli" || value === "api") return value;
+  throw new Error(
+    `REGIMEN_JUDGE_VIA is set to "${value}", which is not a judge backend: use "cli" or "api", or judge with the current agent via \`regimen assess --emit-prompt\` / \`--record-verdict\``,
+  );
 }
 
 /**
