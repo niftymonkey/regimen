@@ -7,7 +7,7 @@ import { openSource } from "../src/source/source.ts";
 import { openWatermarkStore } from "../src/state/watermarks.ts";
 import type { SignalStream } from "../src/state/watermarks.ts";
 import { recordingExporter } from "../src/exporter/recording.ts";
-import type { Exporter } from "../src/exporter/port.ts";
+import type { Exporter, OtlpPayload } from "../src/exporter/port.ts";
 import type { DaemonLog } from "../src/operational-log.ts";
 import type { ProjectionOptions } from "../src/projection/resource.ts";
 import {
@@ -281,4 +281,131 @@ test("a tick reports a rejected stream to the log as a send failure", async () =
     "traces",
   ]);
   expect(failed.every((f) => f.error === "boom")).toBe(true);
+});
+
+test("a backlog larger than the row cap is delivered in bounded payloads over successive ticks", async () => {
+  const dir = tempDir();
+  const db = createFeedbackDb(join(dir, "feedback.db"));
+  seedClosedSession(db);
+
+  const exporter = recordingExporter();
+  const daemon = createDaemon({
+    source: openSource(join(dir, "feedback.db"), { maxRows: 2 }),
+    state: openWatermarkStore(join(dir, "watermarks.json")),
+    exporter,
+    options: OPTIONS,
+  });
+
+  for (let i = 0; i < 4; i += 1) await daemon.tick();
+  daemon.stop();
+  db.close();
+
+  // The seeded session holds five events: 2 + 2 + 1, then nothing.
+  const sizes = exporter.sent
+    .filter((p) => p.stream === "logs")
+    .map((p) =>
+      p.stream === "logs"
+        ? p.data.resourceLogs.flatMap((rl) =>
+            rl.scopeLogs.flatMap((sl) => sl.logRecords),
+          ).length
+        : 0,
+    );
+  expect(sizes).toEqual([2, 2, 1]);
+});
+
+/** The log-record count of each logs payload, in the order given. */
+function logsSizes(payloads: OtlpPayload[]): number[] {
+  return payloads.flatMap((p) =>
+    p.stream === "logs"
+      ? [
+          p.data.resourceLogs.flatMap((rl) =>
+            rl.scopeLogs.flatMap((sl) => sl.logRecords),
+          ).length,
+        ]
+      : [],
+  );
+}
+
+test("a batch the endpoint rejects is dropped and reported, and the stream moves on", async () => {
+  const dir = tempDir();
+  const db = createFeedbackDb(join(dir, "feedback.db"));
+  seedClosedSession(db);
+
+  // The endpoint refuses the first logs payload for good, then accepts.
+  const attempted: OtlpPayload[] = [];
+  const exporter: Exporter = {
+    send: (payload) => {
+      attempted.push(payload);
+      const firstLogs =
+        payload.stream === "logs" &&
+        attempted.filter((p) => p.stream === "logs").length === 1;
+      return Promise.resolve(
+        firstLogs
+          ? { ok: false, error: "timestamp too old", rejected: true }
+          : { ok: true },
+      );
+    },
+  };
+  const anomalies: { context: string; err: unknown }[] = [];
+  const log: DaemonLog = {
+    tick: () => {},
+    delivered: () => {},
+    sendFailed: () => {},
+    anomaly: (context, err) => {
+      anomalies.push({ context, err });
+    },
+  };
+  const daemon = createDaemon({
+    source: openSource(join(dir, "feedback.db"), { maxRows: 2 }),
+    state: openWatermarkStore(join(dir, "watermarks.json")),
+    exporter,
+    options: OPTIONS,
+    log,
+  });
+
+  for (let i = 0; i < 4; i += 1) await daemon.tick();
+  daemon.stop();
+  db.close();
+
+  // Five events: the rejected first two are never sent again.
+  expect(logsSizes(attempted)).toEqual([2, 2, 1]);
+  expect(anomalies).toEqual([
+    {
+      context: "logs batch rejected by the endpoint, 2 record(s) dropped",
+      err: "timestamp too old",
+    },
+  ]);
+});
+
+test("a batch whose send merely fails is sent again on the next tick, not dropped", async () => {
+  const dir = tempDir();
+  const db = createFeedbackDb(join(dir, "feedback.db"));
+  seedClosedSession(db);
+
+  // The first logs send fails in a way a retry can fix; later sends succeed.
+  const attempted: OtlpPayload[] = [];
+  const exporter: Exporter = {
+    send: (payload) => {
+      attempted.push(payload);
+      const firstLogs =
+        payload.stream === "logs" &&
+        attempted.filter((p) => p.stream === "logs").length === 1;
+      return Promise.resolve(
+        firstLogs ? { ok: false, error: "HTTP 503" } : { ok: true },
+      );
+    },
+  };
+  const daemon = createDaemon({
+    source: openSource(join(dir, "feedback.db"), { maxRows: 2 }),
+    state: openWatermarkStore(join(dir, "watermarks.json")),
+    exporter,
+    options: OPTIONS,
+  });
+
+  for (let i = 0; i < 5; i += 1) await daemon.tick();
+  daemon.stop();
+  db.close();
+
+  // Five events: the failed first two go out again, then the rest.
+  expect(logsSizes(attempted)).toEqual([2, 2, 2, 1]);
 });

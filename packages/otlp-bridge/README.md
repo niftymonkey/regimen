@@ -34,12 +34,16 @@ bun run start --dry-run  # log what would be sent, deliver nothing
 
 ### Configuration
 
-Grafana Cloud credentials go in a gitignored `.env`, which Bun loads automatically:
+The bridge reads its Grafana Cloud credentials from two environment variables:
 
 ```
 GRAFANA_CLOUD_OTLP_ENDPOINT="https://otlp-gateway-<region>.grafana.net/otlp"
 GRAFANA_CLOUD_BASIC_AUTH_HEADER="Basic <base64 instance:token>"
 ```
+
+Keep them in `~/.config/regimen/otlp-bridge.env`, readable only by you (`chmod 600`). That file lives outside the working copy on purpose: the credentials then survive the checkout being moved, re-cloned, or deleted. For a foreground run, load it with `bun --env-file ~/.config/regimen/otlp-bridge.env run start`.
+
+Both values come from the Grafana Cloud portal: open your stack, choose the OpenTelemetry tile, and generate a token. The portal shows the endpoint and the instance ID; the header value is `Basic ` followed by the base64 of `<instance id>:<token>`.
 
 Resource attributes resolve from `REGIMEN_SERVICE_NAME`, `REGIMEN_SERVICE_VERSION`, and `REGIMEN_ENVIRONMENT`. `REGIMEN_DATA_DIR` overrides where the bridge looks for `feedback.db`.
 
@@ -53,11 +57,14 @@ Create `~/.config/systemd/user/regimen-otlp-bridge.service`, adjusting the paths
 [Unit]
 Description=Regimen OTLP bridge
 After=default.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart=/path/to/bun /path/to/regimen/packages/otlp-bridge/src/cli.ts
 WorkingDirectory=/path/to/regimen/packages/otlp-bridge
+EnvironmentFile=%h/.config/regimen/otlp-bridge.env
 Restart=on-failure
 RestartSec=2
 
@@ -65,7 +72,7 @@ RestartSec=2
 WantedBy=default.target
 ```
 
-`WorkingDirectory` must be the `packages/otlp-bridge` directory, so Bun loads the `.env` credentials from it. The unit does not redirect the daemon's output: the bridge writes its own `bridge.log` in the Regimen data directory and keeps it size-bounded itself (rolled at 1 MB, three copies kept). The daemon's stdout and stderr fall through to the systemd journal, which journald bounds. Then enable and manage the service:
+`EnvironmentFile` hands the credentials to the daemon, so nothing secret lives in the working copy. The two `StartLimit` lines make a unit that cannot start give up after five tries and show as `failed` in `systemctl --user status`, instead of restarting every two seconds forever. If the working copy moves, update `ExecStart` and `WorkingDirectory`, then run `systemctl --user daemon-reload` and restart. The unit does not redirect the daemon's output: the bridge writes its own `bridge.log` in the Regimen data directory and keeps it size-bounded itself (rolled at 1 MB, three copies kept). The daemon's stdout and stderr fall through to the systemd journal, which journald bounds. Then enable and manage the service:
 
 ```
 systemctl --user daemon-reload
@@ -81,12 +88,14 @@ The service runs `src/cli.ts` from the package working copy, and Bun loads the m
 
 A cross-platform `bridge install-daemon` command, the equivalent of `feedback install-daemon`, is a planned follow-up; until then this unit is written by hand.
 
-Once `bridge install-daemon` ships, the bridge will also compose into the unified install through the `@regimen/cli` orchestrator, as an optional step via `regimen install --with-bridge`. This is deferred until that command exists. The bridge reads `feedback.db` read-only (the ADR-0005 seam) and never has its Grafana secrets bundled, so the compose stays optional and the bridge keeps its own `.env`.
+Once `bridge install-daemon` ships, the bridge will also compose into the unified install through the `@regimen/cli` orchestrator, as an optional step via `regimen install --with-bridge`. This is deferred until that command exists. The bridge reads `feedback.db` read-only (the ADR-0005 seam) and never has its Grafana secrets bundled, so the compose stays optional and the bridge keeps its own credentials file.
 
 ## How it stays correct
 
 - **Per-stream watermarks.** Logs, metrics, and traces each advance an independent watermark, persisted to `<dataDir>/bridge/watermarks.json`. A crash or restart resumes from the last delivered position; a slow stream never pins another.
 - **Each log and span emitted once.** Logs and the three trace span sources (session spans, tool spans, point events) each advance a boundary cursor, a timestamp plus the set of ids already emitted at it. An event landing at an already-passed millisecond is still delivered, and a span Grafana already has is never re-sent, so Tempo's per-trace size accounting is not inflated by repeats.
+- **Bounded batches.** One pull returns at most 1000 rows for logs and for each trace span source, so a backlog built up while the bridge was down drains over successive ticks instead of going out as one request the endpoint rejects as too large.
+- **A rejected batch never pins a stream.** A send that fails is retried on the next tick. A batch the endpoint refuses outright (HTTP 400, which is how Grafana Cloud answers log entries older than its ingestion window) can never be delivered, so the bridge drops it, records the drop and the endpoint's reason in `bridge.log`, and moves on. Auth failures and server errors are not treated this way: they stay retryable, and nothing is dropped.
 - **Idempotent metrics.** Metric counters are cumulative per session, so re-emitting a conversation on watermark overlap reports the same total rather than double-counting.
 - **Bounded cardinality.** Resource attributes are bounded values only (`service.name`, `service.version`, `deployment.environment`). Per-event identifiers stay on the individual record or span.
 - **Bounded operational log.** The bridge owns its `bridge.log` and rolls it at 1 MB, keeping three copies, so a daemon left running for months never leaks disk. Routine per-tick deliveries fold into a periodic heartbeat line; lifecycle events and delivery failures are logged as they happen, so the log stays a readable operational record.
@@ -114,4 +123,3 @@ Individual checks: `bun run typecheck`, `bun run lint`, `bun run format` (writes
 | `src/operational-log.ts` | The bridge's bounded `bridge.log`: heartbeat folding, plus a console variant for dry runs     |
 | `src/rolling-log.ts`     | Size-based roll-and-retain that keeps `bridge.log` bounded                                    |
 | `tests/`                 | Unit and integration tests, with a fixture mirroring the Feedback store schema                |
-| `.env`                   | Grafana Cloud connection secrets. Gitignored, never committed                                 |

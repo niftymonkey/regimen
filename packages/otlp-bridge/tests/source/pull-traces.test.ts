@@ -354,3 +354,235 @@ test("a pre-rebuild plain-timestamp watermark is re-read from the start", () => 
   expect(batch.sessionSpans).toHaveLength(1);
   expect(batch.pointEvents).toHaveLength(1);
 });
+
+test("a tool-span backlog larger than the row cap drains in order over successive pulls", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  insertConversation(db, {
+    session_id: "sess-a",
+    last_event_at: "2026-05-21T12:05:00.000Z",
+  });
+  insertEvent(db, {
+    session_id: "sess-a",
+    trace_id: TRACE_ID,
+    event_type: "session.start",
+  });
+  for (const n of ["1", "2", "3"]) {
+    insertToolCallSpan(db, {
+      session_id: "sess-a",
+      tool_call_id: `tc-${n}`,
+      started_at: `2026-05-21T12:01:0${n}.000Z`,
+      ended_at: `2026-05-21T12:02:0${n}.000Z`,
+    });
+  }
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(first.toolSpans.map((t) => t.toolCallId)).toEqual(["tc-1", "tc-2"]);
+  expect(second.toolSpans.map((t) => t.toolCallId)).toEqual(["tc-3"]);
+  expect(third.toolSpans).toHaveLength(0);
+});
+
+test("a session-span backlog larger than the row cap drains in order over successive pulls", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  for (const n of ["1", "2", "3"]) {
+    insertConversation(db, {
+      session_id: `sess-${n}`,
+      session_started_at: `2026-05-21T12:0${n}:00.000Z`,
+      session_ended_at: `2026-05-21T12:3${n}:00.000Z`,
+      last_event_at: `2026-05-21T12:3${n}:00.000Z`,
+    });
+    insertEvent(db, {
+      session_id: `sess-${n}`,
+      trace_id: TRACE_ID,
+      event_type: "session.start",
+    });
+  }
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(first.sessionSpans.map((s) => s.sessionId)).toEqual([
+    "sess-1",
+    "sess-2",
+  ]);
+  expect(second.sessionSpans.map((s) => s.sessionId)).toEqual(["sess-3"]);
+  expect(third.sessionSpans).toHaveLength(0);
+});
+
+test("a point-event backlog larger than the row cap drains in order over successive pulls", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  insertConversation(db, {
+    session_id: "sess-a",
+    last_event_at: "2026-05-21T12:05:00.000Z",
+  });
+  for (const n of ["1", "2", "3"]) {
+    insertEvent(db, {
+      session_id: "sess-a",
+      trace_id: TRACE_ID,
+      event_type: "user_prompt",
+      timestamp: `2026-05-21T12:0${n}:00.000Z`,
+    });
+  }
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(first.pointEvents.map((e) => e.timestamp)).toEqual([
+    "2026-05-21T12:01:00.000Z",
+    "2026-05-21T12:02:00.000Z",
+  ]);
+  expect(second.pointEvents.map((e) => e.timestamp)).toEqual([
+    "2026-05-21T12:03:00.000Z",
+  ]);
+  expect(third.pointEvents).toHaveLength(0);
+});
+
+test("a capped session-span pull at a crowded millisecond never re-emits a span or exceeds the cap", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  const endedAt = "2026-05-21T12:30:00.000Z";
+  const closeSession = (sessionId: string, startedAt: string) => {
+    insertConversation(db, {
+      session_id: sessionId,
+      session_started_at: startedAt,
+      session_ended_at: endedAt,
+      last_event_at: endedAt,
+    });
+    insertEvent(db, {
+      session_id: sessionId,
+      trace_id: TRACE_ID,
+      event_type: "session.start",
+    });
+  };
+  closeSession("sess-z", "2026-05-21T12:00:00.000Z");
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  expect(first.sessionSpans.map((s) => s.sessionId)).toEqual(["sess-z"]);
+
+  // Three more sessions close at the same millisecond, all sorting BEFORE the
+  // one already emitted, so the cap cuts the emitted span out of the re-read.
+  closeSession("sess-a", "2026-05-21T12:01:00.000Z");
+  closeSession("sess-b", "2026-05-21T12:02:00.000Z");
+  closeSession("sess-c", "2026-05-21T12:03:00.000Z");
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  const fourth = source.pullTraces(third.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(second.sessionSpans.map((s) => s.sessionId)).toEqual([
+    "sess-a",
+    "sess-b",
+  ]);
+  expect(third.sessionSpans.map((s) => s.sessionId)).toEqual(["sess-c"]);
+  expect(fourth.sessionSpans).toHaveLength(0);
+});
+
+test("a capped tool-span pull at a crowded millisecond never re-emits a span or exceeds the cap", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  const endedAt = "2026-05-21T12:05:00.000Z";
+  for (const sessionId of ["sess-a", "sess-b"]) {
+    insertConversation(db, { session_id: sessionId, last_event_at: endedAt });
+    insertEvent(db, {
+      session_id: sessionId,
+      trace_id: TRACE_ID,
+      event_type: "session.start",
+    });
+  }
+  const closeCall = (
+    sessionId: string,
+    toolCallId: string,
+    startedAt: string,
+  ) =>
+    insertToolCallSpan(db, {
+      session_id: sessionId,
+      tool_call_id: toolCallId,
+      started_at: startedAt,
+      ended_at: endedAt,
+    });
+  closeCall("sess-b", "tc-1", "2026-05-21T12:01:00.000Z");
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  expect(first.toolSpans.map((t) => [t.sessionId, t.toolCallId])).toEqual([
+    ["sess-b", "tc-1"],
+  ]);
+
+  // Three more calls close at the same millisecond, all sorting BEFORE the
+  // one already emitted. One shares its tool call id with that emitted call,
+  // so only the session tells them apart.
+  closeCall("sess-a", "tc-1", "2026-05-21T12:02:00.000Z");
+  closeCall("sess-a", "tc-2", "2026-05-21T12:03:00.000Z");
+  closeCall("sess-a", "tc-3", "2026-05-21T12:04:00.000Z");
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  const fourth = source.pullTraces(third.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(second.toolSpans.map((t) => [t.sessionId, t.toolCallId])).toEqual([
+    ["sess-a", "tc-1"],
+    ["sess-a", "tc-2"],
+  ]);
+  expect(third.toolSpans.map((t) => [t.sessionId, t.toolCallId])).toEqual([
+    ["sess-a", "tc-3"],
+  ]);
+  expect(fourth.toolSpans).toHaveLength(0);
+});
+
+test("a capped point-event pull at a crowded millisecond never re-emits an event or exceeds the cap", () => {
+  const path = tempDbPath();
+  const db = createFeedbackDb(path);
+  const ts = "2026-05-21T12:01:00.000Z";
+  insertConversation(db, {
+    session_id: "sess-a",
+    last_event_at: "2026-05-21T12:05:00.000Z",
+  });
+  const prompt = (digit: string) =>
+    insertEvent(db, {
+      session_id: "sess-a",
+      trace_id: TRACE_ID,
+      event_type: "user_prompt",
+      timestamp: ts,
+      event_hash: digit.repeat(64),
+    });
+  prompt("f");
+
+  const source = openSource(path, { maxRows: 2 });
+  const first = source.pullTraces(null);
+  expect(first.pointEvents.map((e) => e.eventHash)).toEqual(["f".repeat(64)]);
+
+  // Three more prompts land at the same millisecond, all sorting BEFORE the
+  // one already emitted, so the cap cuts the emitted event out of the re-read.
+  for (const digit of ["0", "1", "2"]) prompt(digit);
+  const second = source.pullTraces(first.nextWatermark);
+  const third = source.pullTraces(second.nextWatermark);
+  const fourth = source.pullTraces(third.nextWatermark);
+  source.close();
+  db.close();
+
+  expect(second.pointEvents.map((e) => e.eventHash)).toEqual([
+    "0".repeat(64),
+    "1".repeat(64),
+  ]);
+  expect(third.pointEvents.map((e) => e.eventHash)).toEqual(["2".repeat(64)]);
+  expect(fourth.pointEvents).toHaveLength(0);
+});
