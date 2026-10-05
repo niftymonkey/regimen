@@ -224,6 +224,14 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
       ALTER TABLE assessment_run ADD COLUMN covered_event_count INTEGER;
     `,
   },
+  {
+    version: 12,
+    description:
+      "assessment_run.incomplete_detail so a failed run says what the backend said, not only that it failed",
+    up: `
+      ALTER TABLE assessment_run ADD COLUMN incomplete_detail TEXT;
+    `,
+  },
 ];
 
 /** Result of an event insert. `inserted: false` means an identical hash already existed. */

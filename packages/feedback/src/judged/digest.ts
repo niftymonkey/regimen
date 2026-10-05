@@ -87,6 +87,8 @@ export interface JudgedDigest {
   complete: boolean;
   /** Why the run did not finish clean; absent on a complete run. */
   incompleteReason?: IncompleteReason;
+  /** What the backend said when the run failed; see JudgeResult.incompleteDetail. */
+  incompleteDetail?: string;
   provenance: JudgeProvenance;
   /** The conversation assessment; null when the run abstained on it. */
   assessment: DigestAssessment | null;
@@ -123,6 +125,7 @@ interface RunRow {
   judge_backend: string | null;
   complete: number;
   incomplete_reason: string | null;
+  incomplete_detail: string | null;
 }
 
 interface JudgedSignalRow {
@@ -157,7 +160,7 @@ export function readJudgmentDigest(
 ): JudgmentDigest {
   const latest = db
     .prepare(
-      `SELECT run_id, rubric_version, prompt_version, judge_model, judge_backend, complete, incomplete_reason
+      `SELECT run_id, rubric_version, prompt_version, judge_model, judge_backend, complete, incomplete_reason, incomplete_detail
          FROM assessment_run WHERE session_id = ?
          ORDER BY created_at DESC, run_id DESC LIMIT 1`,
     )
@@ -218,6 +221,9 @@ export function readJudgmentDigest(
     ...(latest.incomplete_reason === null
       ? {}
       : { incompleteReason: latest.incomplete_reason as IncompleteReason }),
+    ...(latest.incomplete_detail === null
+      ? {}
+      : { incompleteDetail: latest.incomplete_detail }),
     provenance: {
       judgeModel: latest.judge_model,
       rubricVersion: latest.rubric_version,

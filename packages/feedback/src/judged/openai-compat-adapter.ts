@@ -23,6 +23,7 @@ import type {
   JudgeModelRequest,
   JudgeModelResponse,
 } from "./port.ts";
+import { errorBodySuffix } from "./error-body.ts";
 
 export interface OpenAiCompatJudgeModelOptions {
   /** The bearer key; omit for a keyless local endpoint (no Authorization header). */
@@ -120,8 +121,11 @@ export function openAiCompatJudgeModel(
       }
 
       if (!response.ok) {
+        // The body carries the only diagnosis there is: a low balance, a bad
+        // key and a rate limit are indistinguishable from the status alone.
+        const said = await errorBodySuffix(response);
         throw new Error(
-          `chat-completions endpoint returned ${response.status} ${response.statusText}`,
+          `chat-completions endpoint returned ${response.status} ${response.statusText}${said}`,
         );
       }
 

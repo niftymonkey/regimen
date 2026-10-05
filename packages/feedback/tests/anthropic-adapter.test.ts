@@ -188,3 +188,28 @@ test("the adapter throws on a non-2xx response so the Judge sees a transport fai
 
   await expect(llm.complete({ system: "s", user: "u" })).rejects.toThrow();
 });
+
+test("a non-2xx error carries the provider's own words, not just the status", async () => {
+  const captured: CapturedRequest[] = [];
+  const llm = anthropicJudgeModel({
+    apiKey: "sk-ant-test",
+    model: "claude-opus-4-8",
+    baseUrl: "https://api.anthropic.com",
+    fetch: mockFetch(
+      captured,
+      {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message:
+            "Your credit balance is too low to access the Anthropic API.",
+        },
+      },
+      400,
+    ),
+  });
+
+  await expect(llm.complete({ system: "s", user: "u" })).rejects.toThrow(
+    /credit balance is too low/,
+  );
+});

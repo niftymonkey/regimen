@@ -1042,3 +1042,91 @@ test("a growth sweep re-judges a conversation that outgrew its verdict, and hono
     mock.stop();
   }
 });
+
+test("incompleteSummaryLines says what the backend said when every run said the same", () => {
+  const lines = incompleteSummaryLines([
+    {
+      incompleteReason: "llm-unavailable",
+      incompleteDetail: "400 Your credit balance is too low.",
+    },
+    {
+      incompleteReason: "llm-unavailable",
+      incompleteDetail: "400 Your credit balance is too low.",
+    },
+  ]);
+  expect(lines.join("")).toContain(
+    "every verdict failed the same way (llm-unavailable): 400 Your credit balance is too low.",
+  );
+});
+
+test("incompleteSummaryLines withholds a detail the runs did not agree on", () => {
+  const lines = incompleteSummaryLines([
+    { incompleteReason: "llm-unavailable", incompleteDetail: "429 slow down" },
+    { incompleteReason: "llm-unavailable", incompleteDetail: "503 upstream" },
+  ]);
+  const joined = lines.join("");
+  expect(joined).toContain(
+    "every verdict failed the same way (llm-unavailable)",
+  );
+  expect(joined).not.toContain("429 slow down");
+  expect(joined).not.toContain("503 upstream");
+});
+
+/** An endpoint that refuses every call the way a spent account does. */
+function startMockAnthropicOutOfCredit(): {
+  baseUrl: string;
+  stop: () => void;
+} {
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      return Response.json(
+        {
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            message:
+              "Your credit balance is too low to access the Anthropic API.",
+          },
+        },
+        { status: 400 },
+      );
+    },
+  });
+  return {
+    baseUrl: `http://localhost:${server.port}`,
+    stop: () => server.stop(true),
+  };
+}
+
+test("a sweep that cannot reach the judge says what the endpoint said, per conversation", async () => {
+  const dataDir = tempDir("regimen-sweep-cli-");
+  const codexHome = tempDir("regimen-sweep-home-");
+  const dbPath = join(dataDir, "feedback.db");
+  seedConversation(dbPath, {
+    sessionId: SESSION,
+    lastEventAt: "2026-06-15T10:30:00.000Z",
+  });
+  seedRollout(codexHome, SESSION);
+  const mock = startMockAnthropicOutOfCredit();
+  process.env.REGIMEN_DATA_DIR = dataDir;
+  process.env.CODEX_HOME = codexHome;
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+  const stdout = captureStdout();
+  try {
+    await assessAll({
+      dataDir,
+      filter: {},
+      force: false,
+      batchSize: 10,
+      setupSource: NOOP_SETUP_SOURCE,
+      decideNextBatch: ALWAYS_CONTINUE,
+    });
+    const out = stdout.read();
+    expect(out).toContain("incomplete (llm-unavailable)");
+    expect(out).toContain("credit balance is too low");
+  } finally {
+    mock.stop();
+  }
+});

@@ -87,10 +87,11 @@ export async function judgeConversation(
         system: prompt.system,
         user: repairedUser(prompt.user, repairMessage),
       });
-    } catch {
+    } catch (err) {
       return failed(
         provenanceOf(lastModel, rubricVersion, promptVersion, config),
         "llm-unavailable",
+        incompleteDetail(err),
       );
     }
     lastModel = response.model;
@@ -185,10 +186,14 @@ function anchorRepairMessage(fields: ReadonlyArray<string>): string {
   return `these fields are missing valid chunk citations (they cited no ids, or ids that match no provided chunk): ${fields.join(", ")}. Cite only ids from the enumerated chunk list above, and re-emit the full JSON object`;
 }
 
+/** How much of the backend's failure message is kept, in characters. */
+const DETAIL_LIMIT = 200;
+
 /** A degraded JudgeResult: no signals, no narratives, an incomplete run. */
 function failed(
   provenance: JudgeResult["provenance"],
   reason: NonNullable<JudgeResult["incompleteReason"]>,
+  detail?: string,
 ): JudgeResult {
   return {
     complete: false,
@@ -196,5 +201,24 @@ function failed(
     signals: [],
     narratives: [],
     incompleteReason: reason,
+    ...(detail === undefined ? {} : { incompleteDetail: detail }),
   };
+}
+
+/**
+ * What the backend said, for a failure a reason label alone cannot diagnose.
+ * The message is written to the store and printed to stdout, so credentials are
+ * stripped first: URL userinfo, and any long unbroken token, which is the shape
+ * every provider's key takes and no prose does. Truncated, since the value is
+ * for telling one failure from another, not for reading a stack trace.
+ */
+function incompleteDetail(err: unknown): string | undefined {
+  const message = err instanceof Error ? err.message : String(err);
+  const redacted = message
+    .replace(/:\/\/[^/\s@]*@/g, "://[redacted]@")
+    .replace(/[A-Za-z0-9_-]{24,}/g, "[redacted]");
+  if (redacted.length === 0) return undefined;
+  return redacted.length > DETAIL_LIMIT
+    ? `${redacted.slice(0, DETAIL_LIMIT - 1)}\u2026`
+    : redacted;
 }

@@ -218,3 +218,22 @@ test("the digest reflects only the latest run after a re-judge", () => {
     expect(digest.outcome!.value).toBe("partial");
   });
 });
+
+test("the digest carries the incomplete detail so a sweep can say what the backend said", () => {
+  withStore((store) => {
+    const unavailable: JudgeResult = {
+      ...fullResult(false),
+      incompleteReason: "llm-unavailable",
+      incompleteDetail: "400 Your credit balance is too low.",
+      signals: [],
+    };
+    writeAssessment(
+      store,
+      run("run-1", "2026-06-15T10:00:00.000Z"),
+      unavailable,
+    );
+    const digest = readJudgmentDigest(store.db, SESSION, FIXED);
+    if (digest.judged !== true) throw new Error("expected judged");
+    expect(digest.incompleteDetail).toBe("400 Your credit balance is too low.");
+  });
+});
